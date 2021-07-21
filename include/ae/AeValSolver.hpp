@@ -18,8 +18,8 @@ namespace ufo
     Expr s;
     Expr t;
     ExprSet v; // existentially quantified vars
-    ExprSet sVars;
-    ExprSet stVars;
+    ExprVector sVars;
+    ExprVector stVars;
 
     ExprSet tConjs;
     ExprSet usedConjs;
@@ -58,8 +58,8 @@ namespace ufo
       skol(_skol),
       debug(_debug)
     {
-      filter (boolop::land(s,t), bind::IsConst (), inserter (stVars, stVars.begin()));
-      sVars = minusSets(stVars, v);
+      filter (s, bind::IsConst (), back_inserter (sVars));
+      filter (boolop::land(s,t), bind::IsConst (), back_inserter (stVars));
       getConj(t, tConjs);
 
       for (auto &exp: v) {
@@ -327,11 +327,14 @@ namespace ufo
     void printModelNeg()
     {
       outs () << "(model\n";
-      Expr witn = mk<IMPL>(s, t);
+      Expr s_witn = s;
+      Expr t_witn = t;
       for (auto &var : sVars){
         Expr assnmt = var == modelInvalid[var] ? getDefaultAssignment(var) : modelInvalid[var];
-        if (debug)
-          witn = replaceAll(witn, var, assnmt);
+        if (debug) {
+          s_witn = replaceAll(s_witn, var, assnmt);
+          t_witn = replaceAll(t_witn, var, assnmt);
+        }
 
         outs () << "  (define-fun " << *var << " () " <<
           (bind::isBoolConst(var) ? "Bool" : (bind::isIntConst(var) ? "Int" : "Real"))
@@ -340,7 +343,8 @@ namespace ufo
       outs () << ")\n";
 
       if (debug){
-        outs () << "Sanity check [model]: " << (bool)u.isFalse(witn) << "\n";
+        outs () << "Sanity check [model, S-part]: " << !((bool)(u.isSat(mk<NEG>(s_witn)))) << "\n";
+        outs () << "Sanity check [model, T-part]: " << !((bool)(u.isSat(t_witn))) << "\n";
       }
     }
 
@@ -1390,6 +1394,7 @@ namespace ufo
   inline void aeSolveAndSkolemize(Expr s, Expr t, bool skol, bool debug, bool compact, bool split)
   {
     ExprSet t_quantified;
+
     if (t == NULL)
     {
       if (!(isOpX<FORALL>(s) && isOpX<EXISTS>(s->last()))) exit(0);
@@ -1428,10 +1433,11 @@ namespace ufo
 
     if (debug)
     {
-      outs() << "S: " << *s << "\n";
-      outs() << "T: \\exists ";
-      for (auto &a: t_quantified) outs() << *a << ", ";
-      outs() << *t << "\n";
+      outs() << "DEBUG:\n";
+      outs() << "    S: " << *s << "\n";
+      outs() << "    T: \\exists ";
+      for (auto &a: t_quantified) outs() << "    " << *a << ", ";
+      outs() << "    " << *t << "\n";
     }
 
     SMTUtils u(s->getFactory());

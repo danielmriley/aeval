@@ -79,7 +79,6 @@ namespace ufo
       boost::tribool res = smt.solve ();
       return res;
     }
-
     /**
      * SMT-check
      */
@@ -106,12 +105,7 @@ namespace ufo
      */
     boost::tribool isEquiv(Expr a, Expr b)
     {
-      auto r1 = implies (a, b);
-      auto r2 = implies (b, a);
-      if (indeterminate(r1) || indeterminate(r2))
-        return indeterminate;
-      else
-        return r1 && r2;
+      return implies (a, b) && implies (b, a);
     }
 
     /**
@@ -121,7 +115,7 @@ namespace ufo
     {
       if (isOpX<TRUE>(b)) return true;
       if (isOpX<FALSE>(a)) return true;
-      return ! isSat(a, mkNeg(b));
+      return bool(! isSat(a, mkNeg(b)));
     }
 
     /**
@@ -129,7 +123,9 @@ namespace ufo
      */
     boost::tribool isTrue(Expr a){
       if (isOpX<TRUE>(a)) return true;
-      return !isSat(mkNeg(a));
+      boost::tribool res = !isSat(mkNeg(a));
+      if(res) return true;
+      else return false;
     }
 
     /**
@@ -137,7 +133,9 @@ namespace ufo
      */
     boost::tribool isFalse(Expr a){
       if (isOpX<FALSE>(a)) return true;
-      return !isSat(a);
+      boost::tribool res = !isSat(a);
+      if(res) return true;
+      else return false;
     }
 
     /**
