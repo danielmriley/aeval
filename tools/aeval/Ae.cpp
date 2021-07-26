@@ -73,8 +73,15 @@ int main (int argc, char ** argv)
   bool debug = getBoolValue("--debug", false, argc, argv);
   bool split = getBoolValue("--split", false, argc, argv);
 
-  Expr s = z3_from_smtlib_file (z3, getSmtFileName(1, argc, argv));
-  Expr t = z3_from_smtlib_file (z3, getSmtFileName(2, argc, argv));
+  char* filename = 0;
+  filename = getSmtFileName(1, argc, argv);
+  Expr s = z3_from_smtlib_file (z3, filename);
+
+  filename = 0;
+  filename = getSmtFileName(2, argc, argv);
+  Expr t;
+  if(filename != 0)
+    t = z3_from_smtlib_file (z3, filename);
 
   if (allincl)
     getAllInclusiveSkolem(s, t, debug, compact);
@@ -83,3 +90,10 @@ int main (int argc, char ** argv)
 
   return 0;
 }
+
+/*
+Call get true literals and then pass that to z3
+mknary<EXISTS>(args)
+args.push_back(pr)
+update pr in 268 each iteration
+*/

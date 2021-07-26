@@ -161,7 +161,11 @@ namespace ufo
           outs() <<"\n";
         }
 
-        getMBPandSkolem(m);
+        if(true /* check for nonlin */) {
+          outs() << "Getting Nonlin MBPs\n";
+          getNonlinMBP(m);
+        }
+        else getMBPandSkolem(m);
         smt.pop();
         smt.assertExpr(boolop::lneg(projections.back()));
         if (!smt.solve()) {
@@ -177,6 +181,46 @@ namespace ufo
         smt.assertExpr (t);
       }
       return res;
+    }
+
+    void getNonlinMBP(ZSolver<EZ3>::Model &m)
+    {
+      Expr pr = t;
+      outs() << "pr1: " << pr << "\n";
+      ExprMap substsMap;
+      ExprMap modelMap;
+
+      for (auto & exp : v)
+      {
+        ExprMap map;
+        ExprSet tempVars;
+        pr = getTrueLiterals(pr, m);
+        filter (pr, bind::IsConst (), inserter (tempVars, tempVars.begin()));
+        outs() << "pr2: " << pr << "\n";
+        ExprVector args;
+//        for (auto temp : v) {
+          args.push_back(exp->last());
+//          outs() << "v: " << temp << "\n";
+//        }
+        args.push_back(pr);
+
+        pr = mknary<EXISTS>(args);
+        outs() << "pr3: " << pr << "\n";
+        args.clear();
+        for(auto temp : tempVars) {
+          if(temp != exp) args.push_back(temp->last());
+        }
+        args.push_back(pr);
+        pr = mknary<FORALL>(args);
+        outs () << "pr3+ " << pr << "\n";
+        pr = z3_nl_mbp(z3, pr, m);
+        outs().flush ();
+
+        outs() << "pr4: " << pr << "\n";
+      }
+
+      projections.push_back(pr);
+      partitioning_size++;
     }
 
     /**
@@ -219,6 +263,49 @@ namespace ufo
       else
       {
         substs.insert(mk<IMPL>(ineqNegReverter(es), ineqNegReverter(ef)));
+      }
+    }
+
+    Expr getTrueLiterals(Expr ex, ZSolver<EZ3>::Model &m)
+    {
+      ExprVector ites;
+      getITEs(ex, ites);
+      if (ites.empty())
+      {
+        ExprSet tmp;
+        // outs() << "Before calling getLiterals(ex, tmp)" << *ex << endl; //outTest
+        getLiterals(ex, tmp);
+
+        for (auto it = tmp.begin(); it != tmp.end(); ){
+          if (isOpX<TRUE>(m.eval(*it))) ++it;
+          else it = tmp.erase(it);
+        }
+        // outs() << "After calling getLiterals(ex, tmp): " << conjoin(tmp, efac) << endl; //outTest
+        return conjoin(tmp, efac);
+      }
+      else
+      {
+        // eliminate ITEs first
+        for (auto it = ites.begin(); it != ites.end();)
+        {
+          if (isOpX<TRUE>(m((*it)->left())))
+          {
+            ex = replaceAll(ex, *it, (*it)->right());
+            ex = mk<AND>(ex, (*it)->left());
+          }
+          else if (isOpX<FALSE>(m((*it)->left())))
+          {
+            ex = replaceAll(ex, *it, (*it)->last());
+            ex = mk<AND>(ex, mkNeg((*it)->left()));
+          }
+          else
+          {
+            ex = replaceAll(ex, *it, (*it)->right()); // TODO
+            ex = mk<AND>(ex, mk<EQ>((*it)->right(), (*it)->last()));
+          }
+          it = ites.erase(it);
+        }
+        return getTrueLiterals(ex, m);
       }
     }
 
@@ -1394,6 +1481,9 @@ namespace ufo
   inline void aeSolveAndSkolemize(Expr s, Expr t, bool skol, bool debug, bool compact, bool split)
   {
     ExprSet t_quantified;
+    outs() << "s from start: " << s << "\n";
+    outs() << "t from start: " << t << "\n";
+    //exit(0);
     if (t == NULL)
     {
       if (!(isOpX<FORALL>(s) && isOpX<EXISTS>(s->last()))) exit(0);
@@ -1432,10 +1522,11 @@ namespace ufo
 
     if (debug)
     {
-      outs() << "S: " << *s << "\n";
-      outs() << "T: \\exists ";
-      for (auto &a: t_quantified) outs() << *a << ", ";
-      outs() << *t << "\n";
+      outs() << "DEBUG:\n";
+      outs() << "    S: " << *s << "\n";
+      outs() << "    T: \\exists ";
+      for (auto &a: t_quantified) outs() << "    " << *a << ", ";
+      outs() << "    " << *t << "\n";
     }
 
     SMTUtils u(s->getFactory());

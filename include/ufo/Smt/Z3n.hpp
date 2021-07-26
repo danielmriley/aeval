@@ -30,6 +30,7 @@ DM-0002198
 
 
 #include <sstream>
+#include <iostream>
 
 #include <unordered_map>
 #include <unordered_set>
@@ -238,9 +239,19 @@ namespace ufo
         return z3.toExpr (res);
     }
 
+  template <typename Z, typename M>
+  Expr z3_nl_mbp (Z &z3, Expr e, M m)
+  {
+    z3::context &ctx = z3.get_ctx ();
+
+    z3::ast res (ctx, Z3_nl_mbp(ctx, z3.toAst(e), m.get_model()));
+    std::cout << "MBP returned by Z3: " << z3.toExpr(res) << "\n";
+    std::cout << "returning to aeval\n";
+
+    return z3.toExpr(res);
+  }
+
 }
-
-
 
 
 namespace ufo
@@ -375,6 +386,7 @@ namespace ufo
     friend Expr z3_from_smtlib<this_type> (this_type &z3, std::string smt);
     friend Expr z3_from_smtlib_file<this_type> (this_type &z3,
                                                 const char *fname);
+    friend Expr z3_nl_mbp<this_type, this_model_type> (this_type &z3, Expr e, this_model_type m);
 
     friend std::string z3_to_smtlib<this_type> (this_type &z3, Expr e);
   };
