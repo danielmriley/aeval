@@ -194,7 +194,7 @@ namespace ufo
       {
         ExprMap map;
         ExprSet tempVars;
-        pr = getTrueLiterals(pr, m);
+//        pr = getTrueLiterals(pr, m);
         filter (pr, bind::IsConst (), inserter (tempVars, tempVars.begin()));
         outs() << "pr2: " << pr << "\n";
         ExprVector args;
@@ -213,7 +213,7 @@ namespace ufo
         args.push_back(pr);
         pr = mknary<FORALL>(args);
         outs () << "pr3+ " << pr << "\n";
-        pr = z3_nl_mbp(z3, pr, m);
+        pr = z3_nl_mbp(z3, pr);
         outs().flush ();
 
         outs() << "pr4: " << pr << "\n";
