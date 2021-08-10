@@ -3,6 +3,7 @@
 #include <assert.h>
 
 #include "ufo/Smt/EZ3.hh"
+#include <fstream>
 
 using namespace std;
 using namespace expr::op::bind;
@@ -2429,6 +2430,25 @@ namespace ufo
     }
 
     return disjoin(newDsjs, efac);
+  }
+  template <typename Z>
+  Expr getZ3Expr(Expr e, Z& z3, bool removeFile = true)
+  {
+    // send Expr to a file and read it back in through Z3.
+    outs() << "To send to file\n    " << e << "\n";
+    ZSolver<EZ3> solver(z3);
+    solver.assertExpr(e);
+
+    std::ofstream file;
+    const char* filename = "z3_expr.txt";
+    file.open(filename);
+    solver.toSmtLib(outs());
+    solver.toSmtLib(file);
+    file.close();
+    Expr res = z3_from_smtlib_file (z3, filename);
+    if(removeFile) remove(filename); // delete the temp file.
+
+    return res;
   }
 
   void getLiterals (Expr exp, ExprSet& lits)

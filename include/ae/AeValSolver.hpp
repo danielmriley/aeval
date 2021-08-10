@@ -161,8 +161,17 @@ namespace ufo
           outs() <<"\n";
         }
 
+        /* Daniel
+            Here I have forced the call to the nonlin algorithm for development.
+            Obviously there needs to be a check to decide which MBP algorithm to use.
+            The intension here is to similarly to getMBPandSkolem() by returning an MBP iteratively
+            and loop through the AeVal algorithm to solve.
+            Right now getNonlinMBP() returns a set of MBPs all at once.
+            There are more details in comments in the Z3 files.
+        */
         if(true /* check for nonlin */) {
           outs() << "Getting Nonlin MBPs\n";
+          outs() << "Model: " << m << "\n";
           getNonlinMBP(m);
         }
         else getMBPandSkolem(m);
@@ -173,51 +182,80 @@ namespace ufo
         } else {
           // keep a model in case the formula is invalid
           m = smt.getModel();
+          outs() << "Model being saved: " << m << "\n";
           for (auto &e: sVars)
             modelInvalid[e] = m.eval(e);
         }
-
+        if(partitioning_size >= 5) {
+          outs() << "No result after " << partitioning_size << " iterations.\n";
+          exit(0);
+        }
         smt.push();
         smt.assertExpr (t);
+        outs() << "smt query:\n";
+        smt.toSmtLib(outs());
       }
       return res;
     }
 
+    /* Daniel
+        This is where we call the new z3_nl_mbp function.
+        We do some preprocessing here to gather literals based around a model.
+        This is supposed to be where we build around a model, similar to the linear theory version of the task.
+        This function attempts to gather literals around a model and recompose a quantified expression to send to Z3.
+        We found that Z3 is particular about how its expressions are initialized in this case, and we use the work
+        around of printing the expression to a file and reading it back in via Z3's built in file reading functions.
+        This is done in getZ3Expr() defined above.
+    */
     void getNonlinMBP(ZSolver<EZ3>::Model &m)
     {
-      Expr pr = t;
+      Expr pr = t; // Set new Expr to preserve original t Expr.
       outs() << "pr1: " << pr << "\n";
       ExprMap substsMap;
       ExprMap modelMap;
 
-      for (auto & exp : v)
+      for (auto & exp : v) // loop through the existentially quantified vars.
       {
         ExprMap map;
-        ExprSet tempVars;
-//        pr = getTrueLiterals(pr, m);
-        filter (pr, bind::IsConst (), inserter (tempVars, tempVars.begin()));
+        ExprVector origVars;             // To keep all of the vars in the Expr
+
+        pr = getTrueLiterals(pr, m);  // Gather literals around a model.
+        filter (pr, bind::IsConst (), inserter (origVars, origVars.begin())); // Fills origVars with the vars in pr.
+        for(auto var = origVars.begin(), end = origVars.end(); var != end; var++) {
+           if(exp == *var) var = origVars.erase(var);
+        }
+
+
         outs() << "pr2: " << pr << "\n";
         ExprVector args;
-//        for (auto temp : v) {
-          args.push_back(exp->last());
-//          outs() << "v: " << temp << "\n";
-//        }
-        args.push_back(pr);
+        args.push_back(exp->last()); // Grab one existentially quantified var to reconstruct Expr with.
+        args.push_back(pr);          // Push the expr to build on.
 
-        pr = mknary<EXISTS>(args);
+        pr = mknary<EXISTS>(args);  // remake the EXISTS part of the Expr.
         outs() << "pr3: " << pr << "\n";
         args.clear();
-        for(auto temp : tempVars) {
-          if(temp != exp) args.push_back(temp->last());
+        for(auto temp : origVars) {
+          if(temp != exp) args.push_back(temp->last()); // Put the universally quantified vars in args.
         }
         args.push_back(pr);
-        pr = mknary<FORALL>(args);
+        pr = mknary<FORALL>(args);  // remake the FORALL part of the Expr
         outs () << "pr3+ " << pr << "\n";
-        pr = z3_nl_mbp(z3, pr);
-        outs().flush ();
+        pr = getZ3Expr(pr, z3);         // Do the Z3 printing and file reading to make Z3 happy.
+        pr = z3_nl_mbp(z3, pr);     // Gather MBPs around pr.
 
+        ExprVector z3Vars;
+        filter (pr, bind::IsConst (), inserter (z3Vars, z3Vars.begin())); // Fills origVars with the vars in pr.
+
+        outs() << "z3Vars.size(): " << z3Vars.size() << "; origVars.size(): " << origVars.size() << "\n";
+        if(z3Vars.size() == origVars.size())
+          pr = replaceAll(pr, z3Vars, origVars);
         outs() << "pr4: " << pr << "\n";
       }
+
+      ExprSet disjs;
+      getDisj(pr, disjs);
+      pr = disjoin(disjs, efac);
+      outs() << "pr5: " << pr << "\n";
 
       projections.push_back(pr);
       partitioning_size++;
@@ -1536,7 +1574,7 @@ namespace ufo
       outs () << "Iter: " << ae.getPartitioningSize() << "; Result: invalid\n";
       ae.printModelNeg();
       outs() << "\nvalid subset:\n";
-      u.serialize_formula(simplifyBool(simplifyArithm(ae.getValidSubset(compact))));
+      u.serialize_formula(simplifyBool(ae.getValidSubset(compact)));
     } else {
       outs () << "Iter: " << ae.getPartitioningSize() << "; Result: valid\n";
       if (skol)
