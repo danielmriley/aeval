@@ -415,7 +415,7 @@ namespace ufo
       return true;
     }
 
-    bool checkCand(bool goodtogo = true)
+    boost::tribool checkCand(bool goodtogo = true)
     {
       if (!goodtogo)
       {
@@ -424,7 +424,7 @@ namespace ufo
       }
 
       // cand->print();
-      bool res;
+      boost::tribool res;
 
       switch(slv)
       {
@@ -465,7 +465,7 @@ namespace ufo
       return success;
     }
 
-    bool checkCandWithFreqhorn(int bnd = 20)
+    boost::tribool checkCandWithFreqhorn(int bnd = 20)
     {
       // TODO: try reusing learnedLemmas between runs
       BndExpl be(*cand);
@@ -486,7 +486,7 @@ namespace ufo
 
         for (auto& dcl: cand->decls) ds.doSeedMining (dcl->arg(0), cands);
 
-        bool success = ds.houdini(cands, true, false);
+        boost::tribool success = ds.houdini(cands, true, false);
         if (!success)
         {
           outs () << "  keep proving.. ";
@@ -501,7 +501,7 @@ namespace ufo
     }
 
     ExprSet cands;
-    bool checkCandWithPDR(bool sp)
+    boost::tribool checkCandWithPDR(bool sp)
     {
       // experimentally augment encoding:
       if (lemmas2add != NULL)
@@ -509,7 +509,7 @@ namespace ufo
           if (r.srcRelation == invDecl)
             r.body = mk<AND>(r.body, lemmas2add);
 
-      bool res = cand->checkWith(sp);
+      boost::tribool res = cand->checkWith(sp);
       if (!res)
       {
         Expr ce = cand->getCex().back();
@@ -519,9 +519,9 @@ namespace ufo
       return res;
     }
 
-    bool synthesizeRankingFunction()
+    boost::tribool synthesizeRankingFunction()
     {
-      bool res = false;
+      boost::tribool res = false;
       rankCEs = NULL;
 
       // check all elements first:
@@ -576,10 +576,10 @@ namespace ufo
       return res;
     }
 
-    bool synthesizeLexRankingFunction()
+    boost::tribool synthesizeLexRankingFunction()
     {
       if (lemmas2add == NULL) getSampleExprs();
-      bool res;
+      boost::tribool res;
 
       // gradual brute force.. needs more optimizations
       res = tryLexRankingFunctionCandidates(elements, elements, elements);
@@ -620,7 +620,7 @@ namespace ufo
       }
     }
 
-    bool checkNonterm()
+    boost::tribool checkNonterm()
     {
       // Check if there is nondeterminism in init (for statistics only)
       int nondeterministicIn = 0;
@@ -674,12 +674,12 @@ namespace ufo
       }
 
       // try to refine the init conditions gradually:
-      bool res = resolveInNondeterminism(seeds, loopGuardEnhanced, 1, CEs);
+      boost::tribool res = resolveInNondeterminism(seeds, loopGuardEnhanced, 1, CEs);
       if (res) res = resolveInNondeterminism(mutants, loopGuardEnhanced, 1, CEs);
       return res;
     }
 
-    bool resolveInNondeterminism(ExprSet& refineCands, Expr loopGuardEnhanced, int depth, Expr CEs)
+    boost::tribool resolveInNondeterminism(ExprSet& refineCands, Expr loopGuardEnhanced, int depth, Expr CEs)
     {
       if (depth > nontlevel) return true;    // refinement becomes too complex
 
@@ -702,7 +702,7 @@ namespace ufo
         if (u.isSat(CEs, loopGuardEnhancedTry)) continue;
 
         Expr preCEs = CEs;
-        bool res = resolveTrNondeterminism(loopGuardEnhancedTry, CEs);
+        boost::tribool res = resolveTrNondeterminism(loopGuardEnhancedTry, CEs);
         if (! res) return false;
         else if (isOpX<TRUE>(CEs))
         {
@@ -716,7 +716,7 @@ namespace ufo
       return true;
     }
 
-    bool resolveTrNondeterminism(Expr refinedGuard, Expr& CEs)
+    boost::tribool resolveTrNondeterminism(Expr refinedGuard, Expr& CEs)
     {
       Expr trBody = tr->body;
       if (lemmas2add != NULL) trBody = mk<AND>(trBody, lemmas2add);
@@ -735,7 +735,7 @@ namespace ufo
 
         if (!lightweight)
         {
-          bool res = r1.checkWith(slv == spacer);
+          boost::tribool res = r1.checkWith(slv == spacer);
           if (res && refinedGuard == loopGuard) outs () << "Trully universal\n";
 
           if (res)
@@ -756,7 +756,7 @@ namespace ufo
           {
             if (!u.isSat(updTrBody, b)) continue;
             for (auto & r : r1.chcs) if (r.isInductive) r.body = mk<AND>(updTrBody, b);
-            bool res = r1.checkWith(slv == spacer);
+            boost::tribool res = r1.checkWith(slv == spacer);
             if (res)
             {
               outs () << "refined with " << *refinedGuard << " and " << *b << "\n";
@@ -771,7 +771,7 @@ namespace ufo
       }
       else
       {
-        bool res = u.implies(updTrBody, renamedLoopGuard);
+        boost::tribool res = u.implies(updTrBody, renamedLoopGuard);
         if (res && refinedGuard == loopGuard) outs () << "Trully universal\n";
         if (res)
         {
@@ -856,7 +856,7 @@ namespace ufo
     }
     else if (rank == 3)
     {
-      bool res = a.synthesizeRankingFunction();
+      boost::tribool res = a.synthesizeRankingFunction();
       if (! res) a.synthesizeLexRankingFunction();
     }
   }

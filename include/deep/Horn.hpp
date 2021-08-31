@@ -437,9 +437,9 @@ namespace ufo
       hr->body = conjoin(newCnjs, m_efac);
     }
 
-    bool checkWith(bool spacer)
+    boost::tribool checkWith(bool spacer)
     {
-      bool success = false;
+      boost::tribool success = false;
 
       // fixed-point object
       ZFixedPoint<EZ3> fp (m_z3);

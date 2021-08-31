@@ -79,7 +79,7 @@ namespace ufo
       return num;
     }
 
-    bool checkSafetyAndReset(HornRuleExt* qu)
+    boost::tribool checkSafetyAndReset(HornRuleExt* qu)
     {
       m_smt_solver.reset();
       m_smt_solver.assertExpr (qu->body);
@@ -145,7 +145,7 @@ namespace ufo
       return;
     }
 
-    bool initCheckCand(HornRuleExt* fc, Expr cand)
+    boost::tribool initCheckCand(HornRuleExt* fc, Expr cand)
     {
       Expr candPrime = cand;
 
@@ -227,7 +227,7 @@ namespace ufo
       }
     }
 
-    bool synthesize(int maxAttempts, int batchSz, int scndChSz)
+    boost::tribool synthesize(int maxAttempts, int batchSz, int scndChSz)
     {
       assert(sfs.size() == 1); // current limitation
 
@@ -235,7 +235,7 @@ namespace ufo
 
       ExprVector candsBatch;
 
-      bool success = false;
+      boost::tribool success = false;
       int iter = 1;
       int triggerSecondChance = 0;
       int numFailInit = 0;
@@ -320,7 +320,7 @@ namespace ufo
       return success;
     }
   };
-  
+
   inline void learnInvariants2(string smt, char * outfile, int maxAttempts,
                                int itp, int batch, int retry, bool freqs, bool aggp)
   {
@@ -349,7 +349,7 @@ namespace ufo
 
     for (auto& dcl: ruleManager.decls) ds.doSeedMining (dcl->arg(0), cands);
 
-    bool success = ds.houdini(cands, true, false);
+    boost::tribool success = ds.houdini(cands, true, false);
     outs () << "Number of bootstrapped lemmas: " << ds.getlearnedLemmas(0).size() << "\n";
     if (success)
     {
