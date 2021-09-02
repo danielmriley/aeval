@@ -23,20 +23,31 @@ namespace ufo
 
     public:
 
-    RndLearnerV2 (ExprFactory &efac, EZ3 &z3, CHCs& r, bool freqs, bool aggp, bool lightweight) :
-      RndLearner (efac, z3, r, /*k-induction*/ false, freqs, /*epsilon*/ true, aggp, lightweight){}
+    RndLearnerV2 (ExprFactory &efac, EZ3 &z3, CHCs& r, unsigned to, bool freqs, bool aggp, int debug) :
+      RndLearner (efac, z3, r, to, /*k-induction*/ false, freqs, /*epsilon*/ true, aggp, debug){}
 
     Expr getModel(ExprVector& vars)
     {
       ExprVector eqs;
       ZSolver<EZ3>::Model m = m_smt_solver.getModel();
-      for (auto & v : vars) if (v != m.eval(v))
+      for (auto & v : vars)
       {
-        eqs.push_back(mk<EQ>(v, m.eval(v)));
-      }
-      else
-      {
-        eqs.push_back(mk<EQ>(v, mkTerm (mpz_class (guessUniformly (1000)-500), m_efac)));
+        Expr e = m.eval(v);
+        if (e == NULL)
+        {
+          return NULL;
+        }
+        else if (e != v)
+        {
+          eqs.push_back(mk<EQ>(v, e));
+        }
+        else
+        {
+          if (bind::isBoolConst(v))
+            eqs.push_back(mk<EQ>(v, mk<TRUE>(m_efac)));
+          else if (bind::isIntConst(v))
+            eqs.push_back(mk<EQ>(v, mkTerm (mpz_class (guessUniformly (1000)-500), m_efac)));
+        }
       }
       return conjoin (eqs, m_efac);
     }
@@ -79,7 +90,7 @@ namespace ufo
       return num;
     }
 
-    boost::tribool checkSafetyAndReset(HornRuleExt* qu)
+    bool checkSafetyAndReset(HornRuleExt* qu)
     {
       m_smt_solver.reset();
       m_smt_solver.assertExpr (qu->body);
@@ -95,7 +106,7 @@ namespace ufo
       m_smt_solver.assertExpr(lmApp);
 
       numOfSMTChecks++;
-      return !m_smt_solver.solve ();
+      return bool(!m_smt_solver.solve ());
     }
 
     void getIS(HornRuleExt* hr, ExprVector& candSet, bool deferPriorities)
@@ -145,7 +156,7 @@ namespace ufo
       return;
     }
 
-    boost::tribool initCheckCand(HornRuleExt* fc, Expr cand)
+    bool initCheckCand(HornRuleExt* fc, Expr cand)
     {
       Expr candPrime = cand;
 
@@ -159,7 +170,7 @@ namespace ufo
       m_smt_solver.assertExpr (mk<NEG>(candPrime));
 
       numOfSMTChecks++;
-      return (!m_smt_solver.solve ());
+      return bool(!m_smt_solver.solve ());
     }
 
     bool houdini (ExprSet& cands, bool deferPriorities, bool skipInit)
@@ -227,7 +238,7 @@ namespace ufo
       }
     }
 
-    boost::tribool synthesize(int maxAttempts, int batchSz, int scndChSz)
+    bool synthesize(int maxAttempts, int batchSz, int scndChSz)
     {
       assert(sfs.size() == 1); // current limitation
 
@@ -235,7 +246,7 @@ namespace ufo
 
       ExprVector candsBatch;
 
-      boost::tribool success = false;
+      bool success = false;
       int iter = 1;
       int triggerSecondChance = 0;
       int numFailInit = 0;
@@ -320,59 +331,56 @@ namespace ufo
       return success;
     }
   };
-
-  inline void learnInvariants2(string smt, char * outfile, int maxAttempts,
-                               int itp, int batch, int retry, bool freqs, bool aggp)
+  
+  inline void learnInvariants2(string smt, unsigned to, int maxAttempts,
+                               int itp, int batch, int retry, bool freqs, bool aggp, int debug)
   {
     ExprFactory m_efac;
     EZ3 z3(m_efac);
 
     CHCs ruleManager(m_efac, z3);
     ruleManager.parse(smt);
-    RndLearnerV2 ds(m_efac, z3, ruleManager, freqs, aggp, false);
+    RndLearnerV2 ds(m_efac, z3, ruleManager, to, freqs, aggp, debug);
     ds.categorizeCHCs();
 
     std::srand(std::time(0));
 
     if (ruleManager.decls.size() > 1)
     {
-      outs() << "WARNING: learning multiple invariants is currently unsupported in --v2.\n"
-             << "         Run --v1\n";
+      outs() << "WARNING: learning multiple invariants is unsupported in --v2.\n"
+             << "         Run --v3\n";
       return;
     }
 
-    for (auto& dcl: ruleManager.decls) ds.initializeDecl(dcl);
+    for (auto& dcl: ruleManager.decls) ds.initializeDecl(dcl->left());
 
     ExprSet cands;
 
     if (itp > 0) ds.bootstrapBoundedProofs(itp, cands);
 
-    for (auto& dcl: ruleManager.decls) ds.doSeedMining (dcl->arg(0), cands);
+    for (auto& dcl: ruleManager.decls) ds.prepareSeeds(dcl->arg(0), cands); // cands isn't used
 
-    boost::tribool success = ds.houdini(cands, true, false);
-    outs () << "Number of bootstrapped lemmas: " << ds.getlearnedLemmas(0).size() << "\n";
+    bool success = ds.houdini(cands, true, false);
+
+    if (debug)
+      outs () << "Number of bootstrapped lemmas: " << ds.getlearnedLemmas(0).size() << "\n";
+
     if (success)
-    {
       outs () << "Success after the bootstrapping\n";
-    }
     else
     {
       ds.calculateStatistics();
       ds.prioritiesDeferred();
 
       success = ds.synthesize(maxAttempts, batch, retry);
-      if (success) outs () << "Total number of learned lemmas: " << ds.getlearnedLemmas(0).size() << "\n";
+      if (debug)
+        if (success) outs () << "Total number of learned lemmas: " << ds.getlearnedLemmas(0).size() << "\n";
 
-      if (success) outs () << "\nSuccess after the sampling\n";
-      else         outs () << "\nNo success after " << maxAttempts << " iterations\n";
+      if (success) outs () << "Success after sampling\n";
+      else         outs () << "No success after " << maxAttempts << " iterations\n";
     }
 
-    if (success && outfile != NULL)
-    {
-      vector<ExprSet> invs;
-      invs.push_back(ds.getlearnedLemmas(0));
-      ds.serializeInvariants(invs, outfile);
-    }
+    if (success) ds.printSolution();
   }
 }
 

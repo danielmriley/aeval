@@ -2,7 +2,7 @@
 #define TERMCHECK__HPP__
 
 #include "Horn.hpp"
-#include "RndLearnerV2.hpp"
+#include "RndLearnerV3.hpp"
 #include "ae/SMTUtils.hpp"
 
 using namespace std;
@@ -56,7 +56,7 @@ namespace ufo
 
     ExprSet candConds;
     ExprSet jumpConds;
-    RndLearnerV2* exprsmpl;       // for samples used in various pieces of termination analysis
+    RndLearnerV3* exprsmpl;       // for samples used in various pieces of termination analysis
 
     int nontlevel;
     bool lightweight;
@@ -163,12 +163,15 @@ namespace ufo
     /* Preps for syntax-guided synthesis of ranking functions and program refinements */
     void getSampleExprs()
     {
-      exprsmpl = new RndLearnerV2(efac, z3, r, false, true, lightweight);
+      outs() << "In getSampleExprs\n";
+      exprsmpl = new RndLearnerV3(efac, z3, r, 1000, false, false, false, false, false, false, 0); // New Freqhorn
+      outs() << "New FreqHorn object declared\n";
       for (auto& dcl: r.decls)
       {
         // actually, should be one iter here
+        outs() << "dcl:\n\t---" << dcl << "\n";
         exprsmpl->initializeDecl(dcl);
-        exprsmpl->doSeedMining(dcl->arg(0), seeds);
+        exprsmpl->prepareSeeds(dcl->arg(0), seeds);
       }
 
       exprsmpl->calculateStatistics();
@@ -180,7 +183,10 @@ namespace ufo
         lemmas2add = conjoin(exprsmpl->getlearnedLemmas(0), efac);
       }
 
-      seedsPrepped.insert(mkTerm (mpz_class (*exprsmpl->getAllConsts().rbegin()), efac));
+      vector<cpp_int> temp = exprsmpl->getAllConsts();
+      auto rb = temp.rbegin();
+
+      seedsPrepped.insert(mkTerm (mpz_class (lexical_cast<string>(*rb)), efac));
 
       for (auto s : seeds)
       {
@@ -216,6 +222,7 @@ namespace ufo
       {
         mutantsPrepped.insert(a->right());
       }
+      outs() << "Leaving getSampleExprs\n";
     }
 
     Expr convertToTerm(Expr e)
@@ -265,7 +272,7 @@ namespace ufo
       vars.push_back(ghostVars[0]);
       ExprVector varsPr = invVarsPr;
       varsPr.push_back(ghostVarsPr[0]);
-      cand->addDecl(invDecl, vars);
+      cand->addDeclAndVars(invDecl, vars);
 
       tr_new.srcVars = vars;
       qr_new.srcVars = vars;
@@ -385,7 +392,7 @@ namespace ufo
       ExprVector varsPr = invVarsPr;
       varsPr.push_back(ghostVarsPr[0]);
       varsPr.push_back(ghostVarsPr[1]);
-      cand->addDecl(invDecl, vars);
+      cand->addDeclAndVars(invDecl, vars);
 
       tr_new.srcVars = vars;
       qr_new.srcVars = vars;
@@ -479,12 +486,13 @@ namespace ufo
       else
       {
         outs () << "  keep proving.. ";
-        RndLearnerV2 ds(efac, z3, *cand, true, true, false);
+        RndLearnerV3 ds(efac, z3, r, 1000, false, false, false, false, false, false, 0); // New Freqhorn
+        //RndLearnerV2 ds(efac, z3, *cand, true, true, false); Old FreqHorn
         ds.categorizeCHCs();
 
         for (auto& dcl: cand->decls) ds.initializeDecl(dcl);
 
-        for (auto& dcl: cand->decls) ds.doSeedMining (dcl->arg(0), cands);
+        for (auto& dcl: cand->decls) ds.prepareSeeds (dcl->arg(0), cands);
 
         boost::tribool success = ds.houdini(cands, true, false);
         if (!success)
@@ -493,7 +501,7 @@ namespace ufo
           ds.calculateStatistics();
           ds.prioritiesDeferred();
 
-          success = ds.synthesize(100, 3, 3);
+          success = ds.synthesize(1000, false); // Add ability to pass disj flag.
           cands = ds.getlearnedLemmas(0);
         }
         return success;
@@ -509,7 +517,7 @@ namespace ufo
           if (r.srcRelation == invDecl)
             r.body = mk<AND>(r.body, lemmas2add);
 
-      boost::tribool res = cand->checkWith(sp);
+      boost::tribool res = cand->checkWithSpacer();
       if (!res)
       {
         Expr ce = cand->getCex().back();
@@ -627,7 +635,7 @@ namespace ufo
       // check if there is a nondeterminism in init
       for (auto & v : invVarsPr)
       {
-        nondeterministicIn += !u.hasOneModel(v, fc->body);
+        if(!u.hasOneModel(v, fc->body)) nondeterministicIn++;
         // TODO: optimize the algorithm such that deterministically assigned input variables don't get refined much
       }
       outs () << "level of nondeterminism in init: " << nondeterministicIn << " / "<< invVars.size() << "\n";
@@ -637,11 +645,14 @@ namespace ufo
       // Initially, check if we can enter the loop from the initial state
       Expr initCheck = mk<AND>(loopGuard, fc->body);
       initCheck = replaceAll(initCheck, invVarsPr, invVars);
+      outs() << "initCheck : \n\t----" << initCheck << "\n";
       if (!u.isSat(initCheck))
       {
         outs() << "\nLoop body is unreachable\nTerminates!\n";
         exit(0);
       }
+
+      outs() << "After first isSat check\n";
 
       if (slv == spacer || slv == muz)
       {
@@ -658,6 +669,8 @@ namespace ufo
         outs () << "Unable to determine non-termination\n";
         return true;
       }
+
+      outs() << "After resolveTrNondeterminism\n";
 
       // Then, get some invariants and repeat
       if (lemmas2add == NULL) getSampleExprs();
@@ -727,7 +740,7 @@ namespace ufo
       // try to prove universal non-termination
       if (slv == spacer || slv == muz)
       {
-        CHCs r1 = r;
+        CHCs& r1 = r;
         for (auto & a : r1.chcs)
           if (a.isFact) a.body = mk<AND>(renamedLoopGuard, a.body);
           else if (a.isInductive) a.body = updTrBody;
@@ -735,7 +748,7 @@ namespace ufo
 
         if (!lightweight)
         {
-          boost::tribool res = r1.checkWith(slv == spacer);
+          boost::tribool res = r1.checkWithSpacer();
           if (res && refinedGuard == loopGuard) outs () << "Trully universal\n";
 
           if (res)
@@ -756,7 +769,7 @@ namespace ufo
           {
             if (!u.isSat(updTrBody, b)) continue;
             for (auto & r : r1.chcs) if (r.isInductive) r.body = mk<AND>(updTrBody, b);
-            boost::tribool res = r1.checkWith(slv == spacer);
+            boost::tribool res = r1.checkWithSpacer();
             if (res)
             {
               outs () << "refined with " << *refinedGuard << " and " << *b << "\n";
@@ -821,7 +834,7 @@ namespace ufo
     {
       outs() << "Transforming program such that each new iteration "
              << "corresponds to " << mrg << " original iterations\n";
-      ruleManager.mergeIterations(*ruleManager.decls.begin(), mrg);
+      ruleManager.copyIterations(*ruleManager.decls.begin(), mrg);
     }
     TermCheck a(efac, z3, ruleManager, slv, nonterm, lw, cex);
     a.checkPrerequisites();
