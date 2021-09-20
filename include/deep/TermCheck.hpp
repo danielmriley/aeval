@@ -164,8 +164,41 @@ namespace ufo
     void getSampleExprs()
     {
       outs() << "In getSampleExprs\n";
-      exprsmpl = new RndLearnerV3(efac, z3, r, 1000, false, false, false, false, false, false, 0); // New Freqhorn
+      exprsmpl = new RndLearnerV3(efac, z3, r, 1000, false, false, false, false, false, false, 6); // New Freqhorn
       outs() << "New FreqHorn object declared\n";
+
+      bool doProp, doDisj, enableDataLearning = false;
+      int debug = 0;
+      BndExpl bnd(r, debug);
+
+      map<Expr, ExprSet> cands;
+      for (int i = 0; i < r.cycles.size(); i++)
+      {
+        Expr dcl = r.chcs[r.cycles[i][0]].srcRelation;
+        if (exprsmpl->initializedDecl(dcl)) continue;
+        exprsmpl->initializeDecl(dcl);
+        Expr pref = bnd.compactPrefix(i);
+        ExprSet tmp;
+        getConj(pref, tmp);
+        for (auto & t : tmp)
+          if (hasOnlyVars(t, r.invVars[dcl]))
+            cands[dcl].insert(t);
+
+        exprsmpl->mutateHeuristicEq(cands[dcl], cands[dcl], dcl, true);
+        exprsmpl->initializeAux(bnd, i, pref);
+      }
+
+      if (enableDataLearning) exprsmpl->getDataCandidates(cands);
+
+      for (auto & dcl: r.wtoDecls)
+      {
+        for (int i = 0; i < doProp; i++)
+          for (auto & a : cands[dcl]) exprsmpl->propagate(dcl, a, true);
+        exprsmpl->addCandidates(dcl, cands[dcl]);
+        exprsmpl->prepareSeeds(dcl, cands[dcl]);
+      }
+
+/*
       for (auto& dcl: r.decls)
       {
         // actually, should be one iter here
@@ -178,8 +211,10 @@ namespace ufo
       exprsmpl->categorizeCHCs();
       //if (!lightweight) // GF: experimentally, it does not make much difference,
                           // and for some examples it makes performance even worse
+
+*/
       {
-        exprsmpl->houdini(seeds, true, false);
+        exprsmpl->bootstrap(doDisj);
         lemmas2add = conjoin(exprsmpl->getlearnedLemmas(0), efac);
       }
 
