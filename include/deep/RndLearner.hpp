@@ -68,7 +68,8 @@ namespace ufo
     {
       SamplFactory& sf = sfs[num].back();
       Expr f;
-      while (f == NULL) f = sf.getFreshLinCom();
+      while(f == NULL) f = sf.getFreshLinCom();
+      if(printLog >= 4) outs() << "FreshCandidate: " << f << "\n";
       return f;
     }
 
@@ -573,7 +574,7 @@ namespace ufo
 
         if (printLog >= 3)
         {
-          outs() << "\nSTATISTICS for " << *decls[i] << "\n==========\n";
+          outs() << "\nSTATISTICS for " << *decls[i] << "\n===============\n";
           sfs[i].back().printStatistics();
         }
       }
@@ -581,7 +582,7 @@ namespace ufo
 
     void synthesize(int maxAttempts, ExprSet& itpCands)
     {
-      if (printLog) outs () << "\nSAMPLING\n========\n";
+      if (printLog) outs () << "\nSAMPLING\n===============\n";
       bool success = false;
       int iter = 1;
 

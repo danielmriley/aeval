@@ -131,10 +131,12 @@ namespace ufo
 
       if (lf.getVars().size() > 0 && samples.size() == 0)
       {
+        outs() << "artificially adding a sample\n";
         // artificially add one default sample in case there is nothing here
         // TODO: find a better solution
-        exprToSampl (mk<GEQ>(lf.getVars()[0], mkTerm (mpz_class (0), m_efac)));
+        exprToSampl (mk<GEQ>(lf.getVars()[0], mkTerm<string>("0", m_efac)));
       }
+      outs() << "passed artificial add\n";
 
       for (auto &s : samples)
       {
@@ -142,14 +144,15 @@ namespace ufo
         orArities.insert(s.arity());
         orAritiesDensity[s.arity()] ++;
       }
-
+      outs() << "between samples\n";
       for (int i = 0; i < maxArity; i++)
       {
         if (orAritiesDensity[i] == 0)
           orArities.insert(i);
       }
-
+      outs() << "lf.initDensities\n";
       lf.initDensities(orArities);
+      outs() << "bf.initDensities\n";
       bf.initDensities();
 
       for (auto &s : samples)
@@ -214,7 +217,10 @@ namespace ufo
         }
       }
 
-      if (orAritiesDensity.empty()) return NULL;
+      if (orAritiesDensity.empty()) {
+        outs() << "returning NULL\n";
+        return NULL;
+      }
 
       int arity = chooseByWeight(orAritiesDensity);
       int hasBool = chooseByWeight(hasBooleanComb);
@@ -225,7 +231,10 @@ namespace ufo
       Expr lExpr;
       if (hasLin > 0)
       {
-        if (!lf.guessTerm(curCand.l_part, arity, hasLin)) return NULL;
+        if (!lf.guessTerm(curCand.l_part, arity, hasLin)) {
+          outs() << "returning NULL\n";
+          return NULL;
+        }
         curCand.l_part.normalizePlus();
         lExpr = lf.toExpr(curCand.l_part);
       }
@@ -233,20 +242,26 @@ namespace ufo
       Expr bExpr;
       if (hasBool > 0)
       {
-        if (!bf.guessTerm(curCand.b_part)) return NULL;
+        if (!bf.guessTerm(curCand.b_part)){
+          outs() << "returning NULL\n";
+          return NULL;
+        }
         bExpr = bf.toExpr(curCand.b_part);
       }
 
       if (hasBool > 0 && hasLin > 0)
       {
+        outs() << "returning 3" << mk<OR>(bExpr, lExpr) << "\n";
         return mk<OR>(bExpr, lExpr);
       }
       else if (hasBool > 0)
       {
+        outs() << "returning 1" << bExpr << "\n";
         return bExpr;
       }
       else
       {
+        outs() << "returning 2" << lExpr << "\n";
         return lExpr;
       }
     }
@@ -304,8 +319,10 @@ namespace ufo
 
       if (lf.getConsts().size() > 0)
       {
-        outs() << "\nInt consts:\n";
-        for (auto &form: lf.getConsts()) outs() << lexical_cast<string>(form) << ", ";
+        outs() << "\nInt consts: size: " << lf.getConsts().size() << "\n";
+        for (auto &form: lf.getConsts()) {
+          outs() << lexical_cast<string>(form) << ", ";
+        }
         outs() << "\b\b \n";
 
         for (auto &ar : orAritiesDensity) lf.printCodeStatistics(ar.first);

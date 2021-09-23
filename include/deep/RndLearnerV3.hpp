@@ -798,7 +798,7 @@ namespace ufo
         for (auto & a : deferredCandidates)
           for (auto & b : a.second)
             outs () << "  Deferred cand for " << a.first << ": " << b << "\n";
-      if (printLog) outs () << "\nSAMPLING\n========\n";
+      if (printLog) outs () << "\nSAMPLINGV3\n========\n";
 
       ExprSet cands;
       for (int i = 0; i < maxAttempts; i++)
@@ -812,8 +812,10 @@ namespace ufo
         candidates.clear();
         SamplFactory& sf = sfs[invNum].back();
         Expr cand;
-        if (deferredCandidates[invNum].empty())
+        if (deferredCandidates[invNum].empty()) {
           cand = sf.getFreshCandidate(i < 25);  // try simple array candidates first
+          //outs() << cand << "\n";
+        }
         else {
           cand = deferredCandidates[invNum].back();
           deferredCandidates[invNum].pop_back();
@@ -926,7 +928,10 @@ namespace ufo
       if (printLog >= 3) outs () << "MultiHoudini\n";
       if (printLog >= 4) printCands();
 
-      if (!anyProgress(worklist)) return false;
+      if (!anyProgress(worklist)) {
+        if (printLog >= 4) outs() << "    No progress\n";
+        return false;
+      }
       bool res1 = true;
       for (auto &hr: worklist)
       {
@@ -1352,7 +1357,7 @@ namespace ufo
 
     bool bootstrap(bool doDisj)
     {
-      if (printLog) outs () << "\nBOOTSTRAPPING\n=============\n";
+      if (printLog) outs () << "\nBOOTSTRAPPING\n===============\n";
       filterUnsat();
 
       if (multiHoudini(ruleManager.wtoCHCs))
@@ -1443,7 +1448,7 @@ namespace ufo
           }
         }
       }
-
+      if(printLog >= 4) outs() << "    leaving bootstrapping\n";
       return false;
     }
 

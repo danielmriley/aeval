@@ -72,7 +72,7 @@ namespace ufo
   {
     private:
     set<int> indeces;
-    string varname = "_FH_";
+    string varname = "_FT_";
     SMTUtils u;
 
     bool checkedWithSpacer = false;

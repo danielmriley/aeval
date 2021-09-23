@@ -59,6 +59,7 @@ namespace ufo
     RndLearnerV3* exprsmpl;       // for samples used in various pieces of termination analysis
 
     int nontlevel;
+    int debug;
     bool lightweight;
     bool use_cex;
 
@@ -66,7 +67,7 @@ namespace ufo
 
     TermCheck (ExprFactory& _efac, EZ3& _z3, CHCs& _r, solver _slv, int _n, bool _l, bool _c) :
       efac(_efac), z3(_z3), u(efac), r(_r), slv(_slv), nontlevel(_n), lightweight(_l), use_cex(_c),
-      tr(NULL), fc(NULL), qr(NULL)
+      tr(NULL), fc(NULL), qr(NULL), debug(6)
     {
       for (int i = 0; i < 2; i++)
       {
@@ -163,15 +164,15 @@ namespace ufo
     /* Preps for syntax-guided synthesis of ranking functions and program refinements */
     void getSampleExprs()
     {
-      outs() << "In getSampleExprs\n";
-      exprsmpl = new RndLearnerV3(efac, z3, r, 1000, false, false, false, false, false, false, 6); // New Freqhorn
-      outs() << "New FreqHorn object declared\n";
+      r.print(true);
+      exprsmpl = new RndLearnerV3(efac, z3, r, 1000, false, false, false, false, false, false, debug); // New Freqhorn
 
-      bool doProp, doDisj, enableDataLearning = false;
-      int debug = 0;
+      bool doDisj, enableDataLearning = false;
+      int doProp = 0;
+
       BndExpl bnd(r, debug);
 
-      map<Expr, ExprSet> cands;
+      map<Expr, ExprSet> candMap;
       for (int i = 0; i < r.cycles.size(); i++)
       {
         Expr dcl = r.chcs[r.cycles[i][0]].srcRelation;
@@ -182,60 +183,45 @@ namespace ufo
         getConj(pref, tmp);
         for (auto & t : tmp)
           if (hasOnlyVars(t, r.invVars[dcl]))
-            cands[dcl].insert(t);
+            candMap[dcl].insert(t);
 
-        exprsmpl->mutateHeuristicEq(cands[dcl], cands[dcl], dcl, true);
+        exprsmpl->mutateHeuristicEq(candMap[dcl], candMap[dcl], dcl, true);
         exprsmpl->initializeAux(bnd, i, pref);
       }
 
-      if (enableDataLearning) exprsmpl->getDataCandidates(cands);
+      if (enableDataLearning) exprsmpl->getDataCandidates(candMap);
 
       for (auto & dcl: r.wtoDecls)
       {
         for (int i = 0; i < doProp; i++)
-          for (auto & a : cands[dcl]) exprsmpl->propagate(dcl, a, true);
-        exprsmpl->addCandidates(dcl, cands[dcl]);
-        exprsmpl->prepareSeeds(dcl, cands[dcl]);
+          for (auto & a : candMap[dcl]) exprsmpl->propagate(dcl, a, true);
+        exprsmpl->addCandidates(dcl, candMap[dcl]);
+        exprsmpl->prepareSeeds(dcl, candMap[dcl]);
       }
 
-/*
-      for (auto& dcl: r.decls)
-      {
-        // actually, should be one iter here
-        outs() << "dcl:\n\t---" << dcl << "\n";
-        exprsmpl->initializeDecl(dcl);
-        exprsmpl->prepareSeeds(dcl->arg(0), seeds);
-      }
+      exprsmpl->bootstrap(doDisj);
 
       exprsmpl->calculateStatistics();
-      exprsmpl->categorizeCHCs();
-      //if (!lightweight) // GF: experimentally, it does not make much difference,
-                          // and for some examples it makes performance even worse
-
-*/
-      {
-        exprsmpl->bootstrap(doDisj);
-        lemmas2add = conjoin(exprsmpl->getlearnedLemmas(0), efac);
-      }
+      exprsmpl->deferredPriorities();
+      lemmas2add = conjoin(exprsmpl->getlearnedLemmas(0), efac);
 
       vector<cpp_int> temp = exprsmpl->getAllConsts();
       auto rb = temp.rbegin();
 
       seedsPrepped.insert(mkTerm (mpz_class (lexical_cast<string>(*rb)), efac));
-
       for (auto s : seeds)
       {
+        //if(debug) outs() << "    seed: " << s << "\n";
         s = convertToTerm(s);
         if (s == NULL) continue;
         if (find(std::begin(elements), std::end (elements), s) == std::end(elements))
           seedsPrepped.insert(s);
       }
-
       for (int i = 0; i < 100; i++) // could consider more than 100 mutants as well
         mutants.insert(exprsmpl->getFreshCand());
-
       for (auto m : mutants)
       {
+        //if(debug) outs() << "    mutant: " << m << "\n";
         m = convertToTerm(m);
         if (m == NULL) continue;
         if (find(std::begin(elements), std::end (elements), m) == std::end(elements) &&
@@ -257,7 +243,6 @@ namespace ufo
       {
         mutantsPrepped.insert(a->right());
       }
-      outs() << "Leaving getSampleExprs\n";
     }
 
     Expr convertToTerm(Expr e)
@@ -334,6 +319,7 @@ namespace ufo
       cand->addRule(&qr_new);
 
       cand->addFailDecl(qr->dstRelation);
+
       return true;
     }
 
@@ -467,6 +453,7 @@ namespace ufo
 
       // cand->print();
       boost::tribool res;
+      if(debug) outs() << "Checking candidate\n";
 
       switch(slv)
       {
@@ -509,8 +496,10 @@ namespace ufo
 
     boost::tribool checkCandWithFreqhorn(int bnd = 20)
     {
+      bool doDisj, enableDataLearning = false;
+      int doProp = 0;
       // TODO: try reusing learnedLemmas between runs
-      BndExpl be(*cand);
+      BndExpl be(*cand, debug);
       bool bug = !(be.exploreTraces(2, bnd, false));
       if (bug)
       {
@@ -520,21 +509,48 @@ namespace ufo
       }
       else
       {
-        outs () << "  keep proving.. ";
-        RndLearnerV3 ds(efac, z3, r, 1000, false, false, false, false, false, false, 0); // New Freqhorn
+        outs () << "  keep proving.. \n";
+        RndLearnerV3 ds(efac, z3, *cand, 1000, false, false, false, false, false, false, debug); // New Freqhorn
         //RndLearnerV2 ds(efac, z3, *cand, true, true, false); Old FreqHorn
-        ds.categorizeCHCs();
+        if (!cand->hasCycles())
+        {
+          be.exploreTraces(1, cand->chcs.size(), true);
+          exit(0);
+        }
 
-        for (auto& dcl: cand->decls) ds.initializeDecl(dcl);
+        map<Expr, ExprSet> candMap;
+        for (int i = 0; i < cand->cycles.size(); i++)
+        {
+          Expr dcl = cand->chcs[cand->cycles[i][0]].srcRelation;
+          if (ds.initializedDecl(dcl)) continue;
+          ds.initializeDecl(dcl);
+          Expr pref = be.compactPrefix(i);
+          ExprSet tmp;
+          getConj(pref, tmp);
+          for (auto & t : tmp)
+            if (hasOnlyVars(t, cand->invVars[dcl]))
+              candMap[dcl].insert(t);
 
-        for (auto& dcl: cand->decls) ds.prepareSeeds (dcl->arg(0), cands);
+          ds.mutateHeuristicEq(candMap[dcl], candMap[dcl], dcl, true);
+          ds.initializeAux(be, i, pref);
+        }
 
-        boost::tribool success = ds.houdini(cands, true, false);
+        if (enableDataLearning) ds.getDataCandidates(candMap);
+
+        for (auto & dcl: cand->wtoDecls)
+        {
+          for (int i = 0; i < doProp; i++)
+            for (auto & a : candMap[dcl]) ds.propagate(dcl, a, true);
+          ds.addCandidates(dcl, candMap[dcl]);
+          ds.prepareSeeds(dcl, candMap[dcl]);
+        }
+
+        boost::tribool success = ds.bootstrap(false);
         if (!success)
         {
-          outs () << "  keep proving.. ";
+          outs () << "  keep proving.. \n";
           ds.calculateStatistics();
-          ds.prioritiesDeferred();
+          ds.deferredPriorities();
 
           success = ds.synthesize(1000, false); // Add ability to pass disj flag.
           cands = ds.getlearnedLemmas(0);
@@ -686,8 +702,6 @@ namespace ufo
         outs() << "\nLoop body is unreachable\nTerminates!\n";
         exit(0);
       }
-
-      outs() << "After first isSat check\n";
 
       if (slv == spacer || slv == muz)
       {
