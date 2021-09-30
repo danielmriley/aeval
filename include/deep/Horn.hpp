@@ -792,6 +792,7 @@ namespace ufo
       }
       types.push_back (mk<BOOL_TY> (m_efac));
 
+      //addDecl(bind::fdecl (rel, types));
       decls.insert(bind::fdecl (rel, types));
       for (auto & v : args)
       {

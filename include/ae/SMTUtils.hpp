@@ -9,7 +9,7 @@ using namespace std;
 using namespace boost;
 namespace ufo
 {
-  
+
   class SMTUtils {
   private:
 
@@ -650,7 +650,7 @@ namespace ufo
 //      outs().flush ();
     }
   };
-  
+
   /**
    * Horn-based interpolation over particular vars
    */

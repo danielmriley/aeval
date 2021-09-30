@@ -814,7 +814,7 @@ namespace ufo
         Expr cand;
         if (deferredCandidates[invNum].empty()) {
           cand = sf.getFreshCandidate(i < 25);  // try simple array candidates first
-          //outs() << cand << "\n";
+          //outs() << "CAND>" << cand << "\n";
         }
         else {
           cand = deferredCandidates[invNum].back();
@@ -1039,11 +1039,9 @@ namespace ufo
       Expr ssa = rewriteSelectStore(ssas[invNum]);
       ExprVector& srcVars = ruleManager.invVars[invRel];
       ExprVector& dstVars = ruleManager.invVarsPrime[invRel];
-
       retrieveDeltas(ssa, srcVars, dstVars, cands);
       generateMbps(invNum, ssa, srcVars, dstVars);     // add mbps as candidates:
       for (auto & mbp : mbps[invNum]) getConj(replaceAll(mbp, dstVars, srcVars), cands);
-
       SamplFactory& sf = sfs[invNum].back();
       ExprSet candsFromCode;
       bool analyzedExtras = false;
@@ -1158,7 +1156,6 @@ namespace ufo
                       q->iter, *arrAccessVars[invNum].begin()));
         }
          */
-
         // process all quantified seeds
         for (auto & a : tmpArrCands)
         {

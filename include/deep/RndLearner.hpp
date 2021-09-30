@@ -495,7 +495,6 @@ namespace ufo
     {
       int ind = getVarIndex(invRel, decls);
       SamplFactory& sf = sfs[ind].back();
-
       // analyze each rule separately:
       for (auto &hr : ruleManager.chcs)
       {

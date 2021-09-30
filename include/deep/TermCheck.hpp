@@ -67,7 +67,7 @@ namespace ufo
 
     TermCheck (ExprFactory& _efac, EZ3& _z3, CHCs& _r, solver _slv, int _n, bool _l, bool _c) :
       efac(_efac), z3(_z3), u(efac), r(_r), slv(_slv), nontlevel(_n), lightweight(_l), use_cex(_c),
-      tr(NULL), fc(NULL), qr(NULL), debug(6)
+      tr(NULL), fc(NULL), qr(NULL), debug(0)
     {
       for (int i = 0; i < 2; i++)
       {
@@ -164,7 +164,7 @@ namespace ufo
     /* Preps for syntax-guided synthesis of ranking functions and program refinements */
     void getSampleExprs()
     {
-      r.print(true);
+      //r.print(true);
       exprsmpl = new RndLearnerV3(efac, z3, r, 1000, false, false, false, false, false, false, debug); // New Freqhorn
 
       bool doDisj, enableDataLearning = false;
@@ -299,6 +299,7 @@ namespace ufo
       fc_new.dstVars = varsPr;
       tr_new.dstVars = varsPr;
 
+
       ExprSet tmp;
       getConj(fc_new.body, tmp);
       tmp.insert(candConds.begin(), candConds.end());
@@ -319,6 +320,8 @@ namespace ufo
       cand->addRule(&qr_new);
 
       cand->addFailDecl(qr->dstRelation);
+      cand->wtoSort();
+      cand->invVarsPrime[invDecl] = varsPr; // temp fix.
 
       return true;
     }
@@ -440,6 +443,9 @@ namespace ufo
       cand->addRule(&qr_new);
 
       cand->addFailDecl(qr->dstRelation);
+      cand->wtoSort();
+      cand->invVarsPrime[invDecl] = varsPr; // temp fix.
+
       return true;
     }
 
@@ -465,6 +471,12 @@ namespace ufo
 
       if (res)
       {
+        for(auto& hr: cand->chcs) {
+          if(hr.isFact) {
+            Expr grd = hr.body;
+            outs() << "Last successful guard: " << grd << "\n";
+          }
+        }
         outs () << "  ---> Terminates!\n";
       }
       else
@@ -518,6 +530,7 @@ namespace ufo
           exit(0);
         }
 
+        //cand->print(true);
         map<Expr, ExprSet> candMap;
         for (int i = 0; i < cand->cycles.size(); i++)
         {
@@ -536,7 +549,6 @@ namespace ufo
         }
 
         if (enableDataLearning) ds.getDataCandidates(candMap);
-
         for (auto & dcl: cand->wtoDecls)
         {
           for (int i = 0; i < doProp; i++)
@@ -552,7 +564,7 @@ namespace ufo
           ds.calculateStatistics();
           ds.deferredPriorities();
 
-          success = ds.synthesize(1000, false); // Add ability to pass disj flag.
+          success = ds.synthesize(1000, true); // Add ability to pass disj flag.
           cands = ds.getlearnedLemmas(0);
         }
         return success;
@@ -625,6 +637,7 @@ namespace ufo
       for (auto initCond : mutantsPrepped)
       {
         // TODO: could be done in batches
+        outs() << "initCond: " << initCond << "\n";
         ExprSet a; a.insert(initCond);
         outs() << "mutant #" << candConds.size() << ": " << *initCond;
         res = checkCand(assembleCand(a));
