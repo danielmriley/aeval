@@ -38,6 +38,12 @@ namespace ufo
     set<HornRuleExt*> propped;
     map<int, ExprVector> candidates;
     map<int, deque<Expr>> deferredCandidates;
+    map<int, ExprSet> deferredConjDisj; // Exprs are stored but not used... yet...
+    map<int, map<int, ExprSet>> deferredEqualities;
+    //map<int, ExprSet> deferredEqualities;
+    map<int, map<int, ExprSet>> deferredInequalities;
+    set<int> defCandArities;
+    set<int> eqCandArities;
     map<int, ExprSet> allDataCands;
     map<int, ExprSet> tmpFailed;
     map<int, ExprTree> mbpDt;
@@ -45,6 +51,7 @@ namespace ufo
     int mut;
     int dat;
     int to;
+    int dfrNum;
 
     // extra options for disjunctive invariants
     bool dDisj;
@@ -882,18 +889,63 @@ namespace ufo
       }
     }
 
+    bool eqFirst = true;
+    void doEqOrIneqFirst() {
+      bool res = true;
+      bool everEq = false;
+      for(auto& hr: ruleManager.chcs) {
+        if(hr.isQuery) {
+          ExprSet conjs;
+          getConj(hr.body, conjs);
+          for(auto& e : conjs) {
+            if((isOpX<GT>(e) || isOpX<LT>(e) || isOpX<GEQ>(e) || isOpX<LEQ>(e))) {
+              res = false;
+            }
+            if(isOpX<NEQ>(e) || isOpX<EQ>(e)) everEq = true;
+          }
+        }
+      }
+      if(everEq) eqFirst = true;
+      else eqFirst = res;
+    }
+
+    int max_arity = 0;
+    int max_arityeq = 0;
     bool synthesize(unsigned maxAttempts)
     {
       if (printLog) outs () << "\nSAMPLING\n========\n";
-      if (printLog >= 2)
-        for (auto & a : deferredCandidates)
+      if (printLog >= 2) {
+        for (auto & a : deferredEqualities)
           for (auto & b : a.second)
+            for (auto & c : b.second)
+              outs () << "  Deferred cand for " << a.first << ": " << c << "\n";
+        for (auto & a : deferredInequalities)
+          for (auto & b : a.second)
+            for (auto & c : b.second)
+              outs () << "  Deferred cand for " << a.first << ": " << c << "\n";
+        for(auto& a : deferredConjDisj)
+          for(auto& b : a.second)
             outs () << "  Deferred cand for " << a.first << ": " << b << "\n";
+
+
+      }
 
       map<int, int> defSz;
       for (auto & a : deferredCandidates) defSz[a.first] = a.second.size();
       ExprSet cands;
+      Expr lastDefCand;
+      map<int, ExprSet> usedDefCands;
       bool rndStarted = false;
+      int eqAr = dfrNum;
+      int inAr = dfrNum;
+      doEqOrIneqFirst();
+      if(printLog >= 2) {
+        outs() << "Deferred Equalities: " << deferredEqualities[0].size() << "\n";
+        outs() << "Deferred Inequalities: " << deferredInequalities[0].size() << "\n";
+        outs() << "Deferred ConjDisj: " << deferredConjDisj.size() << "\n";
+        outs() << "max_arity: " << max_arity << "\n";
+        outs() << "max_arityeq: " << max_arityeq << "\n";
+      }
       for (int i = 0; i < maxAttempts; i++)
       {
         // next cand (to be sampled)
@@ -905,15 +957,82 @@ namespace ufo
         candidates.clear();
         SamplFactory& sf = sfs[invNum].back();
         Expr cand;
-        if (deferredCandidates[invNum].empty())
+        if (eqAr > max_arityeq && inAr > max_arity /*&& deferredConjDisj.empty()*/)
         {
           rndStarted = true;
+          if(printLog >= 2) {
+            outs() << "eqAr: " << eqAr << "\n";
+            outs() << "inAr: " << inAr << "\n";
+            outs() << "eqCandArities.size(): " << eqCandArities.size() << "\n";
+            outs() << "defCandArities.size(): " << defCandArities.size() << "\n";
+          }
+          if(printLog >= 2) outs() << "(+ rnd)\n" << "dfrNum: " << dfrNum << "\n";
           cand = sf.getFreshCandidate();  // try simple array candidates first
         }
         else
         {
-          cand = deferredCandidates[invNum].back();
-          deferredCandidates[invNum].pop_back();
+          // Track deferredCands that have been tested already and skip them.
+          int count = 0;
+          while(true) {
+            if(printLog >= 2) {
+              outs() << "eqAr: " << eqAr << "\n";
+              outs() << "inAr: " << inAr << "\n";
+              outs() << "eqCandArities.size(): " << eqCandArities.size() << "\n";
+              outs() << "defCandArities.size(): " << defCandArities.size() << "\n";
+            }
+            if(eqAr <= max_arityeq && eqFirst) {
+              if(printLog >= 2) outs() << "Picking from deferredEqualities\n";
+              if(deferredEqualities[invNum][eqAr].empty()) {
+                eqAr = *eqCandArities.begin();
+                eqCandArities.erase(eqAr);
+              }
+              cand = *deferredEqualities[invNum][eqAr].begin();
+              if(printLog >= 2) outs() << "cand picked: " << cand << "\n";
+              deferredEqualities[invNum][eqAr].erase(cand);
+              if(deferredEqualities[invNum][eqAr].empty()) {
+                eqAr = *eqCandArities.begin();
+                eqCandArities.erase(eqAr);
+              }
+              if(cand == NULL && eqCandArities.empty()) {
+                eqAr = max_arityeq + 1;
+                eqFirst = false;
+                break;
+              }
+            }
+            else if(inAr <= max_arity && !eqFirst) {
+              if(printLog >= 2) outs() << "Picking from deferredInequalities\n";
+              cand = *deferredInequalities[invNum][inAr].begin();
+              if(printLog >= 2) outs() << "cand picked: " << cand << "\n";
+              deferredInequalities[invNum][inAr].erase(cand);
+              if(deferredInequalities[invNum][inAr].empty() && inAr <= max_arity) {
+                inAr = *defCandArities.begin();
+                defCandArities.erase(inAr);
+              }
+              if(cand == NULL && defCandArities.empty()) {
+                inAr = max_arity + 1;
+                eqFirst = true;
+                break;
+              }
+            }
+            else if(false) {
+              if(printLog >= 2) outs() << "Picking from deferredConjDisj\n";
+              cand = *deferredConjDisj[invNum].begin();
+              if(printLog >= 2) outs() << "cand picked: " << cand << "\n";
+              deferredConjDisj[invNum].erase(cand);
+              exit(0);
+              if(cand == NULL) {
+                deferredConjDisj.clear();
+                break;
+              }
+              break;
+            }
+            lastDefCand = cand;
+            if(usedDefCands[invNum].find(cand) == usedDefCands[invNum].end()) break;
+            if(eqAr > max_arityeq && inAr > max_arity && deferredConjDisj.empty()) break;
+
+          }
+          if(cand != NULL)
+            usedDefCands[invNum].insert(cand);
         }
         if (cand != NULL && isOpX<FORALL>(cand) && isOpX<IMPL>(cand->last()))
         {
@@ -944,6 +1063,7 @@ namespace ufo
                     << (rndStarted ? "(+ rnd)" :
                        (i > defSz[invNum]) ? "(+ rec)" : "" ) << "\n";
             printSolution();
+            //outs() << "Last deferred candidate: " << lastDefCand << " arity: " << lastDefCand->left()->arity() << "\n";
             return true;
           }
         }
@@ -1007,15 +1127,31 @@ namespace ufo
           }
           if (boot)
           {
-            if (isOpX<EQ>(*it)) deferredCandidates[invNum].push_back(*it);  //  prioritize equalities
+            if (isOpX<EQ>(*it)) {
+              Expr eq = normalize(*it);
+              int ar = eq->left()->arity();
+              eqCandArities.insert(ar);
+              if(ar > max_arityeq) max_arityeq = ar;
+              deferredEqualities[invNum][ar].insert(eq);  //  prioritize equalities
+            }
             else
             {
               ExprSet disjs;
               getDisj(*it, disjs);
               for (auto & a : disjs)  // to try in the `--disj` mode
               {
-                deferredCandidates[invNum].push_front(a);
-                deferredCandidates[invNum].push_front(mkNeg(a));
+                Expr aa = normalize(a);
+                int ar = aa->left()->arity();
+                defCandArities.insert(ar);
+                if(ar > max_arity) max_arity = ar;
+                if(isOpX<AND>(aa) || isOpX<OR>(aa)) {
+                  deferredConjDisj[invNum].insert(aa);
+                  deferredConjDisj[invNum].insert(mkNeg(aa));
+                }
+                else {
+                  deferredInequalities[invNum][ar].insert(aa);
+                  deferredInequalities[invNum][ar].insert(mkNeg(aa));
+                }
               }
             }
           }
@@ -1028,6 +1164,145 @@ namespace ufo
         }
       }
       return weakened;
+    }
+
+    Expr cleanNegatives(Expr e)
+    { // currently only cleans expressions like (-1*FH1=0), (-1*FH1=-5000)
+      if(e->arity() > 2 && e->left()->arity() > 2) return e;
+
+      Expr res;
+      if(e->left()->arity() == 2 && isOpX<MULT>(e->left())) {
+        if(isOpX<MPZ>(e->right())) {
+          cpp_int coefLeft = 1;
+          cpp_int coefRight = 1;
+          coefLeft *= lexical_cast<cpp_int>(e->left()->left());
+          coefRight *= lexical_cast<cpp_int>(e->right());
+          if(coefLeft < 0 && coefRight <= 0) {
+            const Operator *op = & (e->op ());
+            if(coefLeft == -1) {
+              if(isOpX<GT>(e)) res = mk<LT>(e->left()->right(), mkMPZ(-coefRight, ruleManager.m_efac));
+              else if(isOpX<LT>(e)) res = mk<GT>(e->left()->right(), mkMPZ(-coefRight, ruleManager.m_efac));
+              else if(isOpX<GEQ>(e)) res = mk<LEQ>(e->left()->right(), mkMPZ(-coefRight, ruleManager.m_efac));
+              else if(isOpX<LEQ>(e)) res = mk<GEQ>(e->left()->right(), mkMPZ(-coefRight, ruleManager.m_efac));
+              else res = mk(*op, e->left()->right(), mkMPZ(-coefRight, ruleManager.m_efac));
+            }
+            else {
+              Expr left = mk<MULT>(mkMPZ(-coefLeft, ruleManager.m_efac), e->left()->right());
+              if(isOpX<GT>(e)) res = mk<LT>(left, mkMPZ(-coefRight, ruleManager.m_efac));
+              else if(isOpX<LT>(e)) res = mk<GT>(left, mkMPZ(-coefRight, ruleManager.m_efac));
+              else if(isOpX<GEQ>(e)) res = mk<LEQ>(left, mkMPZ(-coefRight, ruleManager.m_efac));
+              else if(isOpX<LEQ>(e)) res = mk<GEQ>(left, mkMPZ(-coefRight, ruleManager.m_efac));
+              else res = mk(*op, left, mkMPZ(-coefRight, ruleManager.m_efac));
+            }
+            if(u.implies(res, e)) {
+              return res;
+            }
+          }
+        }
+      }
+      return e;
+    }
+
+    Expr cleanCoeff(Expr e) {
+      // Clean (1*FH1) -> (FH1)
+      if(e->arity() > 2 && e->left()->arity() > 2) return e;
+      Expr res;
+
+      if(e->left()->arity() == 2 && isOpX<MULT>(e->left())) {
+        cpp_int coefLeft = lexical_cast<cpp_int>(e->left()->left());
+        if(coefLeft == 1) {
+          const Operator *op = & (e->op ());
+          res = mk(*op, e->left()->right(), e->right());
+          return res;
+        }
+      }
+
+      return e;
+    }
+
+    Expr cleanExprs(Expr e) {
+      Expr res = cleanNegatives(e);
+      res = cleanCoeff(res);
+      return res;
+    }
+
+    void fillDeferredCands(int invNum)
+    {
+      map<int, ExprSet> replace;
+      // search for expressions that are equal and rewrite.
+      for(auto& ar : deferredEqualities[invNum]) {
+        for(auto& c : ar.second) {
+          Expr e = normalize(c);
+          e = cleanExprs(e);
+          replace[e->left()->arity()].insert(e);
+
+        }
+      }
+      for(int i = 0; i < replace.size(); i++) {
+        deferredEqualities[invNum][i].swap(replace[i]);
+        replace[i].clear();
+      }
+
+      map<int, ExprSet> replaceMap;
+      for(auto& ar: deferredInequalities[invNum]) {
+        for(auto& c: ar.second) {
+          Expr e = normalize(c);
+          e = cleanExprs(e);
+          replaceMap[e->left()->arity()].insert(e);
+        }
+      }
+      for(int i = 0; i < replaceMap.size(); i++) {
+        deferredInequalities[invNum][i].swap(replaceMap[i]);
+        replaceMap[i].clear();
+      }
+
+      for(auto& e : deferredEqualities[invNum]) {   //  prioritize equalities
+        for(auto& ex : e.second) {
+          deferredCandidates[invNum].push_back(ex);
+        }
+      }
+      for(auto& e : deferredInequalities[invNum]) {
+        for(auto& ex : e.second)
+          deferredCandidates[invNum].push_back(ex);
+      }
+      for(auto& e : deferredConjDisj[invNum]) {
+        deferredCandidates[invNum].push_back(e);
+      }
+    }
+
+    void setDeferredPriority() {
+      for(auto& hr: ruleManager.chcs) {
+        if(hr.isQuery) {
+          Expr body = hr.body;
+          body = normalize(body);
+
+          if(isOpX<AND>(body)) {
+            if(body->right()->left()->arity() > body->left()->left()->arity()) {
+              dfrNum = body->right()->left()->arity() - 1;
+            }
+            else {
+              dfrNum = body->left()->left()->arity() - 1;
+            }
+          }
+          else {
+            dfrNum = body->arity() - 1;
+          }
+        }
+      }
+      if(dfrNum < 0) dfrNum = 0;
+      defCandArities.erase(dfrNum);
+      eqCandArities.erase(dfrNum);
+      if(printLog >= 3) {
+        outs() << "dfrNum = " << dfrNum << "\n";
+        outs() << "max_arity = " << max_arity << "\n";
+        outs() << "max_arityeq = " << max_arityeq << "\n";
+        outs() << "defCandArities: ";
+        for(auto& i: defCandArities) outs() << i << ", ";
+        outs() << "\b\b \n";
+        outs() << "eqCandArities: ";
+        for(auto& i: eqCandArities) outs() << i << ", ";
+        outs() << "\b\b \n";
+      }
     }
 
     bool multiHoudini (vector<HornRuleExt*> worklist, bool recur = true)
@@ -1061,8 +1336,10 @@ namespace ufo
           // then, invalidate (one-by-one) all candidates for which Z3 failed to find a model
 
           for (int i = 0; i < 3 /*weakeningPriorities.size() */; i++)
-            if (weaken (invNum, candidates[invNum], vals, hr, sf, (*weakeningPriorities[i]), i > 0))
+            if (weaken (invNum, candidates[invNum], vals, hr, sf, (*weakeningPriorities[i]), i > 0)) {
+              fillDeferredCands(invNum);
               break;
+            }
 
           if (recur)
           {
@@ -2021,6 +2298,7 @@ namespace ufo
 
     ds.calculateStatistics();
     ds.deferredPriorities();
+    ds.setDeferredPriority();
     std::srand(std::time(0));
     ds.synthesize(maxAttempts);
   }
