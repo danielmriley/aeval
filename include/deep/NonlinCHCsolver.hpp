@@ -2,6 +2,7 @@
 #define NONLINCHCSOLVER__HPP__
 
 #include "HornNonlin.hpp"
+#include "DataLearner.hpp"
 
 #include <fstream>
 #include <chrono>
@@ -111,6 +112,7 @@ namespace ufo
     void specUpFc()
     {
       HornRuleExt* fc_new = new HornRuleExt();
+      fc_new->srcRelation = fc->srcRelation;
       fc_new->srcRelations = fc->srcRelations;
       fc_new->srcRelations.push_back(specExpr);
       fc_new->srcVars = fc->srcVars;
@@ -147,6 +149,7 @@ namespace ufo
     void setUpTr() // NEED TO RESET INV DECL
     {
       HornRuleExt* tr_new = new HornRuleExt();
+      tr_new->srcRelation = tr->srcRelation;
       tr_new->srcRelations = tr->srcRelations;
       for(auto& s: tr_new->srcRelations) ruleManager.invVars[s].clear();
       tr_new->srcVars = tr->srcVars;
@@ -170,6 +173,7 @@ namespace ufo
     void setUpQr()
     {
       qr = new HornRuleExt();
+      qr->srcRelation = tr->srcRelation;
       qr->srcRelations = tr->srcRelations;
       qr->srcVars = tr->srcVars;
       qr->body = mk<AND>(loopGuard, ghostGuard);
@@ -200,7 +204,7 @@ namespace ufo
       invVars = tr->srcVars[0];
       invVarsPr = tr->dstVars;
       invVarsSz = invVars.size();
-      
+
       if (tr == NULL)
       {
         outs() << "TR is missing\n";
@@ -1417,6 +1421,9 @@ namespace ufo
         worklist.push_back(&hr);
       }
 
+      // Add data candidates here.
+
+
       while (true)
       {
         auto candidatesTmp = candidates;
@@ -2371,7 +2378,8 @@ namespace ufo
         ExprVector fixedRels = !firstSMTCall && fixCRels ? vecDiff(allRels, rels) : ExprVector() ;
         map<Expr, Expr> smtSoln;
 
-        outs() << "current iteration: "<< itr << "\n";
+        if(debug >= 2) outs() << "current iteration: "<< itr << "\n";
+        if(debug) printCands(false);
 
         maxRes = firstSMTCall ? checkMaximalSMT(weakenRels, fixedRels, smtSoln) : checkMaximalSMT(weakenRels, fixedRels, smtSoln, rels);
         itr++;
@@ -2589,10 +2597,13 @@ namespace ufo
     CHCs ruleManager(m_efac, z3);
     ruleManager.parse(smt);
     NonlinCHCsolver spec(ruleManager, stren, debug);
-
+    outs() << "invDecl: " << ruleManager.invRel << "\n";
+    for(auto& e: ruleManager.invVars[ruleManager.invRel])
+      outs() << "invVar: " << e << "\n";
     if(!ruleManager.hasQuery) {
       //ruleManager.print();
       spec.setUpQueryAndSpec();
+      outs() << "invDecl: " << ruleManager.invRel << "\n";
     }
     if (usesygus) {
       spec.setSygusPath(syguspath);

@@ -39,6 +39,7 @@ namespace ufo
     Expr head;
 
     ExprVector srcRelations;
+    Expr srcRelation;
     Expr dstRelation;
 
     bool isFact;
@@ -83,15 +84,19 @@ namespace ufo
 
     ExprSet decls;
     Expr failDecl;
+    Expr invRel;
     vector<HornRuleExt> chcs;
     map<Expr, ExprVector> invVars;
     map<Expr, vector<int>> incms;
+    vector<vector<int>> prefixes;  // for cycles
+    vector<vector<int>> cycles;
+    bool hasArrays;
     int qCHCNum;  // index of the query in chc
     int total_var_cnt = 0;
     string infile;
     bool hasQuery = false;
 
-    CHCs(ExprFactory &efac, EZ3 &z3) : m_efac(efac), m_z3(z3) {};
+    CHCs(ExprFactory &efac, EZ3 &z3) : m_efac(efac), m_z3(z3), hasArrays(false) {};
 
     bool isFapp (Expr e)
     {
@@ -336,6 +341,7 @@ namespace ufo
           hasQuery = true;
           qCHCNum = chcs.size() - 1;
         }
+        if(hr.isFact) invRel = hr.dstRelation;
 
         ExprVector allOrigSymbs;
         for (auto & a : origSrcSymbs) for (auto & b : a) allOrigSymbs.push_back(b);
@@ -389,6 +395,8 @@ namespace ufo
           else ++it;
         }
       }
+
+      for(auto& hr: chcs) hr.srcRelation = invRel;
 
       for (int i = 0; i < chcs.size(); i++)
         incms[chcs[i].dstRelation].push_back(i);
@@ -452,6 +460,108 @@ namespace ufo
         if (emptyIntersect(a, allVars)) newCnjs.insert(a);
       }
       return conjoin(newCnjs, m_efac);
+    }
+
+    bool hasCycles()
+    {
+      if (cycles.size() > 0) return true;
+
+      for (int i = 0; i < chcs.size(); i++)
+      {
+        if (chcs[i].isFact) findCycles(i, vector<int>());
+      }
+
+      assert (cycles.size() == prefixes.size());
+      for (auto & c : cycles)
+      {
+        outs () << "   cycle: ";
+        for (auto & chcNum : c) outs () << *chcs[chcNum].srcRelation << " -> ";
+        outs () << "    [";
+        for (auto & chcNum : c) outs () << chcNum << " -> ";
+        outs () << "]\n";
+      }
+      return (cycles.size() > 0);
+    }
+
+    void findCycles(int chcNum, vector<int> vec)
+    {
+      Expr srcRel = chcs[chcNum].srcRelation;
+      Expr dstRel = chcs[chcNum].dstRelation;
+      bool res = false;
+      for (int i = 0; i < vec.size(); i++)
+      {
+        auto c = vec[i];
+        bool newCycle = (chcs[c].srcRelation == srcRel);
+        // TODO: some cycles can be redundant
+        if (newCycle)
+        {
+          cycles.push_back(vector<int>());
+          prefixes.push_back(vector<int>());
+          for (int j = 0; j < i; j++) prefixes.back().push_back(vec[j]);
+          res = true;
+        }
+        if (res)
+        {
+          cycles.back().push_back(c);
+        }
+      }
+
+      if (! res)
+      {
+        vec.push_back(chcNum);
+
+        for (auto & i : incms[dstRel])
+        {
+          if (chcs[i].dstRelation == failDecl) continue;
+          bool newRel = true;
+          for (auto & c : cycles)
+          {
+            if (c[0] == i)
+            {
+              newRel = false;
+              break;
+            }
+          }
+          if (newRel) findCycles(i, vec);
+        }
+      }
+    }
+
+    void getCycleForRel(Expr rel, vector<int>& cycle)
+    {
+      for (auto & c : cycles)
+      {
+        if (chcs[c[0]].srcRelation == rel)
+        {
+          cycle.insert(std::end(cycle), c.begin(), c.end());
+          return;
+        }
+      }
+    }
+
+    HornRuleExt* getNestedRel (Expr rel)
+    {
+      vector<int> cycle;
+      getCycleForRel(rel, cycle);
+      if (cycle.size() > 0 && !chcs[cycle[0]].isInductive)
+        return &chcs[cycle[0]];
+      else
+        return NULL;
+    }
+
+    HornRuleExt* getFirstRuleOutside (Expr rel)
+    {
+      for (auto & c : cycles)
+      {
+        if (chcs[c[0]].srcRelation == rel)
+        {
+          for (auto & a : incms[rel])
+          {
+            if (a != c.back()) return &chcs[a];
+          }
+        }
+      }
+      return NULL;
     }
 
     void print()
