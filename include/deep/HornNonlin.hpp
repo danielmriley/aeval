@@ -74,7 +74,7 @@ namespace ufo
   {
     private:
     set<int> indeces;
-    string varname = "_FH_";
+    string varname = "ST_";
 
     public:
 
@@ -89,6 +89,7 @@ namespace ufo
     int qCHCNum;  // index of the query in chc
     int total_var_cnt = 0;
     string infile;
+    bool hasQuery = false;
 
     CHCs(ExprFactory &efac, EZ3 &z3) : m_efac(efac), m_z3(z3) {};
 
@@ -166,6 +167,59 @@ namespace ufo
           }
           invVars[a->arg(0)].push_back(var);
         }
+      }
+    }
+
+    void replaceRule(HornRuleExt* hr)
+    {
+      vector<HornRuleExt> chcsOld = chcs;
+      chcs.clear();
+      if(hr->isFact) {
+        addRule(hr);
+        if(chcsOld.size() >= 2) chcs.push_back(chcsOld[1]);
+        if(chcsOld.size() >= 3) chcs.push_back(chcsOld[2]);
+      }
+      else if(hr->isInductive) {
+        if(chcsOld.size() >= 1) chcs.push_back(chcsOld[0]);
+        addRule(hr);
+        if(chcsOld.size() >= 3) chcs.push_back(chcsOld[2]);
+      }
+      else if(hr->isQuery) {
+        if(chcsOld.size() >= 1) chcs.push_back(chcsOld[0]);
+        if(chcsOld.size() >= 2) chcs.push_back(chcsOld[1]);
+        addRule(hr);
+      }
+    }
+
+    void addRule (HornRuleExt* r)
+    {
+      chcs.push_back(*r);
+      for(int i = 0; i < r->srcRelations.size(); i++) {
+        Expr srcRel = r->srcRelations[i];
+        if (!isOpX<TRUE>(srcRel))
+        {
+          if (invVars[srcRel].size() == 0)
+          {
+            addDeclAndVars(srcRel, r->srcVars[i]);
+          }
+        }
+        incms[srcRel].push_back(chcs.size()-1);
+      }
+    }
+
+    void addDeclAndVars(Expr rel, ExprVector& args)
+    {
+      ExprVector types;
+      for (auto &var: args) {
+        types.push_back (bind::typeOf (var));
+      }
+      types.push_back (mk<BOOL_TY> (m_efac));
+
+      //addDecl(bind::fdecl (rel, types));
+      decls.insert(bind::fdecl (rel, types));
+      for (auto & v : args)
+      {
+        invVars[rel].push_back(v);
       }
     }
 
@@ -278,7 +332,10 @@ namespace ufo
 
         hr.isQuery = (hr.dstRelation == failDecl);
         hr.isInductive = (hr.srcRelations.size() == 1 && hr.srcRelations[0] == hr.dstRelation);
-        if (hr.isQuery) qCHCNum = chcs.size() - 1;
+        if (hr.isQuery) {
+          hasQuery = true;
+          qCHCNum = chcs.size() - 1;
+        }
 
         ExprVector allOrigSymbs;
         for (auto & a : origSrcSymbs) for (auto & b : a) allOrigSymbs.push_back(b);
@@ -337,7 +394,7 @@ namespace ufo
         incms[chcs[i].dstRelation].push_back(i);
     }
 
-    
+
     void addFailDecl(Expr decl)
     {
       if (failDecl == NULL)
@@ -352,6 +409,34 @@ namespace ufo
           exit(0);
         }
       }
+    }
+
+    Expr getPrecondition (Expr decl)
+    {
+      HornRuleExt* hr;
+      Expr srcRel;
+      for(auto& a: chcs)
+      {
+        for(auto& e: a.srcRelations) {
+          srcRel = e;
+          if(srcRel != NULL) break;
+        }
+        if(srcRel != NULL) break;
+      }
+
+      for (auto &a : chcs)
+        if (srcRel == decl->left() && a.dstRelation == decl->left()) {
+          hr = &a;
+        }
+
+      ExprSet cnjs;
+      ExprSet newCnjs;
+      getConj(hr->body, cnjs);
+      for (auto &a : cnjs)
+      {
+        if (emptyIntersect(a, hr->dstVars) && emptyIntersect(a, hr->locVars)) newCnjs.insert(a);
+      }
+      return conjoin(newCnjs, m_efac);
     }
 
     Expr getPostcondition (int i)

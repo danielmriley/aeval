@@ -1,1 +1,1 @@
-add_subdirectory(nonlin)
+add_subdirectory(spec)

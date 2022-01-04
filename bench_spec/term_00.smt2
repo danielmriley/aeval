@@ -10,7 +10,7 @@
 
 (rule (=> (and
             (> x 0)
-            (f i x)
+            (f x i)
           )
           (inv x i)))
 

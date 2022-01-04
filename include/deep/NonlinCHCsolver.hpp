@@ -33,7 +33,7 @@ namespace ufo
   }
 
   enum class Result_t {SAT=0, UNSAT, UNKNOWN};
-  
+
   class NonlinCHCsolver
   {
     private:
@@ -49,15 +49,182 @@ namespace ufo
     map<HornRuleExt*, vector<ExprVector>> abdHistory;
     int globalIter = 0;
     int strenBound;
-    bool debug = false;
+    int debug = 0;
     map<Expr, Expr> extend;
     ExprVector fixedRels;
     map<Expr, vector<int> > reachChcs;
     string SYGUS_BIN;
 
+    HornRuleExt* tr;
+    HornRuleExt* fc;
+    HornRuleExt* qr;
+
+    Expr invDecl;
+    ExprVector invVars;
+    ExprVector invVarsPr;
+    int invVarsSz;
+
+    string specName = "f";
+    string varName = "ST_";
+    string ghostVar_pref = "gh_";
+    Expr specExpr;
+    ExprVector ghostVars;
+    ExprVector ghostVarsPr;
+    Expr decGhost0;
+    Expr decGhost1;
+    Expr ghost0Minus1;
+    Expr ghost1Minus1;
+    Expr ghostAss;
+    Expr ghostGuard;
+    Expr ghostGuardPr;
+    Expr loopGuard;
+    Expr loopGuardPr;
+
     public:
 
-    NonlinCHCsolver (CHCs& r, int _b) : m_efac(r.m_efac), ruleManager(r), u(m_efac), strenBound(_b), SYGUS_BIN("") {}
+    NonlinCHCsolver (CHCs& r, int _b, int dbg = 0) : m_efac(r.m_efac), ruleManager(r), u(m_efac), strenBound(_b), SYGUS_BIN(""), debug(dbg) {}
+
+    bool setUpCounters()
+    {
+      for (int i = 0; i < 2; i++)
+      {
+        Expr new_name = mkTerm<string> (ghostVar_pref + to_string(i), m_efac);
+        Expr var = bind::intConst(new_name);
+        ghostVars.push_back(var);
+
+        new_name = mkTerm<string> (ghostVar_pref + to_string(i) + "'", m_efac);
+        var = bind::intConst(new_name);
+        ghostVarsPr.push_back(var);
+      }
+
+      ghost0Minus1 = mk<MINUS>(ghostVars[0], mkTerm (mpz_class (1), m_efac));
+      ghost1Minus1 = mk<MINUS>(ghostVars[1], mkTerm (mpz_class (1), m_efac));
+      decGhost0 = mk<EQ>(ghostVarsPr[0], ghost0Minus1);
+      decGhost1 = mk<EQ>(ghostVarsPr[1], ghost1Minus1);
+      ghostAss = mk<LT>(ghostVars[0], mkTerm (mpz_class (0), m_efac));
+      ghostGuard = mk<EQ>(ghostVars[0], mkTerm (mpz_class (0), m_efac));
+      ghostGuardPr = mk<EQ>(ghostVarsPr[0], mkTerm (mpz_class (0), m_efac));
+
+      return true;
+    }
+
+    void specUpFc()
+    {
+      HornRuleExt* fc_new = new HornRuleExt();
+      fc_new->srcRelations = fc->srcRelations;
+      fc_new->srcRelations.push_back(specExpr);
+      fc_new->srcVars = fc->srcVars;
+      fc_new->dstRelation = fc->dstRelation;
+      fc_new->dstVars = fc->dstVars;
+      fc_new->dstVars.push_back(ghostVarsPr[0]);
+      fc_new->head = bind::boolConstDecl(fc_new->dstRelation);
+      fc_new->isFact = true;
+      ExprVector specVars;
+      ExprVector specVarsPr;
+      for(int i = 0; i < invVars.size(); i++) {
+        specVars.push_back(bind::intConst(mkTerm<string>(varName + to_string(i + invVars.size()), m_efac)));
+        specVarsPr.push_back(bind::intConst(mkTerm<string>(varName + to_string(i + invVars.size()) + "'", m_efac)));
+      }
+      fc_new->srcVars.push_back(specVars);
+
+      ExprSet fc_body;
+      for(int i = 0; i < specVars.size(); i++) {
+        fc_body.insert(mk<EQ>(specVars[i], invVarsPr[i]));
+      }
+      fc_body.insert(replaceAll(fc->body, invVarsPr, specVars));
+      fc_body.insert(mk<EQ>(ghostVars[1], ghostVarsPr[0]));
+      fc_new->body = conjoin(fc_body, m_efac);
+      for(auto& v: fc_new->srcVars) {
+        v.push_back(ghostVars[1]);
+      }
+      ruleManager.replaceRule(fc_new);
+
+      for (auto & a : ruleManager.chcs)       // r.chcs changed by r.addRule, so pointers to its elements are broken
+        if (a.isInductive) tr = &a;
+        else if (a.isFact) fc = &a;
+    }
+
+    void setUpTr() // NEED TO RESET INV DECL
+    {
+      HornRuleExt* tr_new = new HornRuleExt();
+      tr_new->srcRelations = tr->srcRelations;
+      for(auto& s: tr_new->srcRelations) ruleManager.invVars[s].clear();
+      tr_new->srcVars = tr->srcVars;
+      for(auto& sv: tr_new->srcVars) {
+        sv.push_back(ghostVars[0]);
+      }
+      tr_new->dstRelation = tr->dstRelation;
+      tr_new->dstVars = tr->dstVars;
+      tr_new->dstVars.push_back(ghostVarsPr[0]);
+      tr_new->head = bind::boolConstDecl(tr_new->dstRelation);
+      tr_new->isInductive = true;
+
+      ExprSet tmp;
+      getConj(tr->body, tmp);
+      tmp.insert(decGhost0);
+      tr_new->body = conjoin(tmp, m_efac);
+      ruleManager.replaceRule(tr_new);
+
+    }
+
+    void setUpQr()
+    {
+      qr = new HornRuleExt();
+      qr->srcRelations = tr->srcRelations;
+      qr->srcVars = tr->srcVars;
+      qr->body = mk<AND>(loopGuard, ghostGuard);
+      qr->dstRelation = mkTerm<string> ("err", m_efac);
+      qr->head = bind::boolConstDecl(qr->dstRelation);
+      qr->isQuery = true;
+      ruleManager.hasQuery = true;
+
+      ruleManager.addFailDecl(qr->dstRelation);
+      ruleManager.replaceRule(qr);
+
+      for (auto & a : ruleManager.chcs)       // r.chcs changed by r.addRule, so pointers to its elements are broken
+        if (a.isInductive) tr = &a;
+        else if (a.isFact) fc = &a;
+    }
+
+    bool setUpQueryAndSpec()
+    {
+      setUpCounters();
+      specExpr = mkTerm<string>(specName, m_efac);
+
+      for (auto & a : ruleManager.chcs)
+        if (a.isInductive) tr = &a;
+        else if (a.isFact) fc = &a;
+        else if (a.isQuery) qr = &a;
+
+      invDecl = tr->srcRelations[0];
+      invVars = tr->srcVars[0];
+      invVarsPr = tr->dstVars;
+      invVarsSz = invVars.size();
+      
+      if (tr == NULL)
+      {
+        outs() << "TR is missing\n";
+        exit(0);
+      }
+
+      if (fc == NULL)
+      {
+        outs() << "INIT is missing\n";
+        exit(0);
+      }
+      loopGuard = ruleManager.getPrecondition(*ruleManager.decls.begin());
+      loopGuardPr = replaceAll(loopGuard, invVars, invVarsPr);
+      ruleManager.decls.clear();
+
+      //fc
+      specUpFc();
+      setUpTr();
+      setUpQr();
+
+      if(debug) ruleManager.print();
+
+      return true;
+    }
 
     bool checkAllOver (bool checkQuery = false)
     {
@@ -178,7 +345,7 @@ namespace ufo
 
     bool isFixedRel(const Expr & rel)
     {
-      return find(fixedRels.begin(), fixedRels.end(), rel) != fixedRels.end(); 
+      return find(fixedRels.begin(), fixedRels.end(), rel) != fixedRels.end();
     }
 
     void addFixedRel(Expr rel)
@@ -407,7 +574,7 @@ namespace ufo
               if (numTrueCands > 0 && !trueCands[i]) continue;
               if (isFixedRel(rels[i])) continue;
               Expr r = rels[i];
-	      
+
 	      // Expr modelphi = conjoin(curCnd, m_efac);
 
 	      // if (rels.size() == 1) {
@@ -423,7 +590,7 @@ namespace ufo
 	      // }
 
               if (!u.isSat(a, conjoin(curCnd, m_efac))) return; // need to recheck because the solver has been reset
-		
+
               if (processed.find(r) != processed.end()) continue;
 
               invVars.clear();
@@ -456,7 +623,7 @@ namespace ufo
 	      // 	outs() << "allvarsexcept: " << *v << "\n";
 	      // for (auto a : all)
 		// outs() << "all: " << *a << "\n";//DEBUG
-	      
+
               // in the case of nonlin, invVars is empty, so no renaming happens:
 
               preproGuessing(conjoin(all, m_efac), vars, invVars, backGuesses, true, false);
@@ -845,7 +1012,7 @@ namespace ufo
             u.splitUnsatSets(finalExpr, t1, t2);
             for (int i = 0; i < hr.srcRelations.size(); i++) {
               Expr rel = hr.srcRelations[i];
-              
+
               for (auto itr =  annotations[rel].begin(); itr != annotations[rel].end();) {
                 Expr c = replaceAll(*itr, hr.srcVars[i], ruleManager.invVars[rel]);
                 if (find(t1.begin(), t1.end(), c) == t1.end()) {
@@ -1369,7 +1536,7 @@ namespace ufo
       sanitizeForDump(ds);
       sanitizeForDump(rs);
 
-      ofstream newsmtFile(newsmt);      
+      ofstream newsmtFile(newsmt);
       newsmtFile << ds << "\n" << rs << "\n";
       newsmtFile.close();
 
@@ -1481,7 +1648,7 @@ namespace ufo
     }
 
     Result_t checkMaximalSMT(ExprVector & weakenRels, ExprVector & fixedRels, map<Expr, Expr> & soln, ExprVector rels = ExprVector())
-    {            
+    {
       map<Expr, ExprVector> newVars;
       map<Expr, ExprVector> newVarsp;
       map<Expr, Expr> newCand;
@@ -1583,7 +1750,7 @@ namespace ufo
             forallArgs.push_back(v->left());
             allVars.insert(v);
           }
-          
+
           for (auto nv : newVars[hr.srcRelations[i]]) {
             // existsArgs.push_back(nv->left());
             allVars.insert(nv);
@@ -1630,7 +1797,7 @@ namespace ufo
       } else if (!res) {
         //	outs() << "result is us!\n";//DEBUG
         return Result_t::UNSAT;
-      } 
+      }
 
       //debug
       // u.printModel();
@@ -1645,7 +1812,7 @@ namespace ufo
         Expr weakerSoln = mk<OR>(conjoin(candidates[rel],m_efac), replaceAll(model, newVars[rel], ruleManager.invVars[rel]));
         soln.insert({rel, weakerSoln});
         // outs() << "weakersoln: " << *weakerSoln << "\n";//DEBUG
-      }	
+      }
 
       for (auto d : ruleManager.decls) {
         if (find(rels.begin(), rels.end(), d->left()) != rels.end()) continue;
@@ -1695,10 +1862,10 @@ namespace ufo
       return retRels;
     }
 
-    // Adds two new rules in addition to the rules present in 'oldsmt': 
+    // Adds two new rules in addition to the rules present in 'oldsmt':
     // 1) candidate[rel](invVars[rel]) => rel(invVars[rel])
     // 2) ~candidate[rel](invVars[rel]) /\ tmprel(invVars[rel]) => rel(invVars[rel])
-    // returns the name of the file where new rules are present 
+    // returns the name of the file where new rules are present
     string constructWeakeningRules(const ExprVector & weakenRels, const ExprVector & fixedRels)
     {
       stringstream newRules;
@@ -2073,7 +2240,7 @@ namespace ufo
         try {
           Expr funcAsserts = z3_from_smtlib(z3, smtstream.str());
           soln.insert({rel, replaceAll(funcAsserts, syvars[rel], ruleManager.invVars[rel])});
-          
+
         } catch (z3::exception &e){
           char str[3000];
           strncpy(str, e.msg(), 300);
@@ -2102,11 +2269,11 @@ namespace ufo
       if (res == Result_t::SAT) {
       	// outs() << "sygus proved s\n";
       	for (auto e : soln) {
-      	  if (find (fixedRels.begin(), fixedRels.end(), e.first) == fixedRels.end()) {	    
+      	  if (find (fixedRels.begin(), fixedRels.end(), e.first) == fixedRels.end()) {
       	      candidates[e.first].clear();
       	      candidates[e.first].insert(e.second);
       	  }
-      	}	
+      	}
       }
 
       //flip the result as caller expects unsat first time; argh!
@@ -2204,7 +2371,7 @@ namespace ufo
         ExprVector fixedRels = !firstSMTCall && fixCRels ? vecDiff(allRels, rels) : ExprVector() ;
         map<Expr, Expr> smtSoln;
 
-      //  outs() << "current iteration: "<< itr << "\n";
+        outs() << "current iteration: "<< itr << "\n";
 
         maxRes = firstSMTCall ? checkMaximalSMT(weakenRels, fixedRels, smtSoln) : checkMaximalSMT(weakenRels, fixedRels, smtSoln, rels);
         itr++;
@@ -2415,26 +2582,30 @@ namespace ufo
     }
   };
 
-  inline void solveNonlin(string smt, int inv, int stren, bool maximal, const vector<string> & relsOrder, bool useGAS, bool usesygus, bool useUC, bool newenc, bool fixCRels, string syguspath)
+  inline void solveNonlin(string smt, int inv, int stren, bool maximal, const vector<string> & relsOrder, bool useGAS, bool usesygus, bool useUC, bool newenc, bool fixCRels, string syguspath, int debug = 0)
   {
     ExprFactory m_efac;
     EZ3 z3(m_efac);
     CHCs ruleManager(m_efac, z3);
     ruleManager.parse(smt);
-    NonlinCHCsolver nonlin(ruleManager, stren);
+    NonlinCHCsolver spec(ruleManager, stren, debug);
 
+    if(!ruleManager.hasQuery) {
+      //ruleManager.print();
+      spec.setUpQueryAndSpec();
+    }
     if (usesygus) {
-      nonlin.setSygusPath(syguspath);
+      spec.setSygusPath(syguspath);
     }
 
     if (inv == 0) {
       if (maximal) {
-        nonlin.maximalSolve(useGAS, usesygus, useUC, fixCRels);
+        spec.maximalSolve(useGAS, usesygus, useUC, fixCRels);
       } else {
-        nonlin.nonmaximalSolve(useGAS, usesygus);
+        spec.nonmaximalSolve(useGAS, usesygus);
       }
     } else {
-      nonlin.solveIncrementally(inv);
+      spec.solveIncrementally(inv);
     }
   };
 }
