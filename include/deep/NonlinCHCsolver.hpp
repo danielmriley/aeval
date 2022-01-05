@@ -40,6 +40,7 @@ namespace ufo
     private:
 
     ExprFactory &m_efac;
+    EZ3 z3;
     SMTUtils u;
     CHCs& ruleManager;
     int varCnt = 0;
@@ -47,6 +48,7 @@ namespace ufo
     map<Expr, ExprSet> candidates;
     bool hasArrays = false;
     ExprSet declsVisited;
+    ExprVector decls;
     map<HornRuleExt*, vector<ExprVector>> abdHistory;
     int globalIter = 0;
     int strenBound;
@@ -80,10 +82,24 @@ namespace ufo
     Expr ghostGuardPr;
     Expr loopGuard;
     Expr loopGuardPr;
+    ExprSet bounds;
 
     public:
 
-    NonlinCHCsolver (CHCs& r, int _b, int dbg = 0) : m_efac(r.m_efac), ruleManager(r), u(m_efac), strenBound(_b), SYGUS_BIN(""), debug(dbg) {}
+    NonlinCHCsolver (CHCs& r, int _b, int dbg = 0) : m_efac(r.m_efac), ruleManager(r), u(m_efac), strenBound(_b), SYGUS_BIN(""), z3(m_efac), debug(dbg)
+    {
+      for (auto & a : ruleManager.chcs)
+        if (a.isInductive) tr = &a;
+        else if (a.isFact) fc = &a;
+        else if (a.isQuery) qr = &a;
+
+      for(auto& dcl: ruleManager.decls) decls.push_back(dcl->left());
+      invDecl = ruleManager.invRel;
+      outs() << "invDecl constructor: " << invDecl << "\n";
+      invVars = tr->srcVars[0];
+      invVarsPr = tr->dstVars;
+      invVarsSz = invVars.size();
+    }
 
     bool setUpCounters()
     {
@@ -228,6 +244,248 @@ namespace ufo
       if(debug) ruleManager.print();
 
       return true;
+    }
+
+    void mutateHeuristicEq(ExprSet& src, ExprSet& dst, Expr dcl, bool toProp)
+    {
+      int invNum = getVarIndex(dcl, decls);
+      ExprSet src2;
+      map<Expr, ExprVector> substs;
+      Expr (*ops[])(Expr, Expr) = {mk<PLUS>, mk<MINUS>};        // operators used in the mutations
+
+      for (auto a1 = src.begin(); a1 != src.end(); ++a1)
+        if (isNumericEq(*a1))
+        {
+          for (auto a2 = std::next(a1); a2 != src.end(); ++a2)    // create various combinations
+            if (isNumericEq(*a2))
+            {
+              const ExprVector m1[] = {{(*a1)->left(), (*a2)->left()}, {(*a1)->left(), (*a2)->right()}};
+              const ExprVector m2[] = {{(*a1)->right(), (*a2)->right()}, {(*a1)->right(), (*a2)->left()}};
+              for (int i : {0, 1})
+                for (Expr (*op) (Expr, Expr) : ops)
+                  src2.insert(simplifyArithm(normalize(
+                    mk<EQ>((*op)(m1[i][0], m1[i][1]), (*op)(m2[i][0], m2[i][1])))));
+            }
+
+          // before pushing them to the cand set, we do some small mutations to get rid of specific consts
+          Expr a = simplifyArithm(normalize(*a1));
+          if (isOpX<EQ>(a) && isIntConst(a->left()) &&
+              isNumericConst(a->right()) && lexical_cast<string>(a->right()) != "0")
+            substs[a->right()].push_back(a->left());
+          src2.insert(a);
+        }
+
+      bool printedAny = false;
+      if (debug >= 2) outs () << "Mutated candidates:\n";
+      for (auto a : src2)
+        if (!u.isFalse(a) && !u.isTrue(a))
+        {
+          if (debug >= 2) { outs () << "  " << a << "\n"; printedAny = true; }
+
+          if (containsOp<ARRAY_TY>(a)) {}
+//            arrCands[invNum].insert(a);
+          else
+            dst.insert(a);
+
+          if (isNumericConst(a->right()))
+          {
+            cpp_int i1 = lexical_cast<cpp_int>(a->right());
+            for (auto b : substs)
+            {
+              cpp_int i2 = lexical_cast<cpp_int>(b.first);
+
+              if (i1 % i2 == 0 && i1/i2 != 0)
+                for (auto c : b.second)
+                {
+                  Expr e = simplifyArithm(normalize(mk<EQ>(a->left(), mk<MULT>(mkMPZ(i1/i2, m_efac), c))));
+                  if (!u.isSat(mk<NEG>(e))) continue;
+                  if (containsOp<ARRAY_TY>(e)) {}
+//                    arrCands[invNum].insert(e);
+                  else
+                    dst.insert(e);
+
+                  if (debug >= 2) { outs () << "  " << e << "\n"; printedAny = true; }
+                }
+            }
+          }
+        }
+      if (debug >= 2 && !printedAny) outs () << "  none\n";
+    }
+
+
+    void filterNonGhExp(ExprSet& candSet)
+    {
+      for(auto i = candSet.begin(); i != candSet.end(); ) {
+        if(!contains(*i, ghostVars[0])) {
+          i = candSet.erase(i);
+        }
+        else i++;
+      }
+    }
+    void dataForBound(map<Expr, ExprSet>& candMap, Expr block) {
+      //if(debug >= 2)
+        outs() << "USING DATA\n";
+      Expr splitter = mk<TRUE>(m_efac);
+      Expr invs = mk<TRUE>(m_efac);
+      Expr srcRel = ruleManager.invRel;
+      Expr model;
+      Expr preCond;
+      map<Expr, ExprSet> poly;
+      DataLearner dl(ruleManager, z3, true);
+
+      for(auto hr : ruleManager.chcs) {
+        if(hr.isInductive) preCond = ruleManager.getPrecondition(&hr);
+      }
+
+      ruleManager.print();
+
+      if(invs == NULL) {outs() << "RETURNING\n"; return;}
+
+      outs() << "\n    srcRel: " << srcRel << "\n";
+      outs() << "    preCond: " << preCond << "\n";
+      outs() << "    invs: " << invs << "\n";
+      outs() << "    block: " << block << "\n";
+
+      for (auto & dcl : decls) {
+        outs() << "dcl: " << dcl << "\n";
+        if (srcRel == dcl)
+        {
+          if(debug >= 2) outs() << "Compute Data\n";
+          dl.computeDataTerm(srcRel, block, invs, preCond);
+          dl.computePolynomials(dcl, poly[dcl]);
+          //for (auto & a : dl.getConcrInvs(dcl)) {
+            //outs() << "Concrete INV: " << a << "\n";
+            //candMap[dcl].insert(a);
+          //}
+          break;
+        }
+      }
+
+      // mutations after all
+      for (auto & p : poly)
+      {
+        if (ruleManager.hasArrays)   // heuristic to remove cands irrelevant to counters and arrays
+        {
+          /*
+          ExprSet its;
+          int invNum = getVarIndex(p.first, ruleManager.decls);
+          for (auto q : qvits[invNum]) its.insert(q->iter);
+          for (auto it = p.second.begin(); it != p.second.end();)
+            if (emptyIntersect(simplifyArithm(*it), its))
+              it = p.second.erase(it);
+            else
+              ++it;
+          */
+        }
+        mutateHeuristicEq(p.second, candMap[p.first], p.first, (splitter == NULL));
+      }
+    }
+
+    void filterDuplicates(ExprSet& setOne, ExprSet& setTwo)
+    {
+      for(auto one = setOne.begin(); one != setOne.end(); ) {
+        for(auto two = setTwo.begin(); two != setTwo.end(); ) {
+          if(contains(*one, *two)) {
+            two = setTwo.erase(two);
+          }
+          else two++;
+        }
+      }
+    }
+
+    boost::tribool exploreBounds(map<Expr, ExprSet>& ghCandMap,
+                                Expr assertBounds, Expr block)
+    {
+      boost::tribool res = true;
+
+      block = mkNeg(block);
+      if(block == mk<FALSE>(m_efac)) return false;
+
+      map<Expr, ExprSet> ghBoundMap;
+
+      dataForBound(ghCandMap, block);
+      filterNonGhExp(ghCandMap[invDecl]);
+
+      for(auto& e : ghCandMap[invDecl]) { // print bounds found
+        outs() << "    GH_CAND FROM DATA: " << e << "\n";
+      }
+      ExprSet conjs;
+      getConj(assertBounds, conjs);
+      if(block != mk<TRUE>(m_efac)) conjs.insert(mkNeg(block));
+      for(auto& e : ghCandMap[invDecl]) {
+        conjs.insert(e);
+        Expr check = conjoin(conjs, m_efac);
+        //outs() << "CHECK:\n";
+        //pprint(check);
+        res = u.isSat(check);
+        if(!res) {
+          if(u.isTrue(block))
+            bounds.insert(mkNeg(block));
+          if(!u.isFalse(e))
+            bounds.insert(e);
+          break;
+        }
+        conjs.erase(e);
+
+      }
+
+      if(!res) return res;
+
+      for(auto& e: ghCandMap[invDecl]) {
+        res = exploreBounds(ghBoundMap, assertBounds, e);
+        if(!res) break;
+      }
+      return res;
+
+    }
+
+    boost::tribool exploreBounds(map<Expr, ExprSet>& ghCandMap)
+    {
+      boost::tribool res;
+      Expr block = mk<FALSE>(m_efac);
+
+      Expr assertBounds;
+//      for(auto& hr : ruleManager->chcs) {
+//        if(hr.isInductive) {
+          assertBounds = fc->body;
+//        }
+//      }
+      assertBounds = mk<AND>(assertBounds, mkNeg(loopGuardPr));
+      assertBounds = mk<AND>(assertBounds, ghostGuardPr);
+      //outs() << "Assertion to check:\n";
+      //pprint(assertBounds);
+      exploreBounds(ghCandMap, assertBounds, block);
+
+
+      /*
+      map<Expr, ExprSet> ghBoundMap;
+      ExprSet boundSet;
+      //ds.dataForBound(ghCandMap, block);
+      //filterNonGhExp(ghCandMap[invDecl]);
+
+      int count = 0;
+      for(auto& b: ghCandMap[invDecl]) {
+        Expr blk = b;
+        count++;
+        exploreBounds(ghBoundMap, ds, blk);
+        //filterDuplicates(ghCandMap[invDecl], ghBoundMap[invDecl]);
+
+        for(auto& e: ghBoundMap[invDecl]) {
+          for(auto& bb: ghCandMap[invDecl]) {
+             outs() << "Comparing:\n    " << e << " == " << bb << "  ?\n";
+            if(u.isEquiv(e, bb)) {
+              boundSet.insert(bb);
+              break;
+            }
+          }
+        }
+      }
+      */
+      for(auto& e: bounds) outs() << "BOUND: " << e << "\n";
+      //outs() << "count: " << count << "\n";
+      //exit(0);
+      return res;
+
     }
 
     bool checkAllOver (bool checkQuery = false)
@@ -811,7 +1069,7 @@ namespace ufo
     void forceConvergence (ExprSet& prev, ExprSet& next)
     {
       if (prev.size() < 1 || next.size() < 1) return;
-      ExprFactory& efac = (*next.begin())->getFactory();
+      ExprFactory& m_efac = (*next.begin())->getFactory();
 
       ExprSet prevSplit, nextSplit, prevSplitDisj, nextSplitDisj, common;
 
@@ -833,7 +1091,7 @@ namespace ufo
 
       if (common.empty()) return;
       next.clear();
-      next.insert(disjoin(common, efac));
+      next.insert(disjoin(common, m_efac));
     }
 
     bool equivVecs (ExprVector e1, ExprVector e2)
@@ -1422,7 +1680,14 @@ namespace ufo
       }
 
       // Add data candidates here.
+      map<Expr, ExprSet> ghCandMap;
+      exploreBounds(ghCandMap);
 
+      for(auto& e : ghCandMap[invDecl]) { // print bounds found
+        outs() << "    GH_CAND FROM DATA: " << e << "\n";
+      }
+
+      exit(0);
 
       while (true)
       {

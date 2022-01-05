@@ -107,6 +107,16 @@ namespace ufo
     return typeOf(a) == mk<INT_TY>(a->getFactory());
   }
 
+  inline static bool isNumericEq(Expr a)
+  {
+    return isOpX<EQ>(a) && isNumeric(a->left());
+  }
+
+  inline static bool isNumericConst(Expr e)
+  {
+    return isOpX<MPZ>(e) || isOpX<MPQ>(e);
+  }
+
   inline static void findComplexNumerics (Expr a, ExprSet &terms)
   {
     if (isIntConst(a) || isOpX<MPZ>(a)) return;
@@ -1445,11 +1455,6 @@ namespace ufo
       if (find(v2.begin(), v2.end(), *it) == v2.end())
         return false;
     return true;
-  }
-
-  inline static bool isNumericConst(Expr e)
-  {
-    return isOpX<MPZ>(e) || isOpX<MPQ>(e);
   }
 
   template <typename T, typename R> static int getVarIndex(T e, R& vec)
@@ -3818,6 +3823,39 @@ namespace ufo
     return exp;
   }
 
+  template<typename Range> static Expr weakenForVars(Expr fla, Range& vars)
+  {
+    ExprSet cnj;
+    getConj(fla, cnj);
+//    ineqMerger(cnj, true);
+
+    for (auto it = cnj.begin(); it != cnj.end(); )
+    {
+      ExprVector av;
+      filter (*it, bind::IsConst (), inserter(av, av.begin()));
+      map<Expr, ExprVector> qv;
+      getQVars (*it, qv);
+      for (auto & a : qv)
+        for (auto & b : a.second)
+          for (auto it1 = av.begin(); it1 != av.end(); )
+            if (*it1 == b) {
+              it1 = av.erase(it1); break; }
+            else ++it1;
+
+      if (emptyIntersect(av, vars)) ++it;
+      else it = cnj.erase(it);
+    }
+    return simplifyBool(conjoin(cnj, fla->getFactory()));
+  }
+
+  template<typename Range> static Expr weakenForHardVars(Expr fla, Range& vars)
+  {
+    ExprSet qVars;
+    filter (fla, bind::IsConst (), inserter (qVars, qVars.begin()));
+    minusSets(qVars, vars);
+    return weakenForVars(fla, qVars);
+  }
+
   inline static bool evalLeq(Expr a, Expr b)
   {
     if (isOpX<MPZ>(a) && isOpX<MPZ>(b))
@@ -4036,4 +4074,3 @@ namespace ufo
 }
 
 #endif
-

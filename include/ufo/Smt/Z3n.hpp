@@ -19,8 +19,8 @@ DM-0002198
 #ifndef __UFO_Z3N_HPP_
 #define __UFO_Z3N_HPP_
 /**
-   New Z3 interface based of Z3 v4. 
-   
+   New Z3 interface based of Z3 v4.
+
  */
 
 #include "z3.h"
@@ -54,7 +54,7 @@ namespace z3
       return hasher (static_cast<Z3_ast> (ast));
     }
   };
-  
+
   struct ast_ptr_equal_to : public std::binary_function<ast,ast,bool>
   {
     bool operator() (const ast &a1, const ast &a2) const
@@ -88,7 +88,7 @@ namespace z3
         void insert (ast const &k, ast const &v) { Z3_ast_map_insert(ctx(), m_map, k, v); check_error(); };
         ast find (ast const &k) { Z3_ast res = Z3_ast_map_find(ctx(), m_map, k); check_error(); return ast (ctx (), res); };
         ast_vector get_keys() { Z3_ast_vector res =  Z3_ast_map_keys(ctx(), m_map); check_error(); return ast_vector (ctx (), res); };
-        
+
         friend std::ostream & operator<<(std::ostream & out, ast_map const & v) { out << Z3_ast_map_to_string(v.ctx(), v); return out; }
     };
 }
@@ -217,9 +217,9 @@ namespace ufo
         pinned.push_back (a);
         bound.push_back (Z3_to_app (ctx, a));
         assert (a.kind () == Z3_APP_AST);
-        
+
         z3::ast_map emap (ctx);
-        
+
         z3::ast res (ctx,
                      Z3_qe_model_project_skolem (ctx, model.get_model (), bound.size (),
                                                  &bound [0], b, emap));
@@ -354,7 +354,7 @@ namespace ufo
     friend class ZSolver<this_type>;
     friend class ZModel<this_type>;
     friend class ZFixedPoint<this_type>;
-      
+
     friend Expr z3_qe_model_project_skolem<this_type, this_model_type>
             (this_type &z3, this_model_type &model, Expr v, Expr body, ExprMap &map);
     friend Expr z3_lite_simplify<this_type> (this_type &z3, Expr e);
@@ -384,7 +384,7 @@ namespace ufo
     bool isAsArray (const z3::ast &v)
     {
       if (v.kind () != Z3_APP_AST) return false;
-      
+
       Z3_app app = Z3_to_app (ctx, v);
       Z3_func_decl fdecl = Z3_get_app_decl (ctx, app);
       return Z3_get_decl_kind (ctx, fdecl) == Z3_OP_AS_ARRAY;
@@ -436,7 +436,7 @@ namespace ufo
 
     this_type &operator= (this_type other)
     {swap (*this, other); return *this;}
-      
+
     Z3_model &get_model () { return model; }
 
     friend void swap (this_type &src, this_type &dst)
@@ -446,7 +446,7 @@ namespace ufo
       swap (src.model, dst.model);
     }
 
-    
+
     Expr eval (Expr e, bool completion = false)
     {
       assert (model);
@@ -458,8 +458,8 @@ namespace ufo
         z3::ast val (ctx, raw_val);
         ctx.check_error ();
         if (!isAsArray (val)) return z3.toExpr (val);
-          
-          
+
+
         Z3_func_decl fdecl = Z3_get_as_array_func_decl (ctx, val);
         z3::func_interp zfunc (ctx, Z3_model_get_func_interp (ctx, model, fdecl));
         ctx.check_error ();
@@ -655,6 +655,12 @@ namespace ufo
       return ZModel<Z> (z3, m);
     }
 
+    ZSolver<Z>::Model* getModelPtr () const
+    {
+      z3::model m (ctx, Z3_solver_get_model (ctx, solver));
+      return new ZModel<Z> (z3, m);
+    }
+
     void push () { solver.push (); }
     void pop (unsigned n = 1) { solver.pop (n); }
     void reset () { solver.reset (); }
@@ -674,12 +680,12 @@ namespace ufo
     ExprFactory &efac;
 
   public:
-      
+
       ExprVector m_rels;
       ExprVector m_vars;
       ExprVector m_rules;
       ExprVector m_queries;
-      
+
     ZFixedPoint (Z &z) :
       z3(z), ctx(z.get_ctx ()), fp (z.get_ctx ()), efac(z.get_efac ()) {}
 
@@ -698,7 +704,7 @@ namespace ufo
     void addRule (const Range &vars, Expr rule)
     {
       if (isOpX<TRUE> (rule)) return;
-      
+
       boost::copy (vars, std::back_inserter (m_vars));
       m_rules.push_back (rule);
 
@@ -732,9 +738,9 @@ namespace ufo
 
     void addQuery (Expr q) {m_queries.push_back (q);}
 
-    void addQueries (ExprVector qs) 
+    void addQueries (ExprVector qs)
     {
-      std::copy (qs.begin (), qs.end (), 
+      std::copy (qs.begin (), qs.end (),
                  std::back_inserter (m_queries));
     }
 
@@ -767,7 +773,7 @@ namespace ufo
         ast = z3::ast (ctx, Z3_mk_exists_const (ctx, 0, bound.size (),
                                                 &bound [0], 0, NULL, ast));
       }
-      
+
       tribool res = z3l_to_tribool (Z3_fixedpoint_query (ctx, fp, ast));
       ctx.check_error ();
       return res;
@@ -802,8 +808,8 @@ namespace ufo
         ast = z3::ast (ctx, Z3_mk_exists_const (ctx, 0, bound.size (),
                                                 &bound [0], 0, NULL, ast));
       }
-      
-      
+
+
       Z3_ast qptr = static_cast<Z3_ast> (ast);
       Z3_string str = Z3_fixedpoint_to_string (ctx, fp, 1, &qptr);
       return std::string (str);
@@ -842,7 +848,7 @@ namespace ufo
             else out << "UfoUnknownSort";
             out << ") ";
           }
-              
+
           else out << "UfoUnknownSort ";
         }
         out << "))\n";
@@ -917,14 +923,14 @@ namespace ufo
     void addCover (Expr pred, Expr lemma, int lvl = -1)
     {
       if (isOpX<TRUE> (lemma)) return;
-      
+
       assert (bind::isFapp (pred));
       z3::ast zpred (ctx, z3.toAst (pred));
       Z3_app app = Z3_to_app (ctx, zpred);
 
       if (isOpX<FALSE> (lemma))
       {
-        Z3_fixedpoint_add_cover (ctx, fp, lvl, Z3_get_app_decl (ctx, app), 
+        Z3_fixedpoint_add_cover (ctx, fp, lvl, Z3_get_app_decl (ctx, app),
                                  Z3_mk_false (ctx));
         ctx.check_error ();
         return;
@@ -992,7 +998,7 @@ namespace ufo
 
     void getCexRules (ExprVector &res)
     {
-      z3::ast_vector rules (ctx, 
+      z3::ast_vector rules (ctx,
                             Z3_fixedpoint_get_rules_along_trace (ctx, fp));
       for (unsigned i = 0; i < rules.size (); ++i)
       {
@@ -1003,11 +1009,11 @@ namespace ufo
         res.push_back (z3.toExpr (rule));
       }
     }
-      
+
     void loadFPfromFile(std::string smt){
         z3::ast_vector queries (ctx, Z3_fixedpoint_from_file(ctx, fp, smt.c_str ()));
         ctx.check_error ();
-        
+
         z3::ast_vector rules (ctx, Z3_fixedpoint_get_rules(ctx, fp));
         z3::ast_vector asss (ctx, Z3_fixedpoint_get_assertions(ctx, fp));
 

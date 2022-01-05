@@ -9,57 +9,69 @@ using namespace std;
 using namespace boost;
 namespace ufo
 {
-  
-  class SMTUtils {
-  private:
 
+  class SMTUtils {
+
+ private:
     ExprFactory &efac;
     EZ3 z3;
     ZSolver<EZ3> smt;
+    bool can_get_model;
+    ZSolver<EZ3>::Model* m;
 
   public:
 
     SMTUtils (ExprFactory& _efac) :
-    efac(_efac),
-    z3(efac),
-    smt (z3)
-    {}
+      efac(_efac), z3(efac), smt (z3), can_get_model(0), m(NULL) {}
 
-    //debug
-    void printModel()
+    SMTUtils (ExprFactory& _efac, unsigned _to) :
+      efac(_efac), z3(efac), smt (z3, _to), can_get_model(0), m(NULL) {}
+
+    boost::tribool eval(Expr v, ZSolver<EZ3>::Model* m1)
     {
-      ZSolver<EZ3>::Model m = smt.getModel();
-      outs() << m << "\n";
+      Expr ev = m1->eval(v);
+      if (m == NULL) return indeterminate;
+      if (isOpX<TRUE>(ev)) return true;
+      if (isOpX<FALSE>(ev)) return false;
+      return indeterminate;
     }
-    
+
+    boost::tribool eval(Expr v)
+    {
+      getModelPtr();
+      if (m == NULL) return indeterminate;
+      return eval(v, m);
+    }
+
+    ZSolver<EZ3>::Model* getModelPtr()
+    {
+      if (!can_get_model) return NULL;
+      if (m == NULL) m = smt.getModelPtr();
+      return m;
+    }
+
     Expr getModel(Expr v)
     {
-      ExprVector eqs;
-      ZSolver<EZ3>::Model m = smt.getModel();
-      return m.eval(v);
+      getModelPtr();
+      if (m == NULL) return NULL;
+      return m->eval(v);
     }
 
     template <typename T> Expr getModel(T& vars)
     {
+      getModelPtr();
+      if (m == NULL) return NULL;
       ExprVector eqs;
-      ZSolver<EZ3>::Model m = smt.getModel();
       for (auto & v : vars)
       {
-        Expr e = m.eval(v);
-        if (e == NULL)
+        Expr e = m->eval(v);
+        if (e == NULL || containsOp<EXISTS>(e) || containsOp<FORALL>(e))
         {
-          return NULL;
+          continue;
         }
         else if (e != v)
         {
           eqs.push_back(mk<EQ>(v, e));
-        }
-        else
-        {
-          if (bind::isBoolConst(v))
-          eqs.push_back(mk<EQ>(v, mk<TRUE>(efac)));
-          else if (bind::isIntConst(v))
-          eqs.push_back(mk<EQ>(v, mkTerm (mpz_class (0), efac)));
         }
       }
       return conjoin (eqs, efac);
@@ -68,9 +80,30 @@ namespace ufo
     ExprSet allVars;
     Expr getModel() { return getModel(allVars); }
 
+    void getModel (ExprSet& vars, ExprMap& e)
+    {
+      ExprSet mdl;
+      getConj(getModel(vars), mdl);
+      for (auto & m : mdl) e[m->left()] = m->right();
+    }
+
+    template <typename T> void getOptModel (ExprSet& vars, ExprMap& e, Expr v)
+    {
+      if (!can_get_model) return;
+      while (true)
+      {
+        getModel(vars, e);
+        smt.assertExpr(mk<T>(v, e[v]));
+        if (m != NULL) { free(m); m = NULL; }
+        auto res = smt.solve();
+        if (!res || indeterminate(res)) return;
+      }
+    }
+
     template <typename T> boost::tribool isSat(T& cnjs, bool reset=true)
     {
       allVars.clear();
+      if (m != NULL) { free(m); m = NULL; }
       if (reset) smt.reset();
       for (auto & c : cnjs)
       {
@@ -78,7 +111,33 @@ namespace ufo
         smt.assertExpr(c);
       }
       boost::tribool res = smt.solve ();
+      can_get_model = res ? true : false;
       return res;
+    }
+
+    /**
+     * SMT-check
+     */
+    boost::tribool isSat(Expr a, Expr b, Expr c, Expr d, bool reset=true)
+    {
+      ExprSet cnjs;
+      getConj(a, cnjs);
+      getConj(b, cnjs);
+      getConj(c, cnjs);
+      getConj(d, cnjs);
+      return isSat(cnjs, reset);
+    }
+
+    /**
+     * SMT-check
+     */
+    boost::tribool isSat(Expr a, Expr b, Expr c, bool reset=true)
+    {
+      ExprSet cnjs;
+      getConj(a, cnjs);
+      getConj(b, cnjs);
+      getConj(c, cnjs);
+      return isSat(cnjs, reset);
     }
 
     /**
@@ -102,7 +161,9 @@ namespace ufo
       return isSat(cnjs, reset);
     }
 
-        template <typename T, typename Range, typename OutputItr> boost::tribool isSatAssuming(T& cnjs, const Range & lits, OutputItr unsatCore, bool reset=true, bool print = false)
+    template <typename T, typename Range, typename OutputItr>
+    boost::tribool isSatAssuming(T& cnjs, const Range & lits,
+      OutputItr unsatCore, bool reset=true, bool print = false)
     {
       allVars.clear();
       if (reset) smt.reset();
@@ -119,7 +180,7 @@ namespace ufo
           smt.assertForallExpr(varz, c->last());
         }
 	else if(isOpX<IMPL>(c) &&
-		containsOp<FORALL>(c) && 
+		containsOp<FORALL>(c) &&
 		bind::isBoolConst(c->left())) {
           ExprVector varz;
 	  varz.push_back(c->left());
@@ -130,8 +191,8 @@ namespace ufo
 
 	  // outs() << *(c->left()) << "\n";
 	  // outs() << *(c->right()->last()) << "\n";
-	  
-          smt.assertForallExpr(varz, mk<IMPL>(c->left(), c->right()->last()));	  
+
+          smt.assertForallExpr(varz, mk<IMPL>(c->left(), c->right()->last()));
 	}
         else
         {
@@ -275,7 +336,7 @@ namespace ufo
 
         ExprSet newCnjsTry = newCnjs;
         newCnjsTry.erase(cnj);
-        
+
         Expr newConj = conjoin(newCnjsTry, efac);
         if (implies (newConj, cnj))
           newCnjs.erase(cnj);
@@ -388,9 +449,9 @@ namespace ufo
     {
       print(e, outs());
     }
-    
+
     template <typename OutputStream>
-    OutputStream & print(Expr e, OutputStream & out) 
+    OutputStream & print(Expr e, OutputStream & out)
     {
       if (isOpX<FORALL>(e) || isOpX<EXISTS>(e))
       {
@@ -476,7 +537,7 @@ namespace ufo
 //      smt.toSmtLib (outs());
 //      outs().flush ();
     }
-    
+
     template <typename Range> bool splitUnsatSets(Range & src, ExprVector & dst1, ExprVector & dst2)
     {
       if (isSat(src)) return false;
@@ -502,7 +563,7 @@ namespace ufo
       return true;
     }
   };
-  
+
   /**
    * Horn-based interpolation over particular vars
    */
@@ -555,7 +616,7 @@ namespace ufo
 
     return fp.getCoverDelta(itpApp);
   }
-  
+
   /**
    * Horn-based interpolation
    */
@@ -579,7 +640,7 @@ namespace ufo
 
     return getItp(A, B, sharedVars);
   };
-  
+
 }
 
 #endif

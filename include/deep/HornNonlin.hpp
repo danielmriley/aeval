@@ -311,7 +311,7 @@ namespace ufo
             exit (0);
           }
         }
-
+        outs() << "srcRelations size: " << hr.srcRelations.size() << "\n";
         hr.isFact = hr.srcRelations.empty();
 
         if (isOpX<FAPP>(head))
@@ -342,6 +342,7 @@ namespace ufo
           qCHCNum = chcs.size() - 1;
         }
         if(hr.isFact) invRel = hr.dstRelation;
+        outs() << "invRel horn: " << invRel << "\n";
 
         ExprVector allOrigSymbs;
         for (auto & a : origSrcSymbs) for (auto & b : a) allOrigSymbs.push_back(b);
@@ -400,6 +401,8 @@ namespace ufo
 
       for (int i = 0; i < chcs.size(); i++)
         incms[chcs[i].dstRelation].push_back(i);
+
+      hasCycles();
     }
 
 
@@ -447,6 +450,12 @@ namespace ufo
       return conjoin(newCnjs, m_efac);
     }
 
+    Expr getPrecondition (HornRuleExt* hr)
+    {
+      Expr tmp = keepQuantifiers(hr->body, invVars[invRel]);
+      return weakenForHardVars(tmp, invVars[invRel]);
+    }
+
     Expr getPostcondition (int i)
     {
       HornRuleExt& hr = chcs[i];
@@ -454,7 +463,8 @@ namespace ufo
       ExprSet newCnjs;
       getConj(hr.body, cnjs);
       ExprVector allVars = hr.locVars;
-      for (auto & a : hr.srcVars) allVars.insert(allVars.end(), a.begin(), a.end());
+      ExprVector a = invVars[invRel];
+      allVars.insert(allVars.end(), a.begin(), a.end());
       for (auto & a : cnjs)
       {
         if (emptyIntersect(a, allVars)) newCnjs.insert(a);
