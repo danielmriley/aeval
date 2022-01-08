@@ -73,6 +73,7 @@ int main (int argc, char ** argv)
   bool opt = getBoolValue("--opt", false, argc, argv);
   bool debug = getBoolValue("--debug", false, argc, argv);
   bool split = !getBoolValue("--merge", false, argc, argv);
+  bool printMbp = getBoolValue("--print-mbp", false, argc, argv);
 
   Expr s, t = NULL;
   auto name = getSmtFileName(1, argc, argv);
@@ -91,7 +92,7 @@ int main (int argc, char ** argv)
   if (t != NULL) split = false;    // disable for JSyn
   if (skol && opt) opt = false;    // skolem not supported (yet)
 
-  aeSolveAndSkolemize(s, t, skol, debug, opt, compact, split);
+  aeSolveAndSkolemize(s, t, skol, debug, opt, compact, split, printMbp);
 
   return 0;
 }

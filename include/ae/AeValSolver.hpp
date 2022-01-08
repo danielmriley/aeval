@@ -39,11 +39,12 @@ namespace ufo
     map<Expr, ExprVector> skolemConstraints;
     bool skol;
     bool debug;
+    bool printMbp; // for printing Model and Projection
     unsigned fresh_var_ind;
 
   public:
 
-    AeValSolver (Expr _s, Expr _t, ExprSet &_v, bool _debug, bool _skol) :
+    AeValSolver (Expr _s, Expr _t, ExprSet &_v, bool _debug, bool _skol, bool prMbp) :
       s(_s), t(_t), v(_v),
       efac(s->getFactory()),
       z3(efac),
@@ -52,7 +53,8 @@ namespace ufo
       fresh_var_ind(0),
       partitioning_size(0),
       skol(_skol),
-      debug(_debug)
+      debug(_debug),
+      printMbp(prMbp)
     {
       filter (boolop::land(s,t), bind::IsConst (), inserter (stVars, stVars.begin()));
       sVars = stVars;
@@ -176,6 +178,15 @@ namespace ufo
         u.getTrueLiterals(pr, m, lits, false);
         pr = z3_qe_model_project_skolem (z3, m, exp, conjoin(lits, efac), map);
         if (m.eval(exp) != exp) modelMap[exp] = mk<EQ>(exp, m.eval(exp));
+        if(printMbp) {
+          outs() << "model: \n";
+          for(auto& m: modelMap) {
+            pprint(m.second, 2);
+          }
+          outs() << "projection:\n";
+          pprint(pr, 2);
+        }
+
         for (auto it = lits.begin(); it != lits.end(); ){
           if (contains(*it, exp)) ++it;
           else it = lits.erase(it);
@@ -188,6 +199,7 @@ namespace ufo
       someEvals.push_back(modelMap);
       skolMaps.push_back(substsMap);
       projections.push_back(pr);
+
       partitioning_size++;
     }
 
@@ -856,7 +868,7 @@ namespace ufo
         pre.insert(projections[i]);
         post.insert(skol[i]);
       }
-      AeValSolver ae(disjoin(pre, efac), conjoin(post, efac), quant, false, false);
+      AeValSolver ae(disjoin(pre, efac), conjoin(post, efac), quant, false, false, printMbp);
 
       if (!ae.solve())
       {
@@ -926,7 +938,7 @@ namespace ufo
         pre.insert(projections[i]);
         post.insert(skol[i]);
       }
-      AeValSolver ae(disjoin(pre, efac), conjoin(post, efac), quant, false, false);
+      AeValSolver ae(disjoin(pre, efac), conjoin(post, efac), quant, false, false, printMbp);
 
       if (!ae.solve())
       {
@@ -1160,7 +1172,7 @@ namespace ufo
   /**
    * Simple wrapper
    */
-  inline void aeSolveAndSkolemize(Expr s, Expr t, bool skol, bool debug, bool opt, bool compact, bool split)
+  inline void aeSolveAndSkolemize(Expr s, Expr t, bool skol, bool debug, bool opt, bool compact, bool split, bool printMbp)
   {
     ExprSet fa_qvars, ex_qvars;
     ExprFactory& efac = s->getFactory();
@@ -1199,7 +1211,7 @@ namespace ufo
       t = simplifyBool(t);
     }
 
-    AeValSolver ae(s, t, ex_qvars, debug, skol);
+    AeValSolver ae(s, t, ex_qvars, debug, skol, printMbp);
 
     if (ae.solve()){
       outs () << "Iter: " << ae.getPartitioningSize() << "; Result: invalid\n";
