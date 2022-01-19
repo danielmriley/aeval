@@ -511,7 +511,7 @@ namespace ufo
     void
     computeDataTerm(Expr srcRel = NULL, Expr gh_cond = NULL, Expr invs = NULL, Expr preCond = NULL)
     {
-      bnd.unrollAndExecuteTerm(srcRel, exprToModels[srcRel], gh_cond, invs, preCond);
+      bnd.unrollAndExecuteTerm(srcRel, invVars[srcRel], exprToModels[srcRel], gh_cond, invs, preCond);
     }
 
     ExprSet& getConcrInvs(Expr rel) { return bnd.concrInvs[rel]; }
@@ -529,7 +529,10 @@ namespace ufo
       }
 
       map<unsigned int, Expr> monomialToExpr;
-      if (0 == initInvVars(inv, invVars[inv], monomialToExpr)) return;
+      if (0 == initInvVars(inv, invVars[inv], monomialToExpr)) {
+        outs() << "returning\n";
+        return;
+      }
       initLargeCoeffToExpr(dataMatrix);
       getPolynomialsFromData(dataMatrix, cands, inv, monomialToExpr);
 

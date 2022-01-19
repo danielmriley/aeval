@@ -179,7 +179,7 @@ namespace ufo
     {
       vector<HornRuleExt> chcsOld = chcs;
       chcs.clear();
-      if(hr->isFact) {
+      if(!hr->isInductive && !hr->isQuery) {
         addRule(hr);
         if(chcsOld.size() >= 2) chcs.push_back(chcsOld[1]);
         if(chcsOld.size() >= 3) chcs.push_back(chcsOld[2]);
@@ -341,7 +341,7 @@ namespace ufo
           hasQuery = true;
           qCHCNum = chcs.size() - 1;
         }
-        if(hr.isFact) invRel = hr.dstRelation;
+        if(!hr.isInductive && !hr.isQuery) invRel = hr.dstRelation;
         outs() << "invRel horn: " << invRel << "\n";
 
         ExprVector allOrigSymbs;
@@ -397,7 +397,13 @@ namespace ufo
         }
       }
 
-      for(auto& hr: chcs) hr.srcRelation = invRel;
+      for(auto& hr: chcs) {
+        if(hr.isFact) hr.srcRelation = mk<TRUE>(m_efac);
+        else {
+          hr.srcRelation = hr.srcRelations[0];
+
+        }
+      }
 
       for (int i = 0; i < chcs.size(); i++)
         incms[chcs[i].dstRelation].push_back(i);

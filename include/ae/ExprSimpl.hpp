@@ -4071,6 +4071,15 @@ namespace ufo
     cnj.insert(newCnjs.begin(), newCnjs.end());
     if (toRepeat) simplifyPropagate(cnj);
   }
+
+  template<typename T> void printExprContainer(T& cont, int indent = 0)
+  {
+    for(auto& e: cont) {
+      if(indent > 0) for(int i = 0; i < indent; i++) outs() << " ";
+      outs() << e << "\n";
+
+    }
+  }
 }
 
 #endif

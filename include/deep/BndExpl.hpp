@@ -481,6 +481,7 @@ namespace ufo
 
     bool unrollAndExecuteTerm(
           Expr srcRel,
+          ExprVector& dtVars,
 				  vector<vector<double> >& models,
           Expr gh_cond, Expr invs, Expr preCond,
           int k = 10)
@@ -492,10 +493,10 @@ namespace ufo
       str = str.substr(0, str.find('.'));
       cpp_int max_double = lexical_cast<cpp_int>(str);
 
-      outs() << "cycles.size(): " << ruleManager.cycles.size() << "\n";
+      //outs() << "cycles.size(): " << ruleManager.cycles.size() << "\n";
       for (int cyc = 0; cyc < ruleManager.cycles.size(); cyc++)
       {
-        if(debug) outs() << "cycle: " << cyc << "\n";
+        //if(debug) outs() << "cycle: " << cyc << "\n";
         vector<int> mainInds;
         vector<int> arrInds;
         auto & loop = ruleManager.cycles[cyc];
@@ -524,7 +525,7 @@ namespace ufo
 
         if (vars.size() < 2 && cyc == ruleManager.cycles.size() - 1)
           continue; // does not make much sense to run with only one var when it is the last cycle
-        srcVars = vars;
+        dtVars = vars;
 
         auto & prefix = ruleManager.prefixes[cyc];
         vector<int> trace;
@@ -536,11 +537,13 @@ namespace ufo
             trace.push_back(loop[m]);
 
         ExprVector ssa;
+        //for(auto& i: trace) outs() << "trace: " << i << "\n";
+
         getSSA(trace, ssa);
         Expr gh_zero = ssa.back();
         Expr ssa_last = gh_zero;
         ssa.pop_back();
-    //    outs() << "gh_zero: " << gh_zero << "\n";
+        //outs() << "gh_zero: " << gh_zero << "\n";
         ExprSet g;
         getConj(gh_zero, g);
         ExprVector g2;
@@ -574,7 +577,7 @@ namespace ufo
                   replaceAll(gh_cond, srcVars, bindVars[loop.size() - 1]));
         bindVars.pop_back();
         int traceSz = trace.size();
-  //      outs() << "SSA:\n"; // << conjoin(ssa, m_efac) << "\n";
+        //outs() << "SSA:\n" << conjoin(ssa, m_efac) << "\n";
   //      pprint( conjoin(ssa, m_efac));
         // compute vars for opt constraint
         vector<ExprVector> versVars;

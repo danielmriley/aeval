@@ -70,7 +70,7 @@ namespace ufo
     string specName = "f";
     string varName = "ST_";
     string ghostVar_pref = "gh_";
-    Expr specExpr;
+    Expr specDecl;
     ExprVector ghostVars;
     ExprVector ghostVarsPr;
     Expr decGhost0;
@@ -88,14 +88,15 @@ namespace ufo
 
     NonlinCHCsolver (CHCs& r, int _b, int dbg = 0) : m_efac(r.m_efac), ruleManager(r), u(m_efac), strenBound(_b), SYGUS_BIN(""), z3(m_efac), debug(dbg)
     {
+      specDecl = mkTerm<string>(specName, m_efac);
       for (auto & a : ruleManager.chcs)
         if (a.isInductive) tr = &a;
-        else if (a.isFact) fc = &a;
         else if (a.isQuery) qr = &a;
+        else if (!a.isInductive && !a.isQuery) fc = &a;
 
       for(auto& dcl: ruleManager.decls) decls.push_back(dcl->left());
       invDecl = ruleManager.invRel;
-      outs() << "invDecl constructor: " << invDecl << "\n";
+      if(debug >= 2) outs() << "invDecl constructor: " << invDecl << "\n";
       invVars = tr->srcVars[0];
       invVarsPr = tr->dstVars;
       invVarsSz = invVars.size();
@@ -103,6 +104,7 @@ namespace ufo
 
     bool setUpCounters()
     {
+      if(debug >= 3) outs() << "setUpCounters\n";
       for (int i = 0; i < 2; i++)
       {
         Expr new_name = mkTerm<string> (ghostVar_pref + to_string(i), m_efac);
@@ -113,14 +115,14 @@ namespace ufo
         var = bind::intConst(new_name);
         ghostVarsPr.push_back(var);
       }
-
+//**** CHECK THE DST AND SRC VARS IN RM **************
       ghost0Minus1 = mk<MINUS>(ghostVars[0], mkTerm (mpz_class (1), m_efac));
       ghost1Minus1 = mk<MINUS>(ghostVars[1], mkTerm (mpz_class (1), m_efac));
       decGhost0 = mk<EQ>(ghostVarsPr[0], ghost0Minus1);
       decGhost1 = mk<EQ>(ghostVarsPr[1], ghost1Minus1);
       ghostAss = mk<LT>(ghostVars[0], mkTerm (mpz_class (0), m_efac));
-      ghostGuard = mk<EQ>(ghostVars[0], mkTerm (mpz_class (0), m_efac));
-      ghostGuardPr = mk<EQ>(ghostVarsPr[0], mkTerm (mpz_class (0), m_efac));
+      ghostGuard = mk<NEQ>(ghostVars[0], mkTerm (mpz_class (0), m_efac));
+      ghostGuardPr = mk<NEQ>(ghostVarsPr[0], mkTerm (mpz_class (0), m_efac));
 
       return true;
     }
@@ -130,15 +132,17 @@ namespace ufo
       HornRuleExt* fc_new = new HornRuleExt();
       fc_new->srcRelation = fc->srcRelation;
       fc_new->srcRelations = fc->srcRelations;
-      fc_new->srcRelations.push_back(specExpr);
+      fc_new->srcRelations.push_back(specDecl);
       fc_new->srcVars = fc->srcVars;
       fc_new->dstRelation = fc->dstRelation;
       fc_new->dstVars = fc->dstVars;
       fc_new->dstVars.push_back(ghostVarsPr[0]);
       fc_new->head = bind::boolConstDecl(fc_new->dstRelation);
-      fc_new->isFact = true;
+      fc_new->isFact = false;
       ExprVector specVars;
       ExprVector specVarsPr;
+//      specVars = invVars;
+//      specVarsPr = invVarsPr;
       for(int i = 0; i < invVars.size(); i++) {
         specVars.push_back(bind::intConst(mkTerm<string>(varName + to_string(i + invVars.size()), m_efac)));
         specVarsPr.push_back(bind::intConst(mkTerm<string>(varName + to_string(i + invVars.size()) + "'", m_efac)));
@@ -151,15 +155,26 @@ namespace ufo
       }
       fc_body.insert(replaceAll(fc->body, invVarsPr, specVars));
       fc_body.insert(mk<EQ>(ghostVars[1], ghostVarsPr[0]));
+
       fc_new->body = conjoin(fc_body, m_efac);
+      if(debug >= 3) outs() << "fc_new body: " << fc_new->body << "\n";
       for(auto& v: fc_new->srcVars) {
         v.push_back(ghostVars[1]);
       }
+
       ruleManager.replaceRule(fc_new);
+      if(debug >= 4) {
+        for(auto& v: fc_new->srcRelations)
+          outs() << "Rel: " << v << "\n";
+
+        for(auto& v: fc_new->srcVars)
+          for(auto& e: v) outs() << "var: " << e << "\n";
+      }
+
 
       for (auto & a : ruleManager.chcs)       // r.chcs changed by r.addRule, so pointers to its elements are broken
         if (a.isInductive) tr = &a;
-        else if (a.isFact) fc = &a;
+        else if (!a.isInductive && !a.isQuery) fc = &a;
     }
 
     void setUpTr() // NEED TO RESET INV DECL
@@ -184,6 +199,9 @@ namespace ufo
       tr_new->body = conjoin(tmp, m_efac);
       ruleManager.replaceRule(tr_new);
 
+    for (auto & a : ruleManager.chcs)       // r.chcs changed by r.addRule, so pointers to its elements are broken
+      if (a.isInductive) tr = &a;
+      else if (!a.isInductive && !a.isQuery) fc = &a;
     }
 
     void setUpQr()
@@ -192,7 +210,7 @@ namespace ufo
       qr->srcRelation = tr->srcRelation;
       qr->srcRelations = tr->srcRelations;
       qr->srcVars = tr->srcVars;
-      qr->body = mk<AND>(loopGuard, ghostGuard);
+      qr->body = mk<AND>(mkNeg(loopGuard), ghostGuard);
       qr->dstRelation = mkTerm<string> ("err", m_efac);
       qr->head = bind::boolConstDecl(qr->dstRelation);
       qr->isQuery = true;
@@ -201,15 +219,14 @@ namespace ufo
       ruleManager.addFailDecl(qr->dstRelation);
       ruleManager.replaceRule(qr);
 
-      for (auto & a : ruleManager.chcs)       // r.chcs changed by r.addRule, so pointers to its elements are broken
-        if (a.isInductive) tr = &a;
-        else if (a.isFact) fc = &a;
+    for (auto & a : ruleManager.chcs)       // r.chcs changed by r.addRule, so pointers to its elements are broken
+      if (a.isInductive) tr = &a;
+      else if (!a.isInductive && !a.isQuery) fc = &a;
     }
 
     bool setUpQueryAndSpec()
     {
       setUpCounters();
-      specExpr = mkTerm<string>(specName, m_efac);
 
       for (auto & a : ruleManager.chcs)
         if (a.isInductive) tr = &a;
@@ -323,7 +340,7 @@ namespace ufo
       }
     }
     void dataForBound(map<Expr, ExprSet>& candMap, Expr block) {
-      //if(debug >= 2)
+      if(debug >= 2)
         outs() << "USING DATA\n";
       Expr splitter = mk<TRUE>(m_efac);
       Expr invs = mk<TRUE>(m_efac);
@@ -341,10 +358,12 @@ namespace ufo
 
       if(invs == NULL) {outs() << "RETURNING\n"; return;}
 
-      outs() << "\n    srcRel: " << srcRel << "\n";
-      outs() << "    preCond: " << preCond << "\n";
-      outs() << "    invs: " << invs << "\n";
-      outs() << "    block: " << block << "\n";
+      if(debug >= 5) {
+        outs() << "\n    srcRel: " << srcRel << "\n";
+        outs() << "    preCond: " << preCond << "\n";
+        outs() << "    invs: " << invs << "\n";
+        outs() << "    block: " << block << "\n";
+      }
 
       for (auto & dcl : decls) {
         outs() << "dcl: " << dcl << "\n";
@@ -353,10 +372,6 @@ namespace ufo
           if(debug >= 2) outs() << "Compute Data\n";
           dl.computeDataTerm(srcRel, block, invs, preCond);
           dl.computePolynomials(dcl, poly[dcl]);
-          //for (auto & a : dl.getConcrInvs(dcl)) {
-            //outs() << "Concrete INV: " << a << "\n";
-            //candMap[dcl].insert(a);
-          //}
           break;
         }
       }
@@ -377,6 +392,7 @@ namespace ufo
               ++it;
           */
         }
+
         mutateHeuristicEq(p.second, candMap[p.first], p.first, (splitter == NULL));
       }
     }
@@ -406,25 +422,26 @@ namespace ufo
       dataForBound(ghCandMap, block);
       filterNonGhExp(ghCandMap[invDecl]);
 
-      for(auto& e : ghCandMap[invDecl]) { // print bounds found
-        outs() << "    GH_CAND FROM DATA: " << e << "\n";
-      }
       ExprSet conjs;
       getConj(assertBounds, conjs);
       if(block != mk<TRUE>(m_efac)) conjs.insert(mkNeg(block));
       for(auto& e : ghCandMap[invDecl]) {
         conjs.insert(e);
         Expr check = conjoin(conjs, m_efac);
-        //outs() << "CHECK:\n";
+        if(debug >= 4) outs() << "CHECK: " << check << "\n";
         //pprint(check);
         res = u.isSat(check);
-        if(!res) {
-          if(u.isTrue(block))
+        //if(!res) {
+          if(u.isFalse(block)) {
             bounds.insert(mkNeg(block));
-          if(!u.isFalse(e))
+            if(debug >= 5) outs() << "Inserting bound: " << mkNeg(block) << "\n";
+          }
+          if(!u.isEquiv(e, mk<FALSE>(m_efac))) {
             bounds.insert(e);
+            if(debug >= 5) outs() << "Inserting bound: " << e << "\n";
+          }
           break;
-        }
+        //}
         conjs.erase(e);
 
       }
@@ -444,6 +461,8 @@ namespace ufo
       boost::tribool res;
       Expr block = mk<FALSE>(m_efac);
 
+      if(debug >= 3) outs() << "fc body: " << fc->body << "\n";
+
       Expr assertBounds;
 //      for(auto& hr : ruleManager->chcs) {
 //        if(hr.isInductive) {
@@ -452,36 +471,11 @@ namespace ufo
 //      }
       assertBounds = mk<AND>(assertBounds, mkNeg(loopGuardPr));
       assertBounds = mk<AND>(assertBounds, ghostGuardPr);
-      //outs() << "Assertion to check:\n";
+      if(debug >= 4) outs() << "Assertion to check:" << assertBounds << "\n";
       //pprint(assertBounds);
       exploreBounds(ghCandMap, assertBounds, block);
 
-
-      /*
-      map<Expr, ExprSet> ghBoundMap;
-      ExprSet boundSet;
-      //ds.dataForBound(ghCandMap, block);
-      //filterNonGhExp(ghCandMap[invDecl]);
-
-      int count = 0;
-      for(auto& b: ghCandMap[invDecl]) {
-        Expr blk = b;
-        count++;
-        exploreBounds(ghBoundMap, ds, blk);
-        //filterDuplicates(ghCandMap[invDecl], ghBoundMap[invDecl]);
-
-        for(auto& e: ghBoundMap[invDecl]) {
-          for(auto& bb: ghCandMap[invDecl]) {
-             outs() << "Comparing:\n    " << e << " == " << bb << "  ?\n";
-            if(u.isEquiv(e, bb)) {
-              boundSet.insert(bb);
-              break;
-            }
-          }
-        }
-      }
-      */
-      for(auto& e: bounds) outs() << "BOUND: " << e << "\n";
+      if(debug >= 2) for(auto& e: bounds) outs() << "BOUND: " << e << "\n";
       //outs() << "count: " << count << "\n";
       //exit(0);
       return res;
@@ -518,6 +512,7 @@ namespace ufo
         for (auto a : lms) negged.insert(mkNeg(replaceAll(a, ruleManager.invVars[rel], hr.dstVars)));
         checkList.insert(disjoin(negged, m_efac));
       }
+      if(debug >= 5) { outs() << "checkList:\n"; printExprContainer(checkList, 2); }
       return bool(!u.isSat(checkList));
     }
 
@@ -1400,7 +1395,10 @@ namespace ufo
     // adapted from RndLearnerV3
     bool multiHoudini(vector<HornRuleExt*>& worklist, bool recur = true)
     {
-      if (!anyProgress(worklist)) return false;
+      if (!anyProgress(worklist)) {
+        if(debug >= 3) outs() << "No progress\n";
+        return false;
+      }
       auto candidatesTmp = candidates;
       bool res1 = true;
       for (auto & hr : worklist)
@@ -1672,22 +1670,13 @@ namespace ufo
 
     Result_t guessAndSolve()
     {
+      if(debug >= 3) outs() << "Start guessAndSolve\n";
       vector<HornRuleExt*> worklist;
       for (auto & hr : ruleManager.chcs)
       {
         if (containsOp<ARRAY_TY>(hr.body)) hasArrays = true;
         worklist.push_back(&hr);
       }
-
-      // Add data candidates here.
-      map<Expr, ExprSet> ghCandMap;
-      exploreBounds(ghCandMap);
-
-      for(auto& e : ghCandMap[invDecl]) { // print bounds found
-        outs() << "    GH_CAND FROM DATA: " << e << "\n";
-      }
-
-      exit(0);
 
       while (true)
       {
@@ -1802,6 +1791,8 @@ namespace ufo
       newsmt += postfix + "_" + to_string(std::chrono::system_clock::now().time_since_epoch().count());
       newsmt += sygus ? ".sl" : ".smt2";
 
+      outs() << "newsmt: " << newsmt << "\n";
+
       string ds = decls.str();
       string rs = rules.str();
 
@@ -1886,7 +1877,8 @@ namespace ufo
       EZ3 z3(m_efac);
       CHCs nrm(m_efac, z3);
       nrm.parse(newsmt);
-      NonlinCHCsolver newNonlin(nrm, 1);
+      if(debug >= 2) outs() << "getWeakerSoln\n";
+      NonlinCHCsolver newNonlin(nrm, 1, debug);
       ExprVector query;
 
       Result_t res = newNonlin.guessAndSolve();
@@ -1926,8 +1918,12 @@ namespace ufo
       map<Expr, Expr> newCand;
       map<Expr, Expr> newCandp;
 
+      if(debug >= 2) outs() << "checkMaximalSMT\n";
+
       for (auto rel : rels) {
         string relName = lexical_cast<string>(*(rel));
+        if(debug >= 2) outs() << relName << "\n";
+
         ExprVector tvars;
         ExprVector tvarsp;
         ExprVector eqVars;
@@ -2043,7 +2039,8 @@ namespace ufo
           forallArgs.push_back(lv->left());
           allVars.insert(lv);
         }
-
+        outs() << "forallArgs\n";
+        printExprContainer(forallArgs, 2);
         // existsArgs.push_back(mk<IMPL>(conjoin(antec, m_efac), conseq));
         // forallArgs.push_back(mknary<EXISTS>(existsArgs));
 
@@ -2060,14 +2057,16 @@ namespace ufo
 
       //DEBUG
       dumpSMT(constraints, allVars);
+      outs() << "constraints\n";
+      printExprContainer(constraints, 2);
       boost::tribool res = u.isSat(constraints);
 
       if (boost::logic::indeterminate(res)) {
-        //	outs() << "result is indeterminate \n";//DEBUG
+        if(debug >= 3) outs() << "result is indeterminate \n";//DEBUG
         return Result_t::UNKNOWN;
 
       } else if (!res) {
-        //	outs() << "result is us!\n";//DEBUG
+        if(debug >= 3) outs() << "result is unsat!!\n";//DEBUG
         return Result_t::UNSAT;
       }
 
@@ -2080,10 +2079,10 @@ namespace ufo
 
       for (auto rel : rels) {
         Expr model = u.getModel(newVars[rel]);
-        // outs() << "model: " << *model << "\n";//DEBUG
+        if(debug >= 3) outs() << "model: " << *model << "\n";//DEBUG
         Expr weakerSoln = mk<OR>(conjoin(candidates[rel],m_efac), replaceAll(model, newVars[rel], ruleManager.invVars[rel]));
         soln.insert({rel, weakerSoln});
-        // outs() << "weakersoln: " << *weakerSoln << "\n";//DEBUG
+        if(debug >= 3) outs() << "weakersoln: " << *weakerSoln << "\n";//DEBUG
       }
 
       for (auto d : ruleManager.decls) {
@@ -2118,7 +2117,7 @@ namespace ufo
           }
         }
       }
-
+      if(debug >= 5) outs() << "*** returning SAT ***\n";
       return Result_t::SAT;
 
     }
@@ -2257,7 +2256,9 @@ namespace ufo
       EZ3 z3(m_efac);
       CHCs nrm(m_efac, z3);
       nrm.parse(newsmt);
-      NonlinCHCsolver newNonlin(nrm, 1);
+      if(debug >= 3) outs() << "solveWeakCHC\n";
+      nrm.print();
+      NonlinCHCsolver newNonlin(nrm, 1, debug);
       ExprVector query;
 
       Result_t res = newNonlin.guessAndSolve();
@@ -2275,10 +2276,13 @@ namespace ufo
     // chc solver based weaker solution synthesis
     Result_t weakenUsingCHC(const ExprVector & weakenRels, const ExprVector & fixedRels)
     {
+      if(debug >= 3) outs() << "weakenUsingCHC\n";
       string newsmt;
       newsmt = constructWeakeningRules(weakenRels, fixedRels);
       map<Expr, ExprSet> soln;
+      if(debug >= 3) outs() << "Entering solveWeakCHC\n";
       Result_t res = solveWeakCHC(newsmt, soln);
+      if(debug >= 3) outs() << "Left solveWeakCHC\n";
       if (res == Result_t::SAT) {
         // outs() << "CHC proved s\n";
         for (auto e : soln) {
@@ -2577,10 +2581,66 @@ namespace ufo
       ExprVector allRels = getAllRels();
       ExprVector rels = useUC ? getUnderConsRels() : allRels;
 
+      if(debug >= 5) {
+        for(auto& e: allRels) {
+          outs() << "allRels: rel: " << e << "\n";
+        }
+        for(auto& e: rels) {
+          outs() << "rels: rel: " << e << "\n";
+        }
+      }
+
+
+      // Add data candidates here.
+      map<Expr, ExprSet> ghCandMap;
+      if(debug >= 3) outs() << "Entering exploreBounds\n";
+      exploreBounds(ghCandMap);
+      if(debug >= 5) outs() << "Left exploreBounds\n";
+
+      if(debug >= 5) {
+        for(auto& e : ghCandMap[invDecl]) { // print bounds found
+          outs() << "    GH_CAND FROM DATA: " << e << "\n";
+        }
+      }
+
+      for(auto& rel: fc->srcRelations) {
+        for(auto& e: ghCandMap[invDecl]) {
+          candidates[rel].insert(replaceAll(e, tr->srcVars[0], fc->srcVars[0]));
+          if(debug >= 3) {
+            outs() << "Cand added to rel: " << rel;
+            outs() << " : " << replaceAll(e, tr->srcVars[0], fc->srcVars[0]) <<"\n";
+          }
+
+        }
+      }
+
+      vector<HornRuleExt*> worklist;
+      for (auto & hr : ruleManager.chcs)
+      {
+        if (containsOp<ARRAY_TY>(hr.body)) hasArrays = true;
+        worklist.push_back(&hr);
+      }
+
+      for(auto& rel: decls) {
+        for(auto& e: ghCandMap[invDecl]) {
+          candidates[rel].insert(e);
+//          candidates[rel].insert(mk<GEQ>(invVars[0],mkTerm(mpz_class(0), m_efac)));
+          if(debug >= 3) {
+            outs() << "Cand added to rel: " << rel;
+            outs() << " :: " << e <<"\n";
+          }
+        }
+      }
+
       if (useGAS) {
         Result_t res;
         if (!usesygus) {
+          outs() << "entering guessAndSolve\n";
           res = guessAndSolve();
+          outs() << "left guessAndSolve. res: ";
+          if(res == Result_t::UNSAT) outs() << "unsat";
+          else outs() << "sat or unkown";
+          outs() << "\n";
         }  else {
           ExprVector tmpfrels;
           res = weakenUsingSygus(allRels, tmpfrels, true);
@@ -2643,19 +2703,19 @@ namespace ufo
         ExprVector fixedRels = !firstSMTCall && fixCRels ? vecDiff(allRels, rels) : ExprVector() ;
         map<Expr, Expr> smtSoln;
 
-        if(debug >= 2) outs() << "current iteration: "<< itr << "\n";
-        if(debug) printCands(false);
+        if(debug) outs() << "current iteration: "<< itr << "\n";
+        if(debug >= 2) printCands(false);
 
         maxRes = firstSMTCall ? checkMaximalSMT(weakenRels, fixedRels, smtSoln) : checkMaximalSMT(weakenRels, fixedRels, smtSoln, rels);
         itr++;
 
         if (maxRes == Result_t::UNSAT) {
-      //    outs() << "Total iterations: "  << itr << "\n";
+          if(debug >= 2) outs() << "Total iterations: "  << itr << "\n";
 
           //debug
           for (auto hr : ruleManager.chcs) {
             if (!checkCHC(hr, candidates)) {
-              outs() << "something is wrong!(after SMT us)\n";
+              outs() << "something is wrong!(after SMT unsat)\n";
               assert(0);
             }
           }
@@ -2686,8 +2746,11 @@ namespace ufo
           }
           continue;
         }
+        printCands(false);
 
+        outs() << "Entering weakenUsingSygus\n";
         Result_t chcres = usesygus ? weakenUsingSygus(weakenRels, fixedRels) : weakenUsingCHC(weakenRels, fixedRels);
+        outs() << "Left weakenUsingSygus\n";
 
         if (chcres == Result_t::UNKNOWN) {
           for (auto ce : smtSoln) {
@@ -2712,6 +2775,9 @@ namespace ufo
             assert(0);
           }
         }
+        outs() << "End of loop\n";
+        printCands(false);
+
       }
     }
 
@@ -2866,9 +2932,9 @@ namespace ufo
     for(auto& e: ruleManager.invVars[ruleManager.invRel])
       outs() << "invVar: " << e << "\n";
     if(!ruleManager.hasQuery) {
-      //ruleManager.print();
+      ruleManager.print();
       spec.setUpQueryAndSpec();
-      outs() << "invDecl: " << ruleManager.invRel << "\n";
+      outs() << "invDecl: " << ruleManager.invRel << "\nStart solving\n";
     }
     if (usesygus) {
       spec.setSygusPath(syguspath);
