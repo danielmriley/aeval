@@ -606,7 +606,7 @@ namespace ufo
         for (auto & a : gh_condVars)
           gh_condVarsIndex.insert(getVarIndex(a, srcVars));
 
-        if (debug) outs () << "\nUnroll and execute the cycle for " <<  srcRel << " and gh_cond " << gh_cond <<"\n";
+        if (debug) outs () << "\nUnroll and execute the cycle for " <<  srcRel << " and cond " << gh_cond <<"\n";
         for (int j = 0; j < versVars.size(); j++)
         {
           vector<double> model;

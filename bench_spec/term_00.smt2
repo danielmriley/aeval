@@ -25,6 +25,6 @@
   )
 )
 
-(rule (=> (and (inv x i) (> x 0) (= i 0)) fail))
+(rule (=> (and (inv x i) (<= x 0) (not (= i 0))) fail))
 
 (query fail)

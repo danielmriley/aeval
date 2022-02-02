@@ -67,7 +67,7 @@ namespace ufo
     ExprVector invVarsPr;
     int invVarsSz;
 
-    string specName = "f";
+    string specName = "pre";
     string varName = "ST_";
     string ghostVar_pref = "gh_";
     Expr specDecl;
@@ -456,10 +456,9 @@ namespace ufo
 
     }
 
-    boost::tribool exploreBounds(map<Expr, ExprSet>& ghCandMap)
+    boost::tribool exploreBounds(map<Expr, ExprSet>& ghCandMap, Expr block)
     {
       boost::tribool res;
-      Expr block = mk<FALSE>(m_efac);
 
       if(debug >= 3) outs() << "fc body: " << fc->body << "\n";
 
@@ -512,7 +511,7 @@ namespace ufo
         for (auto a : lms) negged.insert(mkNeg(replaceAll(a, ruleManager.invVars[rel], hr.dstVars)));
         checkList.insert(disjoin(negged, m_efac));
       }
-      if(debug >= 5) { outs() << "checkList:\n"; printExprContainer(checkList, 2); }
+      if(debug >= 6) { outs() << "checkList:\n"; printExprContainer(checkList, 2); }
       return bool(!u.isSat(checkList));
     }
 
@@ -1142,6 +1141,14 @@ namespace ufo
             }
           }
         }
+      }
+    }
+
+    void printBounds()
+    {
+      outs() << "Bounds:\n";
+      for(auto& e: bounds) {
+        outs() << "  " << e << "\n";
       }
     }
 
@@ -1922,7 +1929,7 @@ namespace ufo
 
       for (auto rel : rels) {
         string relName = lexical_cast<string>(*(rel));
-        if(debug >= 2) outs() << relName << "\n";
+        if(debug >= 2) outs() << "relName: " << relName << "\n";
 
         ExprVector tvars;
         ExprVector tvarsp;
@@ -1966,6 +1973,12 @@ namespace ufo
       {
         ExprSet antec;
         bool addVacuity = false;
+
+        if(hr.srcRelations[0] == specDecl) {
+          addVacuity = true;
+          outs() << "Rel: " << hr.srcRelations[0] << "\n";
+          outs() << "addVacuity = true!\n";
+        }
 
         for (int i = 0; i < hr.srcRelations.size(); i++) {
           if (find(fixedRels.begin(), fixedRels.end(), hr.srcRelations[i]) != fixedRels.end()) {
@@ -2044,11 +2057,13 @@ namespace ufo
         // existsArgs.push_back(mk<IMPL>(conjoin(antec, m_efac), conseq));
         // forallArgs.push_back(mknary<EXISTS>(existsArgs));
 
-        forallArgs.push_back(mk<IMPL>(conjoin(antec, m_efac), conseq));
-
+        // Try to change IMPL to AND after trying set addVacuity to true;
+        if(hr.srcRelations[0] == specDecl) forallArgs.push_back(mk<AND>(conjoin(antec, m_efac), conseq));
+        else forallArgs.push_back(mk<IMPL>(conjoin(antec, m_efac), conseq));
         constraints.push_back(mknary<FORALL>(forallArgs));
 
         if (addVacuity) {
+          if(debug >= 2) outs() << "addVacuity\n";
           forallArgs.pop_back();
           forallArgs.push_back(conjoin(antec, m_efac));
           constraints.push_back(mknary<EXISTS>(forallArgs));
@@ -2590,53 +2605,11 @@ namespace ufo
         }
       }
 
-
-      // Add data candidates here.
-      map<Expr, ExprSet> ghCandMap;
-      if(debug >= 3) outs() << "Entering exploreBounds\n";
-      exploreBounds(ghCandMap);
-      if(debug >= 5) outs() << "Left exploreBounds\n";
-
-      if(debug >= 5) {
-        for(auto& e : ghCandMap[invDecl]) { // print bounds found
-          outs() << "    GH_CAND FROM DATA: " << e << "\n";
-        }
-      }
-
-      for(auto& rel: fc->srcRelations) {
-        for(auto& e: ghCandMap[invDecl]) {
-          candidates[rel].insert(replaceAll(e, tr->srcVars[0], fc->srcVars[0]));
-          if(debug >= 3) {
-            outs() << "Cand added to rel: " << rel;
-            outs() << " : " << replaceAll(e, tr->srcVars[0], fc->srcVars[0]) <<"\n";
-          }
-
-        }
-      }
-
-      vector<HornRuleExt*> worklist;
-      for (auto & hr : ruleManager.chcs)
-      {
-        if (containsOp<ARRAY_TY>(hr.body)) hasArrays = true;
-        worklist.push_back(&hr);
-      }
-
-      for(auto& rel: decls) {
-        for(auto& e: ghCandMap[invDecl]) {
-          candidates[rel].insert(e);
-//          candidates[rel].insert(mk<GEQ>(invVars[0],mkTerm(mpz_class(0), m_efac)));
-          if(debug >= 3) {
-            outs() << "Cand added to rel: " << rel;
-            outs() << " :: " << e <<"\n";
-          }
-        }
-      }
-
       if (useGAS) {
         Result_t res;
         if (!usesygus) {
           outs() << "entering guessAndSolve\n";
-          res = guessAndSolve();
+          res = Result_t::UNSAT;//guessAndSolve();
           outs() << "left guessAndSolve. res: ";
           if(res == Result_t::UNSAT) outs() << "unsat";
           else outs() << "sat or unkown";
@@ -2695,8 +2668,10 @@ namespace ufo
       // for (auto r : rels) {
       // 	outs() << *r << "\n";
       // }
+      Expr block = mk<FALSE>(m_efac);
+      bounds.clear();
 
-      while (true) {
+      while (true) { // hornspec loop
 
         Result_t maxRes;
         ExprVector weakenRels;
@@ -2704,6 +2679,44 @@ namespace ufo
         map<Expr, Expr> smtSoln;
 
         if(debug) outs() << "current iteration: "<< itr << "\n";
+
+        // Add data candidates here.
+        map<Expr, ExprSet> ghCandMap;
+        if(debug >= 3) outs() << "Entering exploreBounds\n";
+        exploreBounds(ghCandMap, block);
+        if(debug >= 5) outs() << "Left exploreBounds\n";
+
+        if(debug >= 5) {
+          for(auto& e : ghCandMap[invDecl]) { // print bounds found
+            outs() << "    GH_CAND FROM DATA: " << e << "\n";
+          }
+        }
+
+        for(auto& rel: fc->srcRelations) {
+          for(auto& e: ghCandMap[invDecl]) {
+            Expr in = replaceAll(e, tr->srcVars[0], fc->srcVars[0]);
+            bounds.insert(in);
+            candidates[rel].insert(in);
+            if(debug >= 3) {
+              outs() << "Cand added to rel: " << rel;
+              outs() << " : " << in <<"\n";
+            }
+
+          }
+        }
+
+        for(auto& rel: decls) {
+          for(auto& e: ghCandMap[invDecl]) {
+            bounds.insert(e);
+            candidates[rel].insert(e);
+            if(debug >= 3) {
+              outs() << "Cand added to rel: " << rel;
+              outs() << " :: " << e <<"\n";
+            }
+          }
+        }
+        guessAndSolve();
+
         if(debug >= 2) printCands(false);
 
         maxRes = firstSMTCall ? checkMaximalSMT(weakenRels, fixedRels, smtSoln) : checkMaximalSMT(weakenRels, fixedRels, smtSoln, rels);
@@ -2714,11 +2727,15 @@ namespace ufo
 
           //debug
           for (auto hr : ruleManager.chcs) {
-            if (!checkCHC(hr, candidates)) {
+            if (!checkCHC(hr, candidates)) { // Some benches are failing here... Why?
               outs() << "something is wrong!(after SMT unsat)\n";
+              if(hr.isQuery) outs() << "Query\n";
+              else if(hr.isInductive) outs() << "Inductive\n";
+              else outs() << "Pre\n";
               assert(0);
             }
           }
+          printBounds();
           printCands(true, candidates);
           return;
 
@@ -2747,8 +2764,10 @@ namespace ufo
           continue;
         }
         printCands(false);
+        // Use the model from maximalSMT to make a new block EXPR.
+        continue;
 
-        outs() << "Entering weakenUsingSygus\n";
+        outs() << "Entering weakenUsingSygus\n"; // Change this to use DL with model from check.
         Result_t chcres = usesygus ? weakenUsingSygus(weakenRels, fixedRels) : weakenUsingCHC(weakenRels, fixedRels);
         outs() << "Left weakenUsingSygus\n";
 
