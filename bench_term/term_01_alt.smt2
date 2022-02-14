@@ -4,7 +4,7 @@
 (declare-var y Int)
 (declare-var y1 Int)
 
-(rule (=> (< x y) (inv x y)))
+(rule (=> (and (> x 0) (< x y)) (inv x y)))
 
 (rule (=>
     (and

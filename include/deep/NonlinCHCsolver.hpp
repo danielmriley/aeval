@@ -354,7 +354,7 @@ namespace ufo
         if(hr.isInductive) preCond = ruleManager.getPrecondition(&hr);
       }
 
-      ruleManager.print();
+      if(debug >= 2) ruleManager.print();
 
       if(invs == NULL) {outs() << "RETURNING\n"; return;}
 
@@ -366,7 +366,7 @@ namespace ufo
       }
 
       for (auto & dcl : decls) {
-        outs() << "dcl: " << dcl << "\n";
+        if(debug >= 2) outs() << "dcl: " << dcl << "\n";
         if (srcRel == dcl)
         {
           if(debug >= 2) outs() << "Compute Data\n";
@@ -496,11 +496,15 @@ namespace ufo
       ExprSet checkList;
       checkList.insert(hr.body);
       Expr rel;
+      if(hr.isQuery) outs() << "Query\n";
+      else if(hr.isInductive) outs() << "Inductive\n";
+      else outs() << "Pre\n";
       for (int i = 0; i < hr.srcRelations.size(); i++)
       {
         Expr rel = hr.srcRelations[i];
         ExprSet lms = annotations[rel];
         Expr overBody = replaceAll(conjoin(lms, m_efac), ruleManager.invVars[rel], hr.srcVars[i]);
+        outs() << "overbody: " << overBody << "\n";
         getConj(overBody, checkList);
       }
       if (!hr.isQuery)
@@ -509,7 +513,9 @@ namespace ufo
         ExprSet negged;
         ExprSet lms = annotations[rel];
         for (auto a : lms) negged.insert(mkNeg(replaceAll(a, ruleManager.invVars[rel], hr.dstVars)));
-        checkList.insert(disjoin(negged, m_efac));
+        Expr neg = disjoin(negged, m_efac);
+        outs() << "neg: " << neg << "\n";
+        checkList.insert(neg);
       }
       if(debug >= 6) { outs() << "checkList:\n"; printExprContainer(checkList, 2); }
       return bool(!u.isSat(checkList));
@@ -1798,7 +1804,7 @@ namespace ufo
       newsmt += postfix + "_" + to_string(std::chrono::system_clock::now().time_since_epoch().count());
       newsmt += sygus ? ".sl" : ".smt2";
 
-      outs() << "newsmt: " << newsmt << "\n";
+      if(debug >= 3) outs() << "newsmt: " << newsmt << "\n";
 
       string ds = decls.str();
       string rs = rules.str();
@@ -1976,10 +1982,11 @@ namespace ufo
 
         if(hr.srcRelations[0] == specDecl) {
           addVacuity = true;
-          outs() << "Rel: " << hr.srcRelations[0] << "\n";
-          outs() << "addVacuity = true!\n";
+          if(debug >= 3) outs() << "Rel: " << hr.srcRelations[0] << "\n";
+          if(debug >= 3) outs() << "addVacuity = true!\n";
         }
 
+// remove this block
         for (int i = 0; i < hr.srcRelations.size(); i++) {
           if (find(fixedRels.begin(), fixedRels.end(), hr.srcRelations[i]) != fixedRels.end()) {
             Expr curCand = conjoin(candidates[hr.srcRelations[i]], m_efac);
@@ -2052,28 +2059,29 @@ namespace ufo
           forallArgs.push_back(lv->left());
           allVars.insert(lv);
         }
-        outs() << "forallArgs\n";
-        printExprContainer(forallArgs, 2);
+        if(debug >= 3) outs() << "forallArgs\n";
+        if(debug >= 3) printExprContainer(forallArgs, 2);
         // existsArgs.push_back(mk<IMPL>(conjoin(antec, m_efac), conseq));
         // forallArgs.push_back(mknary<EXISTS>(existsArgs));
 
         // Try to change IMPL to AND after trying set addVacuity to true;
-        if(hr.srcRelations[0] == specDecl) forallArgs.push_back(mk<AND>(conjoin(antec, m_efac), conseq));
+        if(addVacuity) forallArgs.push_back(mk<AND>(conjoin(antec, m_efac), conseq));
         else forallArgs.push_back(mk<IMPL>(conjoin(antec, m_efac), conseq));
         constraints.push_back(mknary<FORALL>(forallArgs));
 
-        if (addVacuity) {
+        // Add this back if things go weird...
+      /*  if (addVacuity) {
           if(debug >= 2) outs() << "addVacuity\n";
           forallArgs.pop_back();
           forallArgs.push_back(conjoin(antec, m_efac));
           constraints.push_back(mknary<EXISTS>(forallArgs));
-        }
+        }*/
       }
 
       //DEBUG
       dumpSMT(constraints, allVars);
-      outs() << "constraints\n";
-      printExprContainer(constraints, 2);
+      if(debug >= 5) outs() << "constraints\n";
+      if(debug >= 5) printExprContainer(constraints, 2);
       boost::tribool res = u.isSat(constraints);
 
       if (boost::logic::indeterminate(res)) {
@@ -2608,12 +2616,12 @@ namespace ufo
       if (useGAS) {
         Result_t res;
         if (!usesygus) {
-          outs() << "entering guessAndSolve\n";
+          if(debug >= 3) outs() << "entering guessAndSolve\n";
           res = Result_t::UNSAT;//guessAndSolve();
-          outs() << "left guessAndSolve. res: ";
-          if(res == Result_t::UNSAT) outs() << "unsat";
-          else outs() << "sat or unkown";
-          outs() << "\n";
+          if(debug >= 3) outs() << "left guessAndSolve. res: ";
+          if(debug >= 3 && res == Result_t::UNSAT) outs() << "unsat\n";
+          else if(debug >= 3) outs() << "sat or unkown\n";
+
         }  else {
           ExprVector tmpfrels;
           res = weakenUsingSygus(allRels, tmpfrels, true);
@@ -2670,6 +2678,7 @@ namespace ufo
       // }
       Expr block = mk<FALSE>(m_efac);
       bounds.clear();
+      map<Expr, ExprSet> ghCandMap;
 
       while (true) { // hornspec loop
 
@@ -2681,10 +2690,13 @@ namespace ufo
         if(debug) outs() << "current iteration: "<< itr << "\n";
 
         // Add data candidates here.
-        map<Expr, ExprSet> ghCandMap;
-        if(debug >= 3) outs() << "Entering exploreBounds\n";
-        exploreBounds(ghCandMap, block);
-        if(debug >= 5) outs() << "Left exploreBounds\n";
+        if(ghCandMap[invDecl].empty()) {
+          if(debug >= 3) outs() << "Entering exploreBounds\n";
+          exploreBounds(ghCandMap, block);
+          if(debug >= 5) outs() << "Left exploreBounds\n";
+        }
+
+        //ghCandMap[invDecl].erase(*ghCandMap[invDecl].begin());
 
         if(debug >= 5) {
           for(auto& e : ghCandMap[invDecl]) { // print bounds found
@@ -2701,7 +2713,7 @@ namespace ufo
               outs() << "Cand added to rel: " << rel;
               outs() << " : " << in <<"\n";
             }
-
+            break;
           }
         }
 
@@ -2709,10 +2721,12 @@ namespace ufo
           for(auto& e: ghCandMap[invDecl]) {
             bounds.insert(e);
             candidates[rel].insert(e);
+            ghCandMap[invDecl].erase(e);
             if(debug >= 3) {
               outs() << "Cand added to rel: " << rel;
               outs() << " :: " << e <<"\n";
             }
+            break;
           }
         }
         guessAndSolve();
@@ -2726,12 +2740,11 @@ namespace ufo
           if(debug >= 2) outs() << "Total iterations: "  << itr << "\n";
 
           //debug
+          ruleManager.print();
           for (auto hr : ruleManager.chcs) {
             if (!checkCHC(hr, candidates)) { // Some benches are failing here... Why?
               outs() << "something is wrong!(after SMT unsat)\n";
-              if(hr.isQuery) outs() << "Query\n";
-              else if(hr.isInductive) outs() << "Inductive\n";
-              else outs() << "Pre\n";
+
               assert(0);
             }
           }
@@ -2767,9 +2780,9 @@ namespace ufo
         // Use the model from maximalSMT to make a new block EXPR.
         continue;
 
-        outs() << "Entering weakenUsingSygus\n"; // Change this to use DL with model from check.
+        if(debug >= 3) outs() << "Entering weakenUsingSygus\n"; // Change this to use DL with model from check.
         Result_t chcres = usesygus ? weakenUsingSygus(weakenRels, fixedRels) : weakenUsingCHC(weakenRels, fixedRels);
-        outs() << "Left weakenUsingSygus\n";
+        if(debug >= 3) outs() << "Left weakenUsingSygus\n";
 
         if (chcres == Result_t::UNKNOWN) {
           for (auto ce : smtSoln) {
@@ -2794,8 +2807,8 @@ namespace ufo
             assert(0);
           }
         }
-        outs() << "End of loop\n";
-        printCands(false);
+        if(debug >= 5) outs() << "End of loop\n";
+        if(debug >= 2) printCands(false);
 
       }
     }
@@ -2947,13 +2960,14 @@ namespace ufo
     CHCs ruleManager(m_efac, z3);
     ruleManager.parse(smt);
     NonlinCHCsolver spec(ruleManager, stren, debug);
-    outs() << "invDecl: " << ruleManager.invRel << "\n";
-    for(auto& e: ruleManager.invVars[ruleManager.invRel])
-      outs() << "invVar: " << e << "\n";
+    if(debug >= 3) outs() << "invDecl: " << ruleManager.invRel << "\n";
+    if(debug >= 3)
+      for(auto& e: ruleManager.invVars[ruleManager.invRel])
+        outs() << "invVar: " << e << "\n";
     if(!ruleManager.hasQuery) {
-      ruleManager.print();
+      if(debug >= 2) ruleManager.print();
       spec.setUpQueryAndSpec();
-      outs() << "invDecl: " << ruleManager.invRel << "\nStart solving\n";
+      if(debug >= 3) outs() << "invDecl: " << ruleManager.invRel << "\nStart solving\n";
     }
     if (usesygus) {
       spec.setSygusPath(syguspath);

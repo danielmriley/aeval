@@ -311,7 +311,7 @@ namespace ufo
             exit (0);
           }
         }
-        outs() << "srcRelations size: " << hr.srcRelations.size() << "\n";
+        //outs() << "srcRelations size: " << hr.srcRelations.size() << "\n";
         hr.isFact = hr.srcRelations.empty();
 
         if (isOpX<FAPP>(head))
@@ -342,7 +342,7 @@ namespace ufo
           qCHCNum = chcs.size() - 1;
         }
         if(!hr.isInductive && !hr.isQuery) invRel = hr.dstRelation;
-        outs() << "invRel horn: " << invRel << "\n";
+        //outs() << "invRel horn: " << invRel << "\n";
 
         ExprVector allOrigSymbs;
         for (auto & a : origSrcSymbs) for (auto & b : a) allOrigSymbs.push_back(b);
@@ -488,14 +488,14 @@ namespace ufo
       }
 
       assert (cycles.size() == prefixes.size());
-      for (auto & c : cycles)
+      /*for (auto & c : cycles)
       {
         outs () << "   cycle: ";
         for (auto & chcNum : c) outs () << *chcs[chcNum].srcRelation << " -> ";
         outs () << "    [";
         for (auto & chcNum : c) outs () << chcNum << " -> ";
         outs () << "]\n";
-      }
+      }*/
       return (cycles.size() > 0);
     }
 

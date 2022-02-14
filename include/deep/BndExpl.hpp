@@ -487,6 +487,7 @@ namespace ufo
           int k = 10)
     {
       assert (gh_cond != NULL);
+      ruleManager.print();
 
       // helper var
       string str = to_string(numeric_limits<double>::max());
