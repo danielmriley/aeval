@@ -509,9 +509,9 @@ namespace ufo
     */}
 
     void
-    computeDataTerm(Expr srcRel = NULL, Expr gh_cond = NULL, Expr invs = NULL, Expr preCond = NULL)
+    computeDataTerm(Expr srcRel = NULL, Expr block = NULL, Expr invs = NULL, Expr preCond = NULL)
     {
-      bnd.unrollAndExecuteTerm(srcRel, invVars[srcRel], exprToModels[srcRel], gh_cond, invs, preCond);
+      bnd.unrollAndExecuteTerm(srcRel, invVars[srcRel], exprToModels[srcRel], block, invs, preCond);
     }
 
     ExprSet& getConcrInvs(Expr rel) { return bnd.concrInvs[rel]; }

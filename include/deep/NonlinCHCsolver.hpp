@@ -141,18 +141,19 @@ namespace ufo
       fc_new->isFact = false;
       ExprVector specVars;
       ExprVector specVarsPr;
-//      specVars = invVars;
-//      specVarsPr = invVarsPr;
+//      specVars = invVars; // only include if keeping pre and inv vars the same.
+  //    specVarsPr = invVarsPr; // only include if keeping pre and inv vars the same.
       for(int i = 0; i < invVars.size(); i++) {
         specVars.push_back(bind::intConst(mkTerm<string>(varName + to_string(i + invVars.size()), m_efac)));
         specVarsPr.push_back(bind::intConst(mkTerm<string>(varName + to_string(i + invVars.size()) + "'", m_efac)));
       }
-      fc_new->srcVars.push_back(specVars);
 
+      fc_new->srcVars.push_back(specVars);
       ExprSet fc_body;
       for(int i = 0; i < specVars.size(); i++) {
         fc_body.insert(mk<EQ>(specVars[i], invVarsPr[i]));
       }
+
       fc_body.insert(replaceAll(fc->body, invVarsPr, specVars));
       fc_body.insert(mk<EQ>(ghostVars[1], ghostVarsPr[0]));
 
@@ -341,26 +342,25 @@ namespace ufo
     }
     void dataForBound(map<Expr, ExprSet>& candMap, Expr block) {
       if(debug >= 2)
-        outs() << "USING DATA\n";
-      Expr splitter = mk<TRUE>(m_efac);
+        outs() << "USING DATA\n===========\n";
       Expr invs = mk<TRUE>(m_efac);
       Expr srcRel = ruleManager.invRel;
       Expr model;
-      Expr preCond;
+      Expr loopGuard;
       map<Expr, ExprSet> poly;
-      DataLearner dl(ruleManager, z3, true);
+      DataLearner dl(ruleManager, z3, (debug > 0));
 
       for(auto hr : ruleManager.chcs) {
-        if(hr.isInductive) preCond = ruleManager.getPrecondition(&hr);
+        if(hr.isInductive) loopGuard = ruleManager.getPrecondition(&hr);
       }
 
-      if(debug >= 2) ruleManager.print();
+      if(debug >= 4) ruleManager.print();
 
       if(invs == NULL) {outs() << "RETURNING\n"; return;}
 
       if(debug >= 5) {
         outs() << "\n    srcRel: " << srcRel << "\n";
-        outs() << "    preCond: " << preCond << "\n";
+        outs() << "    loopGuard: " << loopGuard << "\n";
         outs() << "    invs: " << invs << "\n";
         outs() << "    block: " << block << "\n";
       }
@@ -370,7 +370,7 @@ namespace ufo
         if (srcRel == dcl)
         {
           if(debug >= 2) outs() << "Compute Data\n";
-          dl.computeDataTerm(srcRel, block, invs, preCond);
+          dl.computeDataTerm(srcRel, block, invs, loopGuard);
           dl.computePolynomials(dcl, poly[dcl]);
           break;
         }
@@ -393,7 +393,7 @@ namespace ufo
           */
         }
 
-        mutateHeuristicEq(p.second, candMap[p.first], p.first, (splitter == NULL));
+        mutateHeuristicEq(p.second, candMap[p.first], p.first, (block == NULL));
       }
     }
 
@@ -414,7 +414,7 @@ namespace ufo
     {
       boost::tribool res = true;
 
-      block = mkNeg(block);
+      //block = mkNeg(block);
       if(block == mk<FALSE>(m_efac)) return false;
 
       map<Expr, ExprSet> ghBoundMap;
@@ -463,17 +463,11 @@ namespace ufo
       if(debug >= 3) outs() << "fc body: " << fc->body << "\n";
 
       Expr assertBounds;
-//      for(auto& hr : ruleManager->chcs) {
-//        if(hr.isInductive) {
-          assertBounds = fc->body;
-//        }
-//      }
+      assertBounds = fc->body;
       assertBounds = mk<AND>(assertBounds, mkNeg(loopGuardPr));
       assertBounds = mk<AND>(assertBounds, ghostGuardPr);
       if(debug >= 4) outs() << "Assertion to check:" << assertBounds << "\n";
-      //pprint(assertBounds);
       exploreBounds(ghCandMap, assertBounds, block);
-
       if(debug >= 2) for(auto& e: bounds) outs() << "BOUND: " << e << "\n";
       //outs() << "count: " << count << "\n";
       //exit(0);
@@ -496,15 +490,18 @@ namespace ufo
       ExprSet checkList;
       checkList.insert(hr.body);
       Expr rel;
-      if(hr.isQuery) outs() << "Query\n";
-      else if(hr.isInductive) outs() << "Inductive\n";
-      else outs() << "Pre\n";
+      if(debug > 5) {
+        if(hr.isQuery) outs() << "Query\n";
+        else if(hr.isInductive) outs() << "Inductive\n";
+        else outs() << "Pre\n";
+
+      }
       for (int i = 0; i < hr.srcRelations.size(); i++)
       {
         Expr rel = hr.srcRelations[i];
         ExprSet lms = annotations[rel];
         Expr overBody = replaceAll(conjoin(lms, m_efac), ruleManager.invVars[rel], hr.srcVars[i]);
-        outs() << "overbody: " << overBody << "\n";
+        if(debug > 5) outs() << "overbody: " << overBody << "\n";
         getConj(overBody, checkList);
       }
       if (!hr.isQuery)
@@ -514,7 +511,7 @@ namespace ufo
         ExprSet lms = annotations[rel];
         for (auto a : lms) negged.insert(mkNeg(replaceAll(a, ruleManager.invVars[rel], hr.dstVars)));
         Expr neg = disjoin(negged, m_efac);
-        outs() << "neg: " << neg << "\n";
+        if(debug > 5) outs() << "neg: " << neg << "\n";
         checkList.insert(neg);
       }
       if(debug >= 6) { outs() << "checkList:\n"; printExprContainer(checkList, 2); }
@@ -2692,7 +2689,7 @@ namespace ufo
         // Add data candidates here.
         if(ghCandMap[invDecl].empty()) {
           if(debug >= 3) outs() << "Entering exploreBounds\n";
-          exploreBounds(ghCandMap, block);
+          exploreBounds(ghCandMap, mkNeg(block));
           if(debug >= 5) outs() << "Left exploreBounds\n";
         }
 
@@ -2709,7 +2706,7 @@ namespace ufo
             Expr in = replaceAll(e, tr->srcVars[0], fc->srcVars[0]);
             bounds.insert(in);
             candidates[rel].insert(in);
-            if(debug >= 3) {
+            if(debug >= 2) {
               outs() << "Cand added to rel: " << rel;
               outs() << " : " << in <<"\n";
             }
@@ -2722,7 +2719,7 @@ namespace ufo
             bounds.insert(e);
             candidates[rel].insert(e);
             ghCandMap[invDecl].erase(e);
-            if(debug >= 3) {
+            if(debug >= 2) {
               outs() << "Cand added to rel: " << rel;
               outs() << " :: " << e <<"\n";
             }

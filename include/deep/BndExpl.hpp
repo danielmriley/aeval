@@ -487,7 +487,10 @@ namespace ufo
           int k = 10)
     {
       assert (gh_cond != NULL);
-      ruleManager.print();
+      if(debug) {
+        outs() << "Exploring execution of " << srcRel << "\n";
+        ruleManager.print();
+      }
 
       // helper var
       string str = to_string(numeric_limits<double>::max());
@@ -531,54 +534,36 @@ namespace ufo
         auto & prefix = ruleManager.prefixes[cyc];
         vector<int> trace;
         int l = 0;                              // starting index (before the loop)
-        if (ruleManager.hasArrays) l++; // first iter is usually useless
-
+        //if (ruleManager.hasArrays) l++; // first iter is usually useless
+        if(gh_cond == mk<TRUE>(m_efac)) trace.push_back(0);
         for (int j = 0; j < k; j++)
           for (int m = 0; m < loop.size(); m++)
             trace.push_back(loop[m]);
 
         ExprVector ssa;
-        //for(auto& i: trace) outs() << "trace: " << i << "\n";
-
+        for(auto& t: trace) outs() << t << ", ";
+        outs() << "\b\b \n";
         getSSA(trace, ssa);
         Expr gh_zero = ssa.back();
         Expr ssa_last = gh_zero;
         ssa.pop_back();
-        //outs() << "gh_zero: " << gh_zero << "\n";
         ExprSet g;
         getConj(gh_zero, g);
         ExprVector g2;
         for(auto& c: g) g2.push_back(c);
         gh_zero = g2.back();
-        /*
-        for(auto& e : g2) {
-          if(!containsOp<NumericOp>(e->right())) {
-            outs() << "NUMERICOP: " << e->right() << "\n";
-          }
-        }
-        */
-//        outs() << "gh_zero: " << gh_zero << "\n";
         gh_zero = mk<EQ>(gh_zero->left(), mkTerm(mpz_class(0), m_efac));
-//        outs() << "gh_zero: " << gh_zero << "\n";
         g2.push_back(gh_zero);
         gh_zero = conjoin(g2, m_efac);
-//        outs() << "gh_zero: " << gh_zero << "\n";
 
         preCond = replaceAll(preCond, srcVars, bindVars[bindVars.size() - 1]);
-//        outs() << "    PRECOND: " << preCond << "\n";
         preCond = mkNeg(preCond);
         ssa.push_back(mk<AND>(gh_zero, preCond));
-
-  /*      for(int i = 0; i < bindVars.size(); i++)
-          for(auto& b : bindVars[i]) outs() << "    BINDVARS" << i << ": " << b << "\n";
-*/
-        //ssa.push_back(mk<AND>(mkNeg(gh_cond),
-        //          replaceAll(invs, ruleManager.chcs[loop.back()].dstVars, bindVars[loop.size() - 1])));
-        ssa.push_back(
-                  replaceAll(gh_cond, srcVars, bindVars[loop.size() - 1]));
-        bindVars.pop_back();
+        ssa.push_back(gh_cond);
+        //ssa.push_back(replaceAll(gh_cond, srcVars, bindVars[loop.size() - 1]));
+        //bindVars.pop_back();
+        outs() << "SSA:\n" << conjoin(ssa, m_efac) << "\n";
         int traceSz = trace.size();
-        //outs() << "SSA:\n" << conjoin(ssa, m_efac) << "\n";
   //      pprint( conjoin(ssa, m_efac));
         // compute vars for opt constraint
         vector<ExprVector> versVars;

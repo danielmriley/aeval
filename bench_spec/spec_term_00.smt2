@@ -1,15 +1,31 @@
-(declare-rel inv (Int))
+(declare-rel inv (Int Int))
+(declare-rel f (Int Int))
+
 (declare-var x Int)
 (declare-var x1 Int)
+(declare-var i Int)
+(declare-var i1 Int)
 
-(rule (inv x))
+(declare-rel fail ())
+
+(rule (=> (and
+            (= x 5)
+            (= x i)
+            ;(f x i)
+          )
+          (inv x i)))
 
 (rule (=>
     (and
-        (inv x)
+        (inv x i)
         (> x 0)
         (= x1 (- x 1))
+        (= i1 (- i 1))
     )
-    (inv x1)
+    (inv x1 i1)
   )
 )
+
+(rule (=> (and (inv x i) (<= x 0) (not (= i 0))) fail))
+
+(query fail)

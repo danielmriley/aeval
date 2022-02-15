@@ -2,7 +2,7 @@
 (declare-var x Int)
 (declare-var x1 Int)
 
-(rule (=> (> x 10) (inv x)))
+(rule (=> (= x 15) (inv x)))
 
 (rule (=>
     (and
