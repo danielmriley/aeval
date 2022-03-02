@@ -4,11 +4,11 @@
 
 (rule (inv x))
 
-(rule (=>
-    (and
+(rule (=> 
+    (and 
         (inv x)
-        (> x 0)
-        (= x1 (- x 1))
+        (>= x 0)
+        (= x1 (ite (= (mod x 5) 0) (- x 5) (+ x 1)))
     )
     (inv x1)
   )

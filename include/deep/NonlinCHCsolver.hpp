@@ -82,7 +82,10 @@ namespace ufo
     Expr ghostGuardPr;
     Expr loopGuard;
     Expr loopGuardPr;
+    Expr fcBodyInvVars;
     ExprSet bounds;
+
+    bool hornspec = false;
 
     public:
 
@@ -164,6 +167,23 @@ namespace ufo
       }
 
       ruleManager.replaceRule(fc_new);
+
+      fcBodyInvVars = fc_new->body;
+      ExprSet temp;
+      getConj(fcBodyInvVars,temp);
+      bool replaced;
+      for(auto e = temp.begin(); e != temp.end(); ) {
+        replaced = false;
+        for(auto& i: fc_new->dstVars) {
+          if(contains(*e, i)) {
+            e = temp.erase(e);
+            replaced = true;
+          }
+
+        }
+        if(!replaced) e++;
+      }
+      fcBodyInvVars = conjoin(temp, m_efac);
       if(debug >= 4) {
         for(auto& v: fc_new->srcRelations)
           outs() << "Rel: " << v << "\n";
@@ -188,6 +208,8 @@ namespace ufo
       for(auto& sv: tr_new->srcVars) {
         sv.push_back(ghostVars[0]);
       }
+      invVars.push_back(ghostVars[0]);
+      invVarsPr.push_back(ghostVarsPr[0]);
       tr_new->dstRelation = tr->dstRelation;
       tr_new->dstVars = tr->dstVars;
       tr_new->dstVars.push_back(ghostVarsPr[0]);
@@ -199,6 +221,8 @@ namespace ufo
       tmp.insert(decGhost0);
       tr_new->body = conjoin(tmp, m_efac);
       ruleManager.replaceRule(tr_new);
+      fcBodyInvVars = replaceAll(fcBodyInvVars, fc->srcVars[0], invVars);
+      outs() << "fcBodyInvVars: " << fcBodyInvVars << "\n";
 
     for (auto & a : ruleManager.chcs)       // r.chcs changed by r.addRule, so pointers to its elements are broken
       if (a.isInductive) tr = &a;
@@ -340,25 +364,27 @@ namespace ufo
         else i++;
       }
     }
-    void dataForBound(map<Expr, ExprSet>& candMap, Expr block) {
+
+    boost::tribool dataForBound(map<Expr, ExprSet>& candMap, Expr block) {
       if(debug >= 2)
-        outs() << "USING DATA\n===========\n";
+        outs() << "\nUSING DATA\n===========\n";
       Expr invs = mk<TRUE>(m_efac);
       Expr srcRel = ruleManager.invRel;
       Expr model;
       Expr loopGuard;
       map<Expr, ExprSet> poly;
       DataLearner dl(ruleManager, z3, (debug > 0));
+      boost::tribool res;
 
       for(auto hr : ruleManager.chcs) {
         if(hr.isInductive) loopGuard = ruleManager.getPrecondition(&hr);
       }
 
-      if(debug >= 4) ruleManager.print();
+      if(debug >= 6) ruleManager.print();
 
-      if(invs == NULL) {outs() << "RETURNING\n"; return;}
+      if(invs == NULL) {outs() << "RETURNING\n"; return false;}
 
-      if(debug >= 5) {
+      if(debug >= 6) {
         outs() << "\n    srcRel: " << srcRel << "\n";
         outs() << "    loopGuard: " << loopGuard << "\n";
         outs() << "    invs: " << invs << "\n";
@@ -366,11 +392,11 @@ namespace ufo
       }
 
       for (auto & dcl : decls) {
-        if(debug >= 2) outs() << "dcl: " << dcl << "\n";
+        if(debug >= 6) outs() << "dcl: " << dcl << "\n";
         if (srcRel == dcl)
         {
-          if(debug >= 2) outs() << "Compute Data\n";
-          dl.computeDataTerm(srcRel, block, invs, loopGuard);
+          if(debug >= 6) outs() << "Compute Data\n";
+          res = dl.computeDataTerm(srcRel, block, invs, loopGuard);
           dl.computePolynomials(dcl, poly[dcl]);
           break;
         }
@@ -379,9 +405,9 @@ namespace ufo
       // mutations after all
       for (auto & p : poly)
       {
+        /*
         if (ruleManager.hasArrays)   // heuristic to remove cands irrelevant to counters and arrays
         {
-          /*
           ExprSet its;
           int invNum = getVarIndex(p.first, ruleManager.decls);
           for (auto q : qvits[invNum]) its.insert(q->iter);
@@ -390,11 +416,13 @@ namespace ufo
               it = p.second.erase(it);
             else
               ++it;
-          */
         }
+        */
 
         mutateHeuristicEq(p.second, candMap[p.first], p.first, (block == NULL));
       }
+
+      return res;
     }
 
     void filterDuplicates(ExprSet& setOne, ExprSet& setTwo)
@@ -409,70 +437,35 @@ namespace ufo
       }
     }
 
-    boost::tribool exploreBounds(map<Expr, ExprSet>& ghCandMap,
-                                Expr assertBounds, Expr block)
+    boost::tribool exploreBounds(map<Expr, ExprSet>& ghCandMap, Expr block)
     {
-      boost::tribool res = true;
+      boost::tribool res;
 
       //block = mkNeg(block);
       if(block == mk<FALSE>(m_efac)) return false;
 
       map<Expr, ExprSet> ghBoundMap;
 
-      dataForBound(ghCandMap, block);
+      res = dataForBound(ghCandMap, block);
+      if(ghCandMap[invDecl].empty()) res = false;
       filterNonGhExp(ghCandMap[invDecl]);
 
-      ExprSet conjs;
-      getConj(assertBounds, conjs);
-      if(block != mk<TRUE>(m_efac)) conjs.insert(mkNeg(block));
-      for(auto& e : ghCandMap[invDecl]) {
-        conjs.insert(e);
-        Expr check = conjoin(conjs, m_efac);
-        if(debug >= 4) outs() << "CHECK: " << check << "\n";
-        //pprint(check);
-        res = u.isSat(check);
-        //if(!res) {
-          if(u.isFalse(block)) {
-            bounds.insert(mkNeg(block));
-            if(debug >= 5) outs() << "Inserting bound: " << mkNeg(block) << "\n";
-          }
-          if(!u.isEquiv(e, mk<FALSE>(m_efac))) {
-            bounds.insert(e);
-            if(debug >= 5) outs() << "Inserting bound: " << e << "\n";
-          }
-          break;
-        //}
-        conjs.erase(e);
+      ExprSet temp;
+      for(auto i = ghCandMap[invDecl].begin(),
+          end = ghCandMap[invDecl].end(); i != end; i++) {
+        Expr e = *i;
+        e = normalize(e,ghostVars[0]);
+        temp.insert(e);
+      }
+      ghCandMap[invDecl].swap(temp);
 
+      if(debug >= 4) {
+        outs() << "filtered cands:\n";
+        if(!ghCandMap[invDecl].empty()) pprint(ghCandMap[invDecl],2);
       }
 
-      if(!res) return res;
-
-      for(auto& e: ghCandMap[invDecl]) {
-        res = exploreBounds(ghBoundMap, assertBounds, e);
-        if(!res) break;
-      }
+      if(!res) outs() << "RETURNING FALSE\n";
       return res;
-
-    }
-
-    boost::tribool exploreBounds(map<Expr, ExprSet>& ghCandMap, Expr block)
-    {
-      boost::tribool res;
-
-      if(debug >= 3) outs() << "fc body: " << fc->body << "\n";
-
-      Expr assertBounds;
-      assertBounds = fc->body;
-      assertBounds = mk<AND>(assertBounds, mkNeg(loopGuardPr));
-      assertBounds = mk<AND>(assertBounds, ghostGuardPr);
-      if(debug >= 4) outs() << "Assertion to check:" << assertBounds << "\n";
-      exploreBounds(ghCandMap, assertBounds, block);
-      if(debug >= 2) for(auto& e: bounds) outs() << "BOUND: " << e << "\n";
-      //outs() << "count: " << count << "\n";
-      //exit(0);
-      return res;
-
     }
 
     bool checkAllOver (bool checkQuery = false)
@@ -490,7 +483,7 @@ namespace ufo
       ExprSet checkList;
       checkList.insert(hr.body);
       Expr rel;
-      if(debug > 5) {
+      if(debug >= 6) {
         if(hr.isQuery) outs() << "Query\n";
         else if(hr.isInductive) outs() << "Inductive\n";
         else outs() << "Pre\n";
@@ -501,7 +494,7 @@ namespace ufo
         Expr rel = hr.srcRelations[i];
         ExprSet lms = annotations[rel];
         Expr overBody = replaceAll(conjoin(lms, m_efac), ruleManager.invVars[rel], hr.srcVars[i]);
-        if(debug > 5) outs() << "overbody: " << overBody << "\n";
+        if(debug >= 6) outs() << "overbody: " << overBody << "\n";
         getConj(overBody, checkList);
       }
       if (!hr.isQuery)
@@ -511,7 +504,7 @@ namespace ufo
         ExprSet lms = annotations[rel];
         for (auto a : lms) negged.insert(mkNeg(replaceAll(a, ruleManager.invVars[rel], hr.dstVars)));
         Expr neg = disjoin(negged, m_efac);
-        if(debug > 5) outs() << "neg: " << neg << "\n";
+        if(debug >= 6) outs() << "neg: " << neg << "\n";
         checkList.insert(neg);
       }
       if(debug >= 6) { outs() << "checkList:\n"; printExprContainer(checkList, 2); }
@@ -1147,14 +1140,6 @@ namespace ufo
       }
     }
 
-    void printBounds()
-    {
-      outs() << "Bounds:\n";
-      for(auto& e: bounds) {
-        outs() << "  " << e << "\n";
-      }
-    }
-
     void printCands(bool unsat = true, map<Expr, ExprSet> partialsolns = map<Expr,ExprSet>(), bool nonmaximal = false, bool simplify = false)
     {
       printCands(unsat, partialsolns, nonmaximal, simplify, outs());
@@ -1203,7 +1188,7 @@ namespace ufo
           u.removeRedundantConjuncts(lms);
           res = conjoin(lms, m_efac);
         }
-        u.print(res, out);
+        pprint(res);
         out << ")\n";
       }
     }
@@ -1680,7 +1665,7 @@ namespace ufo
 
     Result_t guessAndSolve()
     {
-      if(debug >= 3) outs() << "Start guessAndSolve\n";
+      if(debug >= 3) outs() << "\n    GUESS AND SOLVE\n=======================\n";
       vector<HornRuleExt*> worklist;
       for (auto & hr : ruleManager.chcs)
       {
@@ -1693,25 +1678,18 @@ namespace ufo
         auto candidatesTmp = candidates;
         for (bool fwd : { false, true })
         {
-          if (debug)
+          if (debug>=7)
           {
             outs () << "iter " << globalIter << "." << fwd << "\nCurrent candidates:\n";
             printCands(false);
           }
           declsVisited.clear();
           declsVisited.insert(ruleManager.failDecl);
-          // outs() << "1st\n";//DEBUG
-          // printCands(false);//DEBUG
-          // outs() << "fwd: " << fwd << "\n";//DEBUG
           propagate(fwd);
           filterUnsat();
-          // outs() << "2nd\n";//DEBUG
-          // printCands(false);//DEBUG
           if (fwd) multiHoudini(worklist);  // i.e., weaken
           else strengthen();
           filterUnsat();
-          // outs() << "3rd\n";//DEBUG
-          // printCands(false);//DEBUG
           if (checkAllOver(true)) return Result_t::UNSAT;
         }
         if (equalCands(candidatesTmp)) break;
@@ -2594,6 +2572,141 @@ namespace ufo
       return diff;
     }
 
+    void parseForGuards(ExprSet& grds) {
+      ExprSet exp;
+      if(debug >= 3) outs() << "Begin parsing for guards\n";
+      for(auto e = candidates[specDecl].begin(); e != candidates[specDecl].end() ; e++) {
+        if(contains(*e,ghostVars[0]) || contains(*e,ghostVars[1])) {
+
+        }
+        else {
+          Expr r = replaceAll(*e, fc->srcVars[0],invVars);
+          exp.insert(r);
+        }
+      }
+      if(exp.empty()) exp.insert(mk<TRUE>(m_efac));
+      grds.insert(exp.begin(), exp.end());
+      if(debug >= 3) {
+        outs() << "End parsing for guards\n";
+        printExprContainer(grds,2);
+      }
+    }
+
+    map<Expr, ExprSet> ghCandMap;
+    void writeITE(Expr block, ExprSet& grds) {
+      printCands(false);
+      /*
+      auto gi = grds.begin();
+      auto ge = grds.end();
+      auto bi = ghCandMap[invDecl].begin();
+
+      outs() << ghostVars[0] << " = ite(";
+      while(gi != ge) {
+        Expr gr = *gi;
+        Expr br = *bi;
+        outs() << gr << ", ";
+        outs() << br->left()->right() << ", ";
+        if(next(bi,1) == ghCandMap[invDecl].end()) {
+          outs() << "0";
+        }
+        else {
+          outs() << br;
+        }
+        gi++; bi++;
+      }
+      outs() << ")\n";
+      */
+    }
+
+    boost::tribool boundSolve(Expr block) {
+      map<Expr,ExprSet> bounds;
+      boost::tribool res = exploreBounds(bounds, block);
+      while(!bounds.empty() && res) {
+        if(debug >= 4) outs() << "in recursive loop\n";
+        ExprSet grds; // hold the guards (phi) of the f(vars) /\ phi(vars) expression)
+        Expr b = *bounds[invDecl].begin();
+        bounds[invDecl].erase(bounds[invDecl].begin());
+        outs() << "- - - b: " << b << "\n";
+
+        candidates[specDecl].insert(replaceAll(b, tr->srcVars[0], fc->srcVars[0]));
+        candidates[invDecl].insert(b);
+
+        if(debug >= 4) outs() << "Enter G&S\n";
+        Result_t res_t = guessAndSolve();
+        if(debug >= 4) outs() << "Exit G&S\n";
+        if(res_t == Result_t::UNKNOWN) {
+          candidates.clear();
+          outs() << "=====> unknown\n";
+          continue;
+        }
+        parseForGuards(grds);
+        if(debug >= 3) pprint(grds,2);
+        if(u.isSat(disjoin(grds,m_efac), fcBodyInvVars)) {
+          res = boundSolve(mkNeg(disjoin(grds,m_efac)));
+        }
+        if(res_t == Result_t::UNSAT){
+          return true;
+        }
+      }
+      return false;
+    }
+
+    void boundSolve()
+    {
+      Expr block = mk<TRUE>(m_efac);
+      if(boundSolve(block)) {
+        u.removeRedundantConjuncts(candidates[invDecl]);
+        u.removeRedundantConjuncts(candidates[specDecl]);
+        printCands(true,candidates);
+      }
+      return;
+      bounds.clear();
+      ExprSet grds; // hold the guards (phi) of the f(vars) /\ phi(vars) expression)
+      Result_t res_t = Result_t::SAT;
+      boost::tribool res = true;
+
+      while(res_t != Result_t::UNSAT && res) {
+        res = exploreBounds(ghCandMap, mkNeg(block));
+        if(ghCandMap[invDecl].empty()) break;
+        map<Expr,ExprSet> worklist;
+        map<Expr,ExprSet> temp;
+        worklist[invDecl].insert(ghCandMap[invDecl].begin(), ghCandMap[invDecl].end());
+
+        while(!worklist[invDecl].empty() && res && res_t != Result_t::UNSAT) {
+          Expr b = *worklist[invDecl].begin();
+          worklist[invDecl].erase(worklist[invDecl].begin());
+          outs() << "- - - b: " << b << "\n";
+
+          candidates[specDecl].insert(replaceAll(b, tr->srcVars[0], fc->srcVars[0]));
+          candidates[invDecl].insert(b);
+
+          res_t = guessAndSolve();
+          if(debug >= 2) printCands(false);
+          if(res_t == Result_t::UNKNOWN) {
+            candidates.clear();
+            outs() << "=====> unknown\n";
+            continue;
+          }
+          parseForGuards(grds);
+          if(debug >= 3) pprint(grds,2);
+          if(!u.isSat(mkNeg(disjoin(grds,m_efac)), fcBodyInvVars)) {
+            break;
+          }
+          grds.clear();
+          grds.insert(b);
+          block = mkNeg(disjoin(grds,m_efac));
+          res = exploreBounds(temp, block);
+        }
+      }
+      if(res_t == Result_t::UNSAT) {
+        //outs() << "unsat\n";
+        printCands(true, candidates);
+      }
+      else {
+        outs() << "unknown\n";
+      }
+    }
+
     void maximalSolve (bool useGAS = true, bool usesygus = false, bool useUC = false, bool fixCRels = false)
     {
       int itr = 0;
@@ -2613,11 +2726,7 @@ namespace ufo
       if (useGAS) {
         Result_t res;
         if (!usesygus) {
-          if(debug >= 3) outs() << "entering guessAndSolve\n";
           res = Result_t::UNSAT;//guessAndSolve();
-          if(debug >= 3) outs() << "left guessAndSolve. res: ";
-          if(debug >= 3 && res == Result_t::UNSAT) outs() << "unsat\n";
-          else if(debug >= 3) outs() << "sat or unkown\n";
 
         }  else {
           ExprVector tmpfrels;
@@ -2660,53 +2769,50 @@ namespace ufo
         }
       }
 
-      //debug
-      // if (!firstSMTCall)
-      // 	outs() << "GAS first iteration done\n";
-      // for (auto e : candidates) {
-      // 	outs() << "rel: " << *(e.first) << "\n";
-      // 	for (auto c : e.second) {
-      // 	  outs() << *(c) << "\n";
-      // 	}
-      // }
-      // outs() << "rels: \n";
-      // for (auto r : rels) {
-      // 	outs() << *r << "\n";
-      // }
       Expr block = mk<FALSE>(m_efac);
       bounds.clear();
-      map<Expr, ExprSet> ghCandMap;
+      ExprSet grds; // hold the guards (phi) of the f(vars) /\ phi(vars) expression)
+      Result_t res_t;
 
-      while (true) { // hornspec loop
-
+      while (true) { // spechorn loop (now..)
+        boost::tribool res;
         Result_t maxRes;
         ExprVector weakenRels;
         ExprVector fixedRels = !firstSMTCall && fixCRels ? vecDiff(allRels, rels) : ExprVector() ;
         map<Expr, Expr> smtSoln;
 
         if(debug) outs() << "current iteration: "<< itr << "\n";
-
         // Add data candidates here.
-        if(ghCandMap[invDecl].empty()) {
-          if(debug >= 3) outs() << "Entering exploreBounds\n";
-          exploreBounds(ghCandMap, mkNeg(block));
-          if(debug >= 5) outs() << "Left exploreBounds\n";
+        if(ghCandMap[invDecl].empty() || bounds.size() == 1) {
+          if(debug >= 3) outs() << "\nEXPLORE BOUNDS\n==============\n";
+          res = exploreBounds(ghCandMap, mkNeg(block));
+          if(debug >= 4) outs() << "Left exploreBounds\n";
         }
 
-        //ghCandMap[invDecl].erase(*ghCandMap[invDecl].begin());
-
-        if(debug >= 5) {
+        if(debug >= 3) {
           for(auto& e : ghCandMap[invDecl]) { // print bounds found
-            outs() << "    GH_CAND FROM DATA: " << e << "\n";
+            outs() << "- - - GH_CAND FROM DATA: " << e << "\n";
           }
         }
 
+        if(!res && ghCandMap[invDecl].empty()) {
+        // short circuit here because loop can't be unrolled with the block.
+          if(debug >= 2) {
+            outs() << "\n* * * DATALEARNER CANNOT UNROLL WITH BLOCK * * *\n";
+          }
+          printCands(true,candidates);
+          //writeITE(mkNeg(block), grds);
+          break;
+        }
+        candidates.clear();
+        bounds.clear();
         for(auto& rel: fc->srcRelations) {
-          for(auto& e: ghCandMap[invDecl]) {
-            Expr in = replaceAll(e, tr->srcVars[0], fc->srcVars[0]);
-            bounds.insert(in);
+          for(auto e = ghCandMap[invDecl].begin(); e != ghCandMap[invDecl].end(); e++) {
+
+            Expr in = replaceAll(*e, tr->srcVars[0], fc->srcVars[0]);
+            //bounds.insert(in);
             candidates[rel].insert(in);
-            if(debug >= 2) {
+            if(debug >= 4) {
               outs() << "Cand added to rel: " << rel;
               outs() << " : " << in <<"\n";
             }
@@ -2715,20 +2821,44 @@ namespace ufo
         }
 
         for(auto& rel: decls) {
-          for(auto& e: ghCandMap[invDecl]) {
-            bounds.insert(e);
-            candidates[rel].insert(e);
-            ghCandMap[invDecl].erase(e);
-            if(debug >= 2) {
+          for(auto e = ghCandMap[invDecl].begin(); e != ghCandMap[invDecl].end(); e++) {
+            bounds.insert(*e);
+            candidates[rel].insert(*e);
+            if(debug >= 4) {
               outs() << "Cand added to rel: " << rel;
-              outs() << " :: " << e <<"\n";
+              outs() << " :: " << *e <<"\n";
             }
+            ghCandMap[invDecl].erase(*e);
             break;
           }
         }
-        guessAndSolve();
+        res_t = guessAndSolve();
+        if(debug >= 2) {
+          outs() << "Result_t after G&S: ";
+          if(res_t == Result_t::UNSAT) outs() << "unsat";
+          else outs() << "unknown";
+          outs() << "\nCands after G&S:\n";
+          printCands(false);
+        }
+        if(res_t == Result_t::UNKNOWN) {
+          candidates.clear();
+          continue;
+        }
+        //parse cands of pre for grds.
+        parseForGuards(grds);
+        if(debug >= 3) pprint(grds,2);
 
-        if(debug >= 2) printCands(false);
+        //need to check that all the guards from data have been checked.
+        if(res_t == Result_t::UNSAT && !u.isSat(mkNeg(disjoin(grds,m_efac)), fcBodyInvVars)) {
+          if(debug >= 5) outs() << "=========> breaking main loop\n";
+          printCands(true,candidates);
+          break;
+        }
+        // set block to be the conj of !grds.
+        block = conjoin(bounds,m_efac);
+        if(debug >= 5) outs() << "=========> continue\n";
+        if(!hornspec) continue;
+// ****************************************************************************
 
         maxRes = firstSMTCall ? checkMaximalSMT(weakenRels, fixedRels, smtSoln) : checkMaximalSMT(weakenRels, fixedRels, smtSoln, rels);
         itr++;
@@ -2745,7 +2875,6 @@ namespace ufo
               assert(0);
             }
           }
-          printBounds();
           printCands(true, candidates);
           return;
 
@@ -2966,6 +3095,9 @@ namespace ufo
       spec.setUpQueryAndSpec();
       if(debug >= 3) outs() << "invDecl: " << ruleManager.invRel << "\nStart solving\n";
     }
+
+    spec.boundSolve();
+    return;
     if (usesygus) {
       spec.setSygusPath(syguspath);
     }

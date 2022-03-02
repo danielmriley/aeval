@@ -479,7 +479,30 @@ namespace ufo
             diseqs.push_back(mk<ITE>(mk<NEQ>(versVars[j][i], versVars[k][i]), mkMPZ(1, m_efac), mkMPZ(0, m_efac)));
     }
 
-    bool unrollAndExecuteTerm(
+    void setGhostCond(ExprVector& ssa, Expr gh_cond, Expr preCond)
+    {
+      Expr gh_zero = ssa.back();
+      Expr ssa_last = gh_zero;
+      ssa.pop_back();
+      ExprSet g;
+      getConj(gh_zero, g);
+      ExprVector g2;
+      for(auto& c: g) g2.push_back(c);
+      gh_zero = g2.back();
+      gh_zero = mk<EQ>(gh_zero->left(), mkTerm(mpz_class(0), m_efac));
+      g2.push_back(gh_zero);
+      gh_zero = conjoin(g2, m_efac);
+
+      preCond = replaceAll(preCond, srcVars, bindVars[bindVars.size() - 1]);
+      ssa.push_back(mk<AND>(gh_zero, mkNeg(preCond)));
+      ssa.push_back(gh_cond);
+      //bindVars.pop_back();
+
+      //pprint(ssa,2);
+      //outs() << "\n\n";
+    }
+
+    boost::tribool unrollAndExecuteTerm(
           Expr srcRel,
           ExprVector& dtVars,
 				  vector<vector<double> >& models,
@@ -533,36 +556,19 @@ namespace ufo
 
         auto & prefix = ruleManager.prefixes[cyc];
         vector<int> trace;
-        int l = 0;                              // starting index (before the loop)
+        int l = 0;                        // starting index (before the loop)
         //if (ruleManager.hasArrays) l++; // first iter is usually useless
+
         if(gh_cond == mk<TRUE>(m_efac)) trace.push_back(0);
         for (int j = 0; j < k; j++)
           for (int m = 0; m < loop.size(); m++)
             trace.push_back(loop[m]);
 
+        int backCHC = -1;
         ExprVector ssa;
         for(auto& t: trace) outs() << t << ", ";
         outs() << "\b\b \n";
         getSSA(trace, ssa);
-        Expr gh_zero = ssa.back();
-        Expr ssa_last = gh_zero;
-        ssa.pop_back();
-        ExprSet g;
-        getConj(gh_zero, g);
-        ExprVector g2;
-        for(auto& c: g) g2.push_back(c);
-        gh_zero = g2.back();
-        gh_zero = mk<EQ>(gh_zero->left(), mkTerm(mpz_class(0), m_efac));
-        g2.push_back(gh_zero);
-        gh_zero = conjoin(g2, m_efac);
-
-        preCond = replaceAll(preCond, srcVars, bindVars[bindVars.size() - 1]);
-        preCond = mkNeg(preCond);
-        ssa.push_back(mk<AND>(gh_zero, preCond));
-        ssa.push_back(gh_cond);
-        //ssa.push_back(replaceAll(gh_cond, srcVars, bindVars[loop.size() - 1]));
-        //bindVars.pop_back();
-        outs() << "SSA:\n" << conjoin(ssa, m_efac) << "\n";
         int traceSz = trace.size();
   //      pprint( conjoin(ssa, m_efac));
         // compute vars for opt constraint
@@ -572,17 +578,49 @@ namespace ufo
         fillVars(srcRel, vars, l, loop.size(), mainInds, arrInds, versVars, allVars);
         getOptimConstr(versVars, vars.size(), diseqs);
 
-        Expr cntvar = bind::intConst(mkTerm<string> ("_FH_cnt", m_efac));
+        Expr cntvar = bind::intConst(mkTerm<string> ("_ST_cnt", m_efac));
         allVars.insert(cntvar);
         allVars.insert(bindVars.back().begin(), bindVars.back().end());
-        ssa.push_back(mk<EQ>(cntvar, mkplus(diseqs, m_efac)));
+        ssa.insert(ssa.begin(), mk<EQ>(cntvar, mkplus(diseqs, m_efac)));
 
-        auto res = u.isSat(ssa);
-        if (indeterminate(res) || !res)
+        bool toContinue = false;
+        bool noopt = false;
+        while (true)
         {
-          if (debug) outs () << "Unable to solve the BMC formula for " <<  srcRel << " and gh_cond " << gh_cond <<"\n";
-          continue;
+          setGhostCond(ssa, gh_cond, preCond);
+          if (bindVars.size() <= 1)
+          {
+            if (debug) outs () << "Unable to solve the BMC formula for " <<  srcRel << " and gh_cond " << gh_cond <<"\n";
+            toContinue = true;
+            return false;
+          }
+
+          if (u.isSat(conjoin(ssa, m_efac)))
+          {
+            break;
+          }
+          else
+          {
+            if (trace.size() == traceSz)
+            {
+              trace.pop_back();
+              ssa.pop_back();
+              ssa.pop_back(); // remove the gh conds
+            //  ssa.pop_back(); // remove the gh conds
+              bindVars.pop_back();
+            }
+            else
+            {
+              trace.resize(trace.size()-loop.size());
+              ssa.pop_back();
+              //ssa.pop_back();
+              ssa.resize(ssa.size()-loop.size());
+              bindVars.resize(bindVars.size()-loop.size());
+            }
+
+          }
         }
+
         ExprMap allModels;
         u.getOptModel<GT>(allVars, allModels, cntvar);
 
@@ -595,8 +633,9 @@ namespace ufo
         if (debug) outs () << "\nUnroll and execute the cycle for " <<  srcRel << " and cond " << gh_cond <<"\n";
         for (int j = 0; j < versVars.size(); j++)
         {
+          if(j >= trace.size()) break;
           vector<double> model;
-          if (debug) outs () << "  model for " << j << ": [";
+          if (debug) outs () << "  model for " << j+1 << ":\t[";
           bool toSkip = false;
           SMTUtils u2(m_efac);
           ExprSet equalities;

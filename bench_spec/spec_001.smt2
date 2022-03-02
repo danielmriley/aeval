@@ -7,7 +7,7 @@
 (rule (=>
     (and
         (inv x)
-        (> x 0)
+        (> x 5)
         (= x1 (- x 1))
     )
     (inv x1)

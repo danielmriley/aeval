@@ -508,10 +508,10 @@ namespace ufo
         bnd.unrollAndExecuteSplitter(srcRel, invVars[srcRel], exprToModels[srcRel], splitter, invs);
     */}
 
-    void
+    boost::tribool
     computeDataTerm(Expr srcRel = NULL, Expr block = NULL, Expr invs = NULL, Expr preCond = NULL)
     {
-      bnd.unrollAndExecuteTerm(srcRel, invVars[srcRel], exprToModels[srcRel], block, invs, preCond);
+      return bnd.unrollAndExecuteTerm(srcRel, invVars[srcRel], exprToModels[srcRel], block, invs, preCond);
     }
 
     ExprSet& getConcrInvs(Expr rel) { return bnd.concrInvs[rel]; }

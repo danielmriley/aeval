@@ -3175,6 +3175,148 @@ namespace ufo
     return fla;
   }
 
+  cpp_int gcd(cpp_int x, cpp_int y)
+  {
+    if(x == 0) return y;
+    return gcd(y % x, x);
+  }
+
+  cpp_int gcd(vector<cpp_int> v)
+  {
+    cpp_int res = 0;
+    if(!v.empty()) {
+      res = v[0];
+      for(int i = 1; i < v.size(); i++) {
+        res = gcd(v[i],res);
+        if(res == 1) return res;
+      }
+    }
+    return res;
+  }
+
+  void simplifyVec(vector<cpp_int>& v, cpp_int g)
+  {
+    if(!v.empty()) {
+      for(int i = 0; i < v.size(); i++) {
+        v[i] = v[i] / g;
+      }
+    }
+  }
+
+  bool isIn(Expr e, ExprVector ev)
+  {
+    for(auto& i : ev) {
+      if(i == e) return true;
+    }
+    return false;
+  }
+
+  // follows similar procedure to normaizeAtom above but will set the lhs to lhsVar
+  // and the rhs to the remaining expr.
+  inline static Expr normalizeAtom(Expr fla, ExprVector& intVars, Expr lhsVar)
+  {
+    if (isOp<ComparissonOp>(fla) && isNumeric(fla->left()))
+    {
+      Expr lhs = fla->left();
+      Expr rhs = fla->right();
+
+      bool onLhs = contains(lhs,lhsVar) ? true : false;
+      bool onRhs = contains(rhs,lhsVar) ? true : false;
+      if(!onLhs && !onRhs) return normalizeAtom(fla,intVars);
+
+      ExprVector lhsVec;
+      ExprVector rhsVec;
+      ExprVector all;
+      getAddTerm(lhs, lhsVec);
+      getAddTerm(rhs, rhsVec);
+
+      vector<cpp_int> coefs;
+      if(onLhs) {
+        for(auto& a : lhsVec)
+        {
+          if(contains(a,lhsVar)) all.push_back(a);
+          else all.push_back(additiveInverse(a));
+        }
+        for(auto& a : rhsVec) {
+          if(onRhs && contains(a,lhsVar)) all.push_back(additiveInverse(a));
+          else all.push_back(a);
+        }
+      }
+      else {
+        for(auto & a : rhsVec)
+        {
+          if(contains(a,lhsVar)) all.push_back(a);
+          else all.push_back(additiveInverse(a));
+        }
+        for(auto& a : lhsVec) {
+          all.push_back(a);
+        }
+      }
+
+      map<Expr,cpp_int> allMap;
+      for(auto& e: all) {
+        cpp_int c = 1;
+        if (isOpX<MPZ>(e))
+        {
+          c = c * lexical_cast<cpp_int>(e);
+          allMap[e] += c;
+        }
+        else if(isOpX<MULT>(e)) {
+          ExprVector ops;
+          getMultOps (e, ops);
+          for (auto & a : ops) {
+            if (isOpX<MPZ>(a))
+            {
+              c = c * lexical_cast<cpp_int>(a);
+              allMap[e->right()] += c;
+            }
+          }
+        }
+        else if(isOpX<UN_MINUS>(e)) {
+          allMap[additiveInverse(e)] += -1;
+        }
+        else {
+          allMap[e] += 1;
+        }
+      }
+      
+      coefs.clear();
+      for(auto& e : allMap) coefs.push_back(e.second);
+      cpp_int g = gcd(coefs);
+      if(g > 1) simplifyVec(coefs,g);
+      int w = 0;
+      for(auto& e: allMap) {
+        e.second = coefs[w];
+        w++;
+      }
+
+      if(allMap[lhsVar] < 0) for(auto& e : allMap) e.second = e.second * -1;
+      ExprVector newRhs, newLhs;
+
+      for(auto& e: allMap) {
+        if(e.first == lhsVar) {
+          if(e.second == 0) continue;
+          (e.second == 1) ? newLhs.push_back(e.first)
+            : newLhs.push_back(mk<MULT>(mkMPZ(e.second,fla->getFactory()), e.first));
+        }
+        else if(isIn(e.first, intVars)) {
+          if(e.second == 0) continue;
+          (e.second == 1) ? newRhs.push_back(e.first)
+            : newRhs.push_back(mk<MULT>(mkMPZ(e.second,fla->getFactory()), e.first));
+        }
+        else {
+          if(e.second == 0) continue;
+          newRhs.push_back(mkMPZ(e.second,fla->getFactory()));
+        }
+      }
+
+      Expr r = (newRhs.size() == 1) ? *newRhs.begin(): mknary<PLUS>(newRhs);
+      Expr l = (newLhs.size() == 1) ? *newLhs.begin(): mknary<PLUS>(newLhs);
+      return reBuildCmp(fla,l,r);
+    }
+    return fla;
+  }
+
   inline static Expr normalizeDisj(Expr exp, ExprVector& intVars)
   {
     ExprSet disjs;
@@ -3187,6 +3329,23 @@ namespace ufo
       if (!isOpX<FALSE>(norm)) newDisjs.insert(norm);
     }
     return disjoin(newDisjs, exp->getFactory());
+  }
+
+  inline static Expr normalize(Expr fla, Expr lhsVar)
+  {
+    ExprVector vars;
+    filter (fla, IsConst (), inserter(vars, vars.begin()));
+    if (isOpX<AND>(fla) || isOpX<OR>(fla))
+    {
+      ExprSet args;
+      for (int i = 0; i < fla->arity(); i++){
+        args.insert(normalizeAtom(fla->arg(i), vars, lhsVar));
+      }
+
+      return simplifyBool(isOpX<AND>(fla) ? conjoin (args, fla->getFactory()) :
+        disjoin (args, fla->getFactory()));
+    }
+    return normalizeAtom(fla, vars, lhsVar);
   }
 
   inline static Expr normalize(Expr fla)
@@ -4080,6 +4239,58 @@ namespace ufo
 
     }
   }
+  void pprint(Expr exp, int inden, bool upper);
+
+  template<typename Range> static void pprint(Range& exprs, int inden = 0)
+  {
+    for (auto it = exprs.begin(); it != exprs.end(); ++it)
+    {
+      pprint(*it, inden, false);
+      outs() << (inden > 0 ? "\n" :
+        (std::next(it) != exprs.end()) ? ", " : "");
+    }
+  }
+
+  inline void pprint(Expr exp, int inden = 0, bool upper = true)
+  {
+    ExprSet flas;
+    if (isOpX<FORALL>(exp) || isOpX<EXISTS>(exp))
+    {
+      outs() << string(inden, ' ') << (isOpX<FORALL>(exp) ? "[forall (" : "[exists (");
+      int i = 0;
+      for (; i < exp->arity() - 1; i++)
+        outs () << fapp(exp->arg(i)) <<
+          (i < exp->arity() - 2 ? " " : "");
+      outs () << ")\n";
+      pprint(exp->arg(i), inden + 2, false);
+      outs () << "]";
+      if (upper) outs() << "\n";
+      return;
+    }
+    else if (isOpX<AND>(exp))
+    {
+      outs () << string(inden, ' ') << "[&&\n";
+      getConj(exp, flas);
+    }
+    else if (isOpX<OR>(exp))
+    {
+      outs () << string(inden, ' ') << "[||\n";
+      getDisj(exp, flas);
+    }
+    else if (isOpX<NEG>(exp))
+    {
+      outs () << string(inden, ' ') << "[!\n";
+      flas.insert(exp->left());
+    }
+    if (flas.empty()) outs () << string(inden, ' ') << exp;
+    else
+    {
+      pprint(flas, inden + 2);
+      outs () << string(inden, ' ') << "]";
+    }
+    if (upper) outs() << "\n";
+  }
+
 }
 
 #endif
