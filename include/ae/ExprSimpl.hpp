@@ -3215,23 +3215,30 @@ namespace ufo
   // and the rhs to the remaining expr.
   inline static Expr normalizeAtom(Expr fla, ExprVector& intVars, Expr lhsVar)
   {
+    //Change this to remove the extra loop at the top.
+    //Should be able to organize from LHS RHS into just two ExprSets.
     if (isOp<ComparissonOp>(fla) && isNumeric(fla->left()))
     {
       Expr lhs = fla->left();
       Expr rhs = fla->right();
 
-      bool onLhs = contains(lhs,lhsVar) ? true : false;
-      bool onRhs = contains(rhs,lhsVar) ? true : false;
+      bool onLhs = contains(lhs,lhsVar);
+      bool onRhs = contains(rhs,lhsVar);
       if(!onLhs && !onRhs) return normalizeAtom(fla,intVars);
 
       ExprVector lhsVec;
       ExprVector rhsVec;
       ExprVector all;
       getAddTerm(lhs, lhsVec);
-      getAddTerm(rhs, rhsVec);
+      getAddTerm(rhs, all);
+
+      for(auto& a: lhsVec) {
+        all.push_back(additiveInverse(a));
+      }
 
       vector<cpp_int> coefs;
-      if(onLhs) {
+      // rewrite this so that it only uses 2 sets rather than 3.
+/*      if(onLhs) {
         for(auto& a : lhsVec)
         {
           if(contains(a,lhsVar)) all.push_back(a);
@@ -3252,14 +3259,14 @@ namespace ufo
           all.push_back(a);
         }
       }
-
+*/
       map<Expr,cpp_int> allMap;
       for(auto& e: all) {
         cpp_int c = 1;
         if (isOpX<MPZ>(e))
         {
           c = c * lexical_cast<cpp_int>(e);
-          allMap[e] += c;
+          allMap[mkMPZ(1,fla->getFactory())] += c;
         }
         else if(isOpX<MULT>(e)) {
           ExprVector ops;
@@ -3279,7 +3286,7 @@ namespace ufo
           allMap[e] += 1;
         }
       }
-      
+
       coefs.clear();
       for(auto& e : allMap) coefs.push_back(e.second);
       cpp_int g = gcd(coefs);
@@ -3290,22 +3297,29 @@ namespace ufo
         w++;
       }
 
-      if(allMap[lhsVar] < 0) for(auto& e : allMap) e.second = e.second * -1;
+      if(allMap[lhsVar] > 0) {
+        for(auto& e : allMap) {
+          e.second = e.second * -1;
+        }
+
+      }
       ExprVector newRhs, newLhs;
 
       for(auto& e: allMap) {
+        if(e.second == 0) continue;
         if(e.first == lhsVar) {
-          if(e.second == 0) continue;
-          (e.second == 1) ? newLhs.push_back(e.first)
-            : newLhs.push_back(mk<MULT>(mkMPZ(e.second,fla->getFactory()), e.first));
+          (e.second == 1) ? newLhs.push_back(additiveInverse(e.first))
+            : newLhs.push_back(additiveInverse(mk<MULT>(mkMPZ(e.second,fla->getFactory()), e.first)));
         }
-        else if(isIn(e.first, intVars)) {
-          if(e.second == 0) continue;
+        else if(find(intVars.begin(), intVars.end(), e.first) != intVars.end()) {
           (e.second == 1) ? newRhs.push_back(e.first)
             : newRhs.push_back(mk<MULT>(mkMPZ(e.second,fla->getFactory()), e.first));
         }
         else {
-          if(e.second == 0) continue;
+          // write an assert to check for if(MPZ) e == 1
+          // e might not == 1 here since this is just the constant term.
+          // it could be any value.
+          assert(isOpX<MPZ>(e.first));
           newRhs.push_back(mkMPZ(e.second,fla->getFactory()));
         }
       }

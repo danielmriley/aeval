@@ -507,7 +507,7 @@ namespace ufo
           ExprVector& dtVars,
 				  vector<vector<double> >& models,
           Expr gh_cond, Expr invs, Expr preCond,
-          int k = 10)
+          int k = 9)
     {
       assert (gh_cond != NULL);
       if(debug) {
@@ -606,14 +606,12 @@ namespace ufo
               trace.pop_back();
               ssa.pop_back();
               ssa.pop_back(); // remove the gh conds
-            //  ssa.pop_back(); // remove the gh conds
               bindVars.pop_back();
             }
             else
             {
               trace.resize(trace.size()-loop.size());
               ssa.pop_back();
-              //ssa.pop_back();
               ssa.resize(ssa.size()-loop.size());
               bindVars.resize(bindVars.size()-loop.size());
             }

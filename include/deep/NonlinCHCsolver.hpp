@@ -390,17 +390,19 @@ namespace ufo
         outs() << "    invs: " << invs << "\n";
         outs() << "    block: " << block << "\n";
       }
-
-      for (auto & dcl : decls) {
+      Expr dcl = invDecl;
+      //for (auto & dcl : decls) {
         if(debug >= 6) outs() << "dcl: " << dcl << "\n";
         if (srcRel == dcl)
         {
           if(debug >= 6) outs() << "Compute Data\n";
           res = dl.computeDataTerm(srcRel, block, invs, loopGuard);
           dl.computePolynomials(dcl, poly[dcl]);
-          break;
+        //  break;
         }
-      }
+      //}
+      ExprSet concr = dl.getConcrInvs(invDecl);
+      pprint(concr,2);
 
       // mutations after all
       for (auto & p : poly)
@@ -447,8 +449,8 @@ namespace ufo
       map<Expr, ExprSet> ghBoundMap;
 
       res = dataForBound(ghCandMap, block);
-      if(ghCandMap[invDecl].empty()) res = false;
       filterNonGhExp(ghCandMap[invDecl]);
+      if(ghCandMap[invDecl].empty()) res = false;
 
       ExprSet temp;
       for(auto i = ghCandMap[invDecl].begin(),
@@ -462,9 +464,10 @@ namespace ufo
       if(debug >= 4) {
         outs() << "filtered cands:\n";
         if(!ghCandMap[invDecl].empty()) pprint(ghCandMap[invDecl],2);
+        else outs() << "  none.";
       }
 
-      if(!res) outs() << "RETURNING FALSE\n";
+      if(!res && debug >= 3) outs() << "RETURNING FALSE FROM EXPLOREBOUNDS\n";
       return res;
     }
 
@@ -2572,12 +2575,12 @@ namespace ufo
       return diff;
     }
 
-    void parseForGuards(ExprSet& grds) {
+    void parseForGuards(ExprSet& grds) { // return bool
       ExprSet exp;
       if(debug >= 3) outs() << "Begin parsing for guards\n";
       for(auto e = candidates[specDecl].begin(); e != candidates[specDecl].end() ; e++) {
         if(contains(*e,ghostVars[0]) || contains(*e,ghostVars[1])) {
-
+          // add the ghost formula here. size is one and is Equality of form gh = ....
         }
         else {
           Expr r = replaceAll(*e, fc->srcVars[0],invVars);
@@ -2620,33 +2623,36 @@ namespace ufo
 
     boost::tribool boundSolve(Expr block) {
       map<Expr,ExprSet> bounds;
-      boost::tribool res = exploreBounds(bounds, block);
-      while(!bounds.empty() && res) {
-        if(debug >= 4) outs() << "in recursive loop\n";
+      boost::tribool res = exploreBounds(bounds, block); // maybe hold previously computed bounds in a global ExprSet to avoid duplication.
+      outs() << "entering loop\n";
+      for(auto b = bounds[invDecl].begin(), end = bounds[invDecl].end(); b != end; b++) { // change to go over iterators.
         ExprSet grds; // hold the guards (phi) of the f(vars) /\ phi(vars) expression)
-        Expr b = *bounds[invDecl].begin();
-        bounds[invDecl].erase(bounds[invDecl].begin());
-        outs() << "- - - b: " << b << "\n";
 
-        candidates[specDecl].insert(replaceAll(b, tr->srcVars[0], fc->srcVars[0]));
-        candidates[invDecl].insert(b);
+        if(debug >= 2) outs() << "- - - b: " << *b << "\n";
+        // What if we sent the guards in all at once and then teased out the relevant ones?
+        candidates[specDecl].insert(replaceAll(*b, tr->srcVars[0], fc->srcVars[0]));
+        candidates[invDecl].insert(*b);
 
-        if(debug >= 4) outs() << "Enter G&S\n";
         Result_t res_t = guessAndSolve();
-        if(debug >= 4) outs() << "Exit G&S\n";
+        u.removeRedundantConjuncts(candidates[invDecl]);
+        u.removeRedundantConjuncts(candidates[specDecl]);
         if(res_t == Result_t::UNKNOWN) {
-          candidates.clear();
-          outs() << "=====> unknown\n";
+          if(std::next(b) == end) {
+            if(debug >= 4) outs() << "* * * CLEARING CANDS\n";
+            candidates.clear();
+          }
+          if(debug >= 2) outs() << "=====> unknown\n";
           continue;
         }
+        // use remove redundant conjuncts
         parseForGuards(grds);
         if(debug >= 3) pprint(grds,2);
         if(u.isSat(disjoin(grds,m_efac), fcBodyInvVars)) {
-          res = boundSolve(mkNeg(disjoin(grds,m_efac)));
+          //collect blocks for the DT.
+          grds.insert(*b);
+          if(boundSolve(mkNeg(disjoin(grds,m_efac)))) return true;//disjoin(grds,m_efac)));
         }
-        if(res_t == Result_t::UNSAT){
-          return true;
-        }
+        else return true;
       }
       return false;
     }
@@ -2659,7 +2665,16 @@ namespace ufo
         u.removeRedundantConjuncts(candidates[specDecl]);
         printCands(true,candidates);
       }
-      return;
+      else {
+        if(guessAndSolve() == Result_t::UNSAT) {
+          outs() << "G&S\n";
+          u.removeRedundantConjuncts(candidates[invDecl]);
+          u.removeRedundantConjuncts(candidates[specDecl]);
+          printCands(true,candidates);
+        }
+        else outs() << "unknown\n";
+      }
+      /*
       bounds.clear();
       ExprSet grds; // hold the guards (phi) of the f(vars) /\ phi(vars) expression)
       Result_t res_t = Result_t::SAT;
@@ -2705,6 +2720,7 @@ namespace ufo
       else {
         outs() << "unknown\n";
       }
+      */
     }
 
     void maximalSolve (bool useGAS = true, bool usesygus = false, bool useUC = false, bool fixCRels = false)
@@ -3097,20 +3113,6 @@ namespace ufo
     }
 
     spec.boundSolve();
-    return;
-    if (usesygus) {
-      spec.setSygusPath(syguspath);
-    }
-
-    if (inv == 0) {
-      if (maximal) {
-        spec.maximalSolve(useGAS, usesygus, useUC, fixCRels);
-      } else {
-        spec.nonmaximalSolve(useGAS, usesygus);
-      }
-    } else {
-      spec.solveIncrementally(inv);
-    }
   };
 }
 
