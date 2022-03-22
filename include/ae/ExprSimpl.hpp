@@ -3049,6 +3049,34 @@ namespace ufo
     return disjoin(newDsjs, efac);
   }
 
+  cpp_int gcd(cpp_int x, cpp_int y)
+  {
+    if(x == 0) return y;
+    return gcd(y % x, x);
+  }
+
+  cpp_int gcd(vector<cpp_int> v)
+  {
+    cpp_int res = 0;
+    if(!v.empty()) {
+      res = v[0];
+      for(int i = 1; i < v.size(); i++) {
+        res = gcd(v[i],res);
+        if(res == 1) return res;
+      }
+    }
+    return res;
+  }
+
+  void simplifyVec(vector<cpp_int>& v, cpp_int g)
+  {
+    if(!v.empty()) {
+      for(int i = 0; i < v.size(); i++) {
+        v[i] = v[i] / g;
+      }
+    }
+  }
+/*
   inline static Expr normalizeAtom(Expr fla, ExprVector& intVars)
   {
     if (isOp<ComparissonOp>(fla) && isNumeric(fla->left()))
@@ -3174,53 +3202,24 @@ namespace ufo
     }
     return fla;
   }
-
-  cpp_int gcd(cpp_int x, cpp_int y)
-  {
-    if(x == 0) return y;
-    return gcd(y % x, x);
-  }
-
-  cpp_int gcd(vector<cpp_int> v)
-  {
-    cpp_int res = 0;
-    if(!v.empty()) {
-      res = v[0];
-      for(int i = 1; i < v.size(); i++) {
-        res = gcd(v[i],res);
-        if(res == 1) return res;
-      }
-    }
-    return res;
-  }
-
-  void simplifyVec(vector<cpp_int>& v, cpp_int g)
-  {
-    if(!v.empty()) {
-      for(int i = 0; i < v.size(); i++) {
-        v[i] = v[i] / g;
-      }
-    }
-  }
-
-  bool isIn(Expr e, ExprVector ev)
-  {
-    for(auto& i : ev) {
-      if(i == e) return true;
-    }
-    return false;
-  }
-
+*/
   // follows similar procedure to normaizeAtom above but will set the lhs to lhsVar
   // and the rhs to the remaining expr.
-  inline static Expr normalizeAtom(Expr fla, ExprVector& intVars, Expr lhsVar)
+  inline static Expr normalizeAtom(Expr fla, ExprVector& intVars, Expr lhsVar = 0)
   {
     //Change this to remove the extra loop at the top.
     //Should be able to organize from LHS RHS into just two ExprSets.
+    //outs() << "fla: " << fla << "\n";
     if (isOp<ComparissonOp>(fla) && isNumeric(fla->left()))
     {
       Expr lhs = fla->left();
       Expr rhs = fla->right();
+
+      if(lhsVar == 0) {
+        lhsVar = mkMPZ(0, fla->getFactory());
+        lhs = mk<PLUS>(lhs, lhsVar);
+      //  outs() << "lhs: " << lhs << "\n";
+    }
 
       bool onLhs = contains(lhs,lhsVar);
       bool onRhs = contains(rhs,lhsVar);
@@ -3235,33 +3234,12 @@ namespace ufo
       for(auto& a: lhsVec) {
         all.push_back(additiveInverse(a));
       }
+  //    outs() << "lhsVec set\n";
 
       vector<cpp_int> coefs;
-      // rewrite this so that it only uses 2 sets rather than 3.
-/*      if(onLhs) {
-        for(auto& a : lhsVec)
-        {
-          if(contains(a,lhsVar)) all.push_back(a);
-          else all.push_back(additiveInverse(a));
-        }
-        for(auto& a : rhsVec) {
-          if(onRhs && contains(a,lhsVar)) all.push_back(additiveInverse(a));
-          else all.push_back(a);
-        }
-      }
-      else {
-        for(auto & a : rhsVec)
-        {
-          if(contains(a,lhsVar)) all.push_back(a);
-          else all.push_back(additiveInverse(a));
-        }
-        for(auto& a : lhsVec) {
-          all.push_back(a);
-        }
-      }
-*/
       map<Expr,cpp_int> allMap;
       for(auto& e: all) {
+  //      outs() << "loop: " << e << "\n";
         cpp_int c = 1;
         if (isOpX<MPZ>(e))
         {
@@ -3304,13 +3282,19 @@ namespace ufo
 
       }
       ExprVector newRhs, newLhs;
-
+  //    outs() << "setting up new Exprs\n";
       for(auto& e: allMap) {
-        if(e.second == 0) continue;
+  //      outs() << "allMap: " << e.first << " coef: " << e.second << "\n";
         if(e.first == lhsVar) {
-          (e.second == 1) ? newLhs.push_back(additiveInverse(e.first))
-            : newLhs.push_back(additiveInverse(mk<MULT>(mkMPZ(e.second,fla->getFactory()), e.first)));
+          if(e.second == 0) { // LHS needs to have an Expr so set it to zero.
+            newLhs.push_back(mkMPZ(0,fla->getFactory()));
+          }
+          else {
+            (e.second == 1) ? newLhs.push_back(additiveInverse(e.first))
+              : newLhs.push_back(additiveInverse(mk<MULT>(mkMPZ(e.second,fla->getFactory()), e.first)));
+          }
         }
+        else if(e.second == 0) {continue;} // The Expr should not be included.
         else if(find(intVars.begin(), intVars.end(), e.first) != intVars.end()) {
           (e.second == 1) ? newRhs.push_back(e.first)
             : newRhs.push_back(mk<MULT>(mkMPZ(e.second,fla->getFactory()), e.first));
@@ -3323,7 +3307,7 @@ namespace ufo
           newRhs.push_back(mkMPZ(e.second,fla->getFactory()));
         }
       }
-
+  //    outs() << "Making return Expr\n";
       Expr r = (newRhs.size() == 1) ? *newRhs.begin(): mknary<PLUS>(newRhs);
       Expr l = (newLhs.size() == 1) ? *newLhs.begin(): mknary<PLUS>(newLhs);
       return reBuildCmp(fla,l,r);

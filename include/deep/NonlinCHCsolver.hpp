@@ -2624,6 +2624,7 @@ namespace ufo
     boost::tribool boundSolve(Expr block) {
       map<Expr,ExprSet> bounds;
       boost::tribool res = exploreBounds(bounds, block); // maybe hold previously computed bounds in a global ExprSet to avoid duplication.
+
       outs() << "entering loop\n";
       for(auto b = bounds[invDecl].begin(), end = bounds[invDecl].end(); b != end; b++) { // change to go over iterators.
         ExprSet grds; // hold the guards (phi) of the f(vars) /\ phi(vars) expression)
@@ -2645,6 +2646,7 @@ namespace ufo
           continue;
         }
         // use remove redundant conjuncts
+        if(debug >= 3) pprint(candidates[specDecl],2);
         parseForGuards(grds);
         if(debug >= 3) pprint(grds,2);
         if(u.isSat(disjoin(grds,m_efac), fcBodyInvVars)) {
