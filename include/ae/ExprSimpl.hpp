@@ -3214,8 +3214,10 @@ namespace ufo
     {
       Expr lhs = fla->left();
       Expr rhs = fla->right();
+      bool nullvar = false;
 
       if(lhsVar == 0) {
+        nullvar = true;
         lhsVar = mkMPZ(0, fla->getFactory());
         lhs = mk<PLUS>(lhs, lhsVar);
       //  outs() << "lhs: " << lhs << "\n";
@@ -3226,7 +3228,6 @@ namespace ufo
       if(!onLhs && !onRhs) return normalizeAtom(fla,intVars);
 
       ExprVector lhsVec;
-      ExprVector rhsVec;
       ExprVector all;
       getAddTerm(lhs, lhsVec);
       getAddTerm(rhs, all);
@@ -3244,7 +3245,7 @@ namespace ufo
         if (isOpX<MPZ>(e))
         {
           c = c * lexical_cast<cpp_int>(e);
-          allMap[mkMPZ(1,fla->getFactory())] += c;
+          allMap[mkMPZ(0,fla->getFactory())] += c;
         }
         else if(isOpX<MULT>(e)) {
           ExprVector ops;
@@ -3282,10 +3283,11 @@ namespace ufo
 
       }
       ExprVector newRhs, newLhs;
+      // A change in how the Exprs are put back together needs to happen in the case that
   //    outs() << "setting up new Exprs\n";
       for(auto& e: allMap) {
   //      outs() << "allMap: " << e.first << " coef: " << e.second << "\n";
-        if(e.first == lhsVar) {
+        if(e.first == lhsVar && !nullvar) {
           if(e.second == 0) { // LHS needs to have an Expr so set it to zero.
             newLhs.push_back(mkMPZ(0,fla->getFactory()));
           }
@@ -3300,11 +3302,16 @@ namespace ufo
             : newRhs.push_back(mk<MULT>(mkMPZ(e.second,fla->getFactory()), e.first));
         }
         else {
-          // write an assert to check for if(MPZ) e == 1
-          // e might not == 1 here since this is just the constant term.
-          // it could be any value.
-          assert(isOpX<MPZ>(e.first));
-          newRhs.push_back(mkMPZ(e.second,fla->getFactory()));
+          // write an assert to check for e == 0
+          assert(e.first == mkMPZ(0,fla->getFactory()));
+          if(e.first == mkMPZ(0,fla->getFactory())) {
+            if(nullvar) {
+              newLhs.push_back(mkMPZ(-e.second,fla->getFactory()));
+            }
+            else {
+              newRhs.push_back(mkMPZ(e.second,fla->getFactory()));
+            }
+          }
         }
       }
   //    outs() << "Making return Expr\n";
