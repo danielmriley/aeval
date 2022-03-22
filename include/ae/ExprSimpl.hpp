@@ -3209,7 +3209,7 @@ namespace ufo
   {
     //Change this to remove the extra loop at the top.
     //Should be able to organize from LHS RHS into just two ExprSets.
-    //outs() << "fla: " << fla << "\n";
+    outs() << "fla: " << fla << "\n";
     if (isOp<ComparissonOp>(fla) && isNumeric(fla->left()))
     {
       Expr lhs = fla->left();
@@ -3220,7 +3220,7 @@ namespace ufo
         nullvar = true;
         lhsVar = mkMPZ(0, fla->getFactory());
         lhs = mk<PLUS>(lhs, lhsVar);
-      //  outs() << "lhs: " << lhs << "\n";
+        outs() << "lhs: " << lhs << "\n";
     }
 
       bool onLhs = contains(lhs,lhsVar);
@@ -3235,12 +3235,12 @@ namespace ufo
       for(auto& a: lhsVec) {
         all.push_back(additiveInverse(a));
       }
-  //    outs() << "lhsVec set\n";
+      outs() << "lhsVec set\n";
 
       vector<cpp_int> coefs;
       map<Expr,cpp_int> allMap;
       for(auto& e: all) {
-  //      outs() << "loop: " << e << "\n";
+        outs() << "loop: " << e << "\n";
         cpp_int c = 1;
         if (isOpX<MPZ>(e))
         {
@@ -3254,7 +3254,8 @@ namespace ufo
             if (isOpX<MPZ>(a))
             {
               c = c * lexical_cast<cpp_int>(a);
-              allMap[e->right()] += c;
+              if(isOpX<MPZ>(e->right())) allMap[mkMPZ(0,fla->getFactory())] += c;
+              else allMap[e->right()] += c;
             }
           }
         }
@@ -3284,9 +3285,9 @@ namespace ufo
       }
       ExprVector newRhs, newLhs;
       // A change in how the Exprs are put back together needs to happen in the case that
-  //    outs() << "setting up new Exprs\n";
+      outs() << "setting up new Exprs\n";
       for(auto& e: allMap) {
-  //      outs() << "allMap: " << e.first << " coef: " << e.second << "\n";
+        outs() << "allMap: " << e.first << " coef: " << e.second << "\n";
         if(e.first == lhsVar && !nullvar) {
           if(e.second == 0) { // LHS needs to have an Expr so set it to zero.
             newLhs.push_back(mkMPZ(0,fla->getFactory()));
@@ -3296,8 +3297,9 @@ namespace ufo
               : newLhs.push_back(additiveInverse(mk<MULT>(mkMPZ(e.second,fla->getFactory()), e.first)));
           }
         }
-        else if(e.second == 0) {continue;} // The Expr should not be included.
+//        else if(e.second == 0) {continue;} // The Expr should not be included.
         else if(find(intVars.begin(), intVars.end(), e.first) != intVars.end()) {
+          if(e.second == 0) {continue;}
           (e.second == 1) ? newRhs.push_back(e.first)
             : newRhs.push_back(mk<MULT>(mkMPZ(e.second,fla->getFactory()), e.first));
         }
@@ -3314,7 +3316,7 @@ namespace ufo
           }
         }
       }
-  //    outs() << "Making return Expr\n";
+      outs() << "Making return Expr\n";
       Expr r = (newRhs.size() == 1) ? *newRhs.begin(): mknary<PLUS>(newRhs);
       Expr l = (newLhs.size() == 1) ? *newLhs.begin(): mknary<PLUS>(newLhs);
       return reBuildCmp(fla,l,r);
