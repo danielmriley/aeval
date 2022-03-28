@@ -2584,14 +2584,13 @@ namespace ufo
         }
         else {
           Expr r = replaceAll(*e, fc->srcVars[0],invVars);
-          exp.insert(r);
+          exp.insert(normalize(r));
         }
       }
       if(exp.empty()) exp.insert(mk<TRUE>(m_efac));
       grds.insert(exp.begin(), exp.end());
       if(debug >= 3) {
         outs() << "End parsing for guards\n";
-        printExprContainer(grds,2);
       }
     }
 
@@ -2621,13 +2620,13 @@ namespace ufo
       */
     }
 
+    ExprSet grds; // hold the guards (phi) of the f(vars) /\ phi(vars) expression)
     boost::tribool boundSolve(Expr block) {
       map<Expr,ExprSet> bounds;
       boost::tribool res = exploreBounds(bounds, block); // maybe hold previously computed bounds in a global ExprSet to avoid duplication.
 
       outs() << "entering loop\n";
       for(auto b = bounds[invDecl].begin(), end = bounds[invDecl].end(); b != end; b++) { // change to go over iterators.
-        ExprSet grds; // hold the guards (phi) of the f(vars) /\ phi(vars) expression)
 
         if(debug >= 2) outs() << "- - - b: " << *b << "\n";
         // What if we sent the guards in all at once and then teased out the relevant ones?
@@ -2642,20 +2641,24 @@ namespace ufo
             if(debug >= 4) outs() << "* * * CLEARING CANDS\n";
             candidates.clear();
           }
-          if(debug >= 2) outs() << "=====> unknown\n";
+          if(debug >= 2) outs() << "=====> unknown\n\n";
           continue;
         }
         // use remove redundant conjuncts
-        if(debug >= 3) pprint(candidates[specDecl],2);
+        if(debug >= 3) {
+          printCands(false);
+        }
         parseForGuards(grds);
         if(debug >= 3) pprint(grds,2);
-        if(u.isSat(disjoin(grds,m_efac), fcBodyInvVars)) {
+//        grds.insert(*b);
+        Expr grd = mkNeg(disjoin(grds,m_efac));
+        if(u.isSat(grd, fcBodyInvVars)) {
           //collect blocks for the DT.
-          grds.insert(*b);
-          if(boundSolve(mkNeg(disjoin(grds,m_efac)))) return true;//disjoin(grds,m_efac)));
+          if(boundSolve(grd)) return true;//disjoin(grds,m_efac)));
         }
         else return true;
       }
+      grds.clear();
       return false;
     }
 
