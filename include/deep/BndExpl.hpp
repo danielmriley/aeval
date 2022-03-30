@@ -512,7 +512,6 @@ namespace ufo
       assert (gh_cond != NULL);
       if(debug) {
         outs() << "Exploring execution of " << srcRel << "\n";
-        ruleManager.print();
       }
 
       // helper var
@@ -566,8 +565,6 @@ namespace ufo
 
         int backCHC = -1;
         ExprVector ssa;
-        for(auto& t: trace) outs() << t << ", ";
-        outs() << "\b\b \n";
         getSSA(trace, ssa);
         int traceSz = trace.size();
   //      pprint( conjoin(ssa, m_efac));
@@ -591,7 +588,7 @@ namespace ufo
           if (bindVars.size() <= 1)
           {
             if (debug) outs () << "Unable to solve the BMC formula for " <<  srcRel << " and gh_cond " << gh_cond <<"\n";
-            toContinue = true;
+          //  toContinue = true;
             return false;
           }
 

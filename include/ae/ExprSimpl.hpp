@@ -3209,9 +3209,9 @@ namespace ufo
     {
       // Changes made as requested.
       // Handles cases of lhsVar being specified and when one is not specified.
-      // Normalizes with consts on the LHS in all cases except when lhsVar coefs add to zero.
+      // Normalizes with consts on the RHS in all cases except when lhsVar coefs add to zero.
       // then the form is 0 = ...
-      //fla = simplifyArithm(fla);
+      fla = simplifyArithm(fla);
   //      outs() << "fla: " << fla << "\n";
       if (isOp<ComparissonOp>(fla) && isNumeric(fla->left()))
       {
