@@ -85,6 +85,8 @@ namespace ufo
     Expr fcBodyInvVars;
     ExprSet bounds;
     ExprSet concrtBounds;
+    ExprSet dataGrds;
+    Expr mpzZero;
 
     bool hornspec = false;
 
@@ -104,6 +106,7 @@ namespace ufo
       invVars = tr->srcVars[0];
       invVarsPr = tr->dstVars;
       invVarsSz = invVars.size();
+      mpzZero = mkMPZ(0, m_efac);
     }
 
     bool setUpCounters()
@@ -119,7 +122,7 @@ namespace ufo
         var = bind::intConst(new_name);
         ghostVarsPr.push_back(var);
       }
-//**** CHECK THE DST AND SRC VARS IN RM **************
+
       ghost0Minus1 = mk<MINUS>(ghostVars[0], mkTerm (mpz_class (1), m_efac));
       ghost1Minus1 = mk<MINUS>(ghostVars[1], mkTerm (mpz_class (1), m_efac));
       decGhost0 = mk<EQ>(ghostVarsPr[0], ghost0Minus1);
@@ -131,13 +134,60 @@ namespace ufo
       return true;
     }
 
+    void replaceRule(HornRuleExt* hr, HornRuleExt* rule)
+    {
+      rule->srcRelation = hr->srcRelation;
+      rule->srcRelations = hr->srcRelations;
+      rule->srcVars = hr->srcVars;
+      rule->dstRelation = hr->dstRelation;
+      rule->dstVars = hr->dstVars;
+      rule->head = hr->head;
+      rule->isFact = hr->isFact;
+      rule->isInductive = hr->isInductive;
+      rule->isQuery = hr->isQuery;
+      rule->body = hr->body;
+
+/*      vector<HornRuleExt> chcsOld = chcs;
+      chcs.clear();
+      if(!hr->isInductive && !hr->isQuery) {
+        addRule(hr);
+        if(chcsOld.size() >= 2) chcs.push_back(chcsOld[1]);
+        if(chcsOld.size() >= 3) chcs.push_back(chcsOld[2]);
+      }
+      else if(hr->isInductive) {
+        if(chcsOld.size() >= 1) chcs.push_back(chcsOld[0]);
+        addRule(hr);
+        if(chcsOld.size() >= 3) chcs.push_back(chcsOld[2]);
+      }
+      else if(hr->isQuery) {
+        if(chcsOld.size() >= 1) chcs.push_back(chcsOld[0]);
+        if(chcsOld.size() >= 2) chcs.push_back(chcsOld[1]);
+        addRule(hr);
+      }
+*/
+    }
+
+    void replaceRule(HornRuleExt* hr) {
+      for(auto& rule: ruleManager.chcs) {
+        if(!hr->isInductive && !hr->isQuery && !rule.isInductive && !rule.isQuery) {
+          replaceRule(hr,&rule);
+        }
+        else if(hr->isInductive && rule.isInductive) {
+          replaceRule(hr,&rule);
+        }
+        else if(hr->isQuery && rule.isQuery) {
+          replaceRule(hr,&rule);
+        }
+      }
+    }
+
     void specUpFc()
     {
       HornRuleExt* fc_new = new HornRuleExt();
       fc_new->srcRelation = fc->srcRelation;
       fc_new->srcRelations = fc->srcRelations;
       fc_new->srcRelations.push_back(specDecl);
-      fc_new->srcVars = fc->srcVars;
+      fc_new->srcVars.clear();
       fc_new->dstRelation = fc->dstRelation;
       fc_new->dstVars = fc->dstVars;
       fc_new->dstVars.push_back(ghostVarsPr[0]);
@@ -151,7 +201,6 @@ namespace ufo
         specVars.push_back(bind::intConst(mkTerm<string>(varName + to_string(i + invVars.size()), m_efac)));
         specVarsPr.push_back(bind::intConst(mkTerm<string>(varName + to_string(i + invVars.size()) + "'", m_efac)));
       }
-
       fc_new->srcVars.push_back(specVars);
       ExprSet fc_body;
       for(int i = 0; i < specVars.size(); i++) {
@@ -166,8 +215,13 @@ namespace ufo
       for(auto& v: fc_new->srcVars) {
         v.push_back(ghostVars[1]);
       }
+      specVars = fc_new->srcVars[0];
+      ruleManager.invVars[specDecl].clear();
+      ruleManager.addDeclAndVars(specDecl,specVars);
 
-      ruleManager.replaceRule(fc_new);
+
+      replaceRule(fc_new);
+
 
       fcBodyInvVars = fc_new->body;
       ExprSet temp;
@@ -204,7 +258,7 @@ namespace ufo
       HornRuleExt* tr_new = new HornRuleExt();
       tr_new->srcRelation = tr->srcRelation;
       tr_new->srcRelations = tr->srcRelations;
-      for(auto& s: tr_new->srcRelations) ruleManager.invVars[s].clear();
+      ruleManager.invVars[invDecl].clear();
       tr_new->srcVars = tr->srcVars;
       for(auto& sv: tr_new->srcVars) {
         sv.push_back(ghostVars[0]);
@@ -216,12 +270,15 @@ namespace ufo
       tr_new->dstVars.push_back(ghostVarsPr[0]);
       tr_new->head = bind::boolConstDecl(tr_new->dstRelation);
       tr_new->isInductive = true;
+      ruleManager.addDeclAndVars(invDecl,invVars);
+
 
       ExprSet tmp;
       getConj(tr->body, tmp);
       tmp.insert(decGhost0);
       tr_new->body = conjoin(tmp, m_efac);
-      ruleManager.replaceRule(tr_new);
+      replaceRule(tr_new);
+
       fcBodyInvVars = replaceAll(fcBodyInvVars, fc->srcVars[0], invVars);
       outs() << "fcBodyInvVars: " << fcBodyInvVars << "\n";
 
@@ -243,7 +300,7 @@ namespace ufo
       ruleManager.hasQuery = true;
 
       ruleManager.addFailDecl(qr->dstRelation);
-      ruleManager.replaceRule(qr);
+      ruleManager.addRule(qr);
 
     for (auto & a : ruleManager.chcs)       // r.chcs changed by r.addRule, so pointers to its elements are broken
       if (a.isInductive) tr = &a;
@@ -360,6 +417,7 @@ namespace ufo
     {
       for(auto i = candSet.begin(); i != candSet.end(); ) {
         if(!contains(*i, ghostVars[0])) {
+          dataGrds.insert(*i);
           i = candSet.erase(i);
         }
         else i++;
@@ -494,7 +552,7 @@ namespace ufo
         if(debug >= 6) outs() << "neg: " << neg << "\n";
         checkList.insert(neg);
       }
-      if(debug >= 6) { outs() << "checkList:\n"; printExprContainer(checkList, 2); }
+      if(debug >= 6) { outs() << "checkList:\n"; pprint(checkList, 2); }
       return bool(!u.isSat(checkList));
     }
 
@@ -1163,6 +1221,7 @@ namespace ufo
         map<Expr, ExprVector> qv;
         getQVars (sol, qv);
         for (auto & q : qv) minusSets(allVars, q.second);
+        for(auto& r: allVars) outs() << "allVars: " << r << "\n";
         assert (allVars.empty());
 //        if (!u.isSat(sol)) assert(0);
 
@@ -2022,7 +2081,7 @@ namespace ufo
           allVars.insert(lv);
         }
         if(debug >= 3) outs() << "forallArgs\n";
-        if(debug >= 3) printExprContainer(forallArgs, 2);
+        if(debug >= 3) pprint(forallArgs, 2);
         // existsArgs.push_back(mk<IMPL>(conjoin(antec, m_efac), conseq));
         // forallArgs.push_back(mknary<EXISTS>(existsArgs));
 
@@ -2043,7 +2102,7 @@ namespace ufo
       //DEBUG
       dumpSMT(constraints, allVars);
       if(debug >= 5) outs() << "constraints\n";
-      if(debug >= 5) printExprContainer(constraints, 2);
+      if(debug >= 5) pprint(constraints, 2);
       boost::tribool res = u.isSat(constraints);
 
       if (boost::logic::indeterminate(res)) {
@@ -2582,42 +2641,84 @@ namespace ufo
     map<Expr, ExprSet> ghCandMap;
     ExprSet usedGhCands; // remember previously failed usedGhCands.
     map<Expr,Expr> grds2gh; // associate a guard (phi(vars)) with a precond of gh (f(vars))
+
     void printGhSoln() {
+      Expr l = ghostVars[0];
+      Expr r;
+/*
+      for(auto& m: grds2hs) {
+        if(isOpX<MULT>(m.second->left())) {
+          r = mk<ITE>(m.first,
+                mk<DIV>(m.second->right(),m.second->left()->left()));
+        }
+        else {
+          r = mk<ITE>(m.first,m.second->right());
+        }
+      }
+*/
       outs() << "gh = ";
       for(auto& m: grds2gh) {
+        if(m.first == mk<TRUE>(m_efac)) continue;
         outs() << "ite(";
-        outs() << m.first << ", " << m.second->right() << ", ";
+        outs() << m.first << ", ";
+        if(isOpX<MULT>(m.second->left())) {
+          outs() << "(div " << m.second->right();
+          outs() << " " << m.second->left()->left() << "), ";
+        }
+        else {
+          outs() << m.second->right() << ", ";
+        }
       }
+      // SANITY CHECK that the guards and Qr is unsat so that we know it is
+      // possible that the loop won't execute in some executions of the program.
       outs() << "0)\n";
     }
 
-    void throwAtWall(map<Expr,ExprSet> bounds) {
-      Result_t res_t = guessAndSolve();
-      u.removeRedundantConjuncts(candidates[invDecl]);
-      u.removeRedundantConjuncts(candidates[specDecl]);
-      printCands(false);
-      // now parse out guards and gh cands.
-      ExprSet grds;
-      parseForGuards(grds);
+    Expr implyWeakening(Expr e) {
+      Expr l;
+      Expr j = e;
+      if(e->arity() != 2) return e;
 
-      ExprSet ghCands = candidates[specDecl];
-      filterNonGhExp(ghCands);
+      if(isOpX<EQ>(e)) {
+        if(containsOp<UN_MINUS>(e->left())) {
+          if(isOpX<MPZ>(e->right()) && e->right() != mpzZero) {
+            cpp_int i = lexical_cast<cpp_int>(e->right());
+            l = e->left();
+            if(i > 0) {
+              if(isOpX<UN_MINUS>(l->left())) {
+                j = mk<LT>(l->left()->left(),l->right());
+              }
+              else {
+                j = mk<LT>(l->right()->left(),l->left());
+              }
+            }
+            else {
+              if(isOpX<UN_MINUS>(l->left())) {
+                j = mk<LT>(l->right(),l->left()->left());
+              }
+              else {
+                j = mk<LT>(l->left(),l->right()->left());
+              }
+            }
+          }
+        }
+      }
 
-      outs() << "THROW AT WALL\n";
-      outs() << "Guards:\n";
-      pprint(grds);
-      outs() << "\n";
-      outs() << "Bounds:\n";
-      pprint(ghCands);
-      outs() << "\n";
+      if(u.implies(e,j)) e = j;
+      return e;
     }
 
-
-    boost::tribool boundSolve(Expr block) {
+    boost::tribool boundSolve(Expr block, Result_t prevRes = Result_t::UNKNOWN) {
       map<Expr,ExprSet> bounds;
+      dataGrds.clear();
       boost::tribool res = exploreBounds(bounds, block); // maybe hold previously computed bounds in a global ExprSet to avoid duplication.
+      // See if anything comes from using previous concrete datacands
+//      if(!res) res = exploreBounds(bounds, mkNeg(disjoin(concrtBounds,m_efac)));
+      ExprSet grds;
+      for(auto& e: dataGrds) grds.insert(implyWeakening(e));
+      if(debug >= 2) for(auto& e: grds) outs() << "  grd: " << e << "\n";
+
       // check for previously explored bound.
-      if(!res) res = exploreBounds(bounds, mkNeg(conjoin(concrtBounds,m_efac)));
       for(auto& prev: usedGhCands) {
         auto i = bounds[invDecl].begin(), end = bounds[invDecl].end();
         while(i != end) {
@@ -2627,14 +2728,11 @@ namespace ufo
       }
       if(bounds[invDecl].size() == 0) res = false;
 
-      // Data mining failed. Try just G&S to see if it comes up with anything.
-      if(!res) {
-        throwAtWall(bounds);
-      }
-
-      outs() << "Bounds found this iteration\n";
-      for(auto& e: bounds[invDecl]) {
-        outs() << "  " << e << "\n";
+      if(debug >= 2) {
+        outs() << "Bounds found this iteration\n";
+        for(auto& e: bounds[invDecl]) {
+          outs() << "  " << e << "\n";
+        }
       }
       if(res && debug >= 3) {
         outs() << "res is true\n";
@@ -2643,24 +2741,29 @@ namespace ufo
         outs() << "res is false\n";
       }
 
-      if(bounds[invDecl].size() > 0) outs() << "\nentering loop\n";
+      if(debug >= 2 && bounds[invDecl].size() > 0) outs() << "\nentering loop\n";
       for(auto b = bounds[invDecl].begin(), end = bounds[invDecl].end(); b != end && res; b++) { // change to go over iterators.
+        candidates.clear();
 
         if(debug >= 2) outs() << "- - - b: " << *b << "\n";
 
-        // What if we sent the guards in all at once and then teased out the relevant ones?
         candidates[specDecl].insert(replaceAll(*b, tr->srcVars[0], fc->srcVars[0]));
         candidates[invDecl].insert(*b);
-        usedGhCands.insert(*b); // to remember.
+        for(auto& e: grds) {
+          candidates[specDecl].insert(replaceAll(e, tr->srcVars[0], fc->srcVars[0]));
+          candidates[invDecl].insert(e);
+        }
+        usedGhCands.insert(*b); // to remember what has been previously used.
 
-        outs() << "Cands going to G&S\n";
+        if(debug >= 2) outs() << "Cands going to G&S\n";
+
         printCands(false);
-
         Result_t res_t = guessAndSolve();
-        outs() << "finished G&S\n";
+        if(debug >= 2) outs() << "finished G&S\n";
         u.removeRedundantConjuncts(candidates[invDecl]);
         u.removeRedundantConjuncts(candidates[specDecl]);
-
+        printCands(false);
+/*
         if(!contains( // if G&S removed the ghCand then clear and move on.
               normalize(conjoin(candidates[specDecl],m_efac),ghostVars[1]),
                 replaceAll(*b, tr->srcVars[0], fc->srcVars[0]))) {
@@ -2669,16 +2772,16 @@ namespace ufo
           outs() << "G&S removed cand\n";
           continue;
         }
-
+*/
         if(res_t == Result_t::UNKNOWN) {
           if(std::next(b) == end) {
             if(debug >= 4) outs() << "* * * CLEARING CANDS\n";
             candidates.clear();
           }
-//          else {
-//            candidates[specDecl].erase(replaceAll(*b, tr->srcVars[0], fc->srcVars[0]));
-//            candidates[invDecl].erase(*b);
-//          }
+          else {
+            candidates[specDecl].erase(replaceAll(*b, tr->srcVars[0], fc->srcVars[0]));
+            candidates[invDecl].erase(*b);
+          }
           if(debug >= 2) outs() << "=====> unknown\n\n";
           continue;
         }
@@ -2688,20 +2791,24 @@ namespace ufo
           printCands(false);
         }
 
-        ExprSet grds;
         parseForGuards(grds);
-
+        // add assertion to say no gh vars are in cands
         // Associate grds with the precond.
         grds2gh[conjoin(grds, m_efac)] = *b;
 
         if(debug >= 3) pprint(grds,2);
 
-        grds.insert(*b);
-        Expr grd = mkNeg(disjoin(grds,m_efac));
+        for(auto& g: grds2gh) {
+          grds.insert(g.first);
+        }
 
-        if(u.isSat(grd, fcBodyInvVars)) {
-          if(boundSolve(mkNeg(*b))) return true;//disjoin(grds,m_efac)));
-          //else return false;
+        Expr grd = disjoin(grds,m_efac);
+        outs() << "grd: " << grd << "\n";
+        if(u.isSat(mkNeg(grd), loopGuard)) {
+          //Expr mdl = u.getModel();
+          if(boundSolve(mkNeg(grd),res_t)) return true;
+        //  else if(prevRes == Result_t::UNSAT) return true;
+          else return false;
         }
         else return true;
       }
@@ -2714,7 +2821,9 @@ namespace ufo
       if(boundSolve(block)) {
         u.removeRedundantConjuncts(candidates[invDecl]);
         u.removeRedundantConjuncts(candidates[specDecl]);
+        outs() << "-----------\n";
         printGhSoln();
+        outs() << "-----------\n";
         printCands(true,candidates);
       }
       else {
@@ -2722,7 +2831,9 @@ namespace ufo
           outs() << "G&S\n";
           u.removeRedundantConjuncts(candidates[invDecl]);
           u.removeRedundantConjuncts(candidates[specDecl]);
+          outs() << "-----------\n";
           printGhSoln();
+          outs() << "-----------\n";
           printCands(true,candidates);
         }
         else outs() << "unknown\n";

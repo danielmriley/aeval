@@ -175,27 +175,6 @@ namespace ufo
       }
     }
 
-    void replaceRule(HornRuleExt* hr)
-    {
-      vector<HornRuleExt> chcsOld = chcs;
-      chcs.clear();
-      if(!hr->isInductive && !hr->isQuery) {
-        addRule(hr);
-        if(chcsOld.size() >= 2) chcs.push_back(chcsOld[1]);
-        if(chcsOld.size() >= 3) chcs.push_back(chcsOld[2]);
-      }
-      else if(hr->isInductive) {
-        if(chcsOld.size() >= 1) chcs.push_back(chcsOld[0]);
-        addRule(hr);
-        if(chcsOld.size() >= 3) chcs.push_back(chcsOld[2]);
-      }
-      else if(hr->isQuery) {
-        if(chcsOld.size() >= 1) chcs.push_back(chcsOld[0]);
-        if(chcsOld.size() >= 2) chcs.push_back(chcsOld[1]);
-        addRule(hr);
-      }
-    }
-
     void addRule (HornRuleExt* r)
     {
       chcs.push_back(*r);
