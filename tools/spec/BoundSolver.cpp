@@ -90,6 +90,7 @@ int main (int argc, char ** argv)
   bool newenc = getBoolValue("--newenc", false, argc, argv);
   bool fixcrel = getBoolValue("--fixcrel", false, argc, argv);
   int debug = getIntValue("--debug", 0, argc, argv);
+  bool useDataGrds = getBoolValue("--data-guards", false, argc, argv);
 
   outs() << "SpecTerm v1.0\n";
 
@@ -116,6 +117,6 @@ int main (int argc, char ** argv)
     }
   }
 
-  solveNonlin(string(argv[argc-1]), cex, str, maximal, relsOrder, !noGAS, usesygus, useUC, newenc, fixcrel, syguspath, debug);
+  solveNonlin(string(argv[argc-1]), cex, str, maximal, relsOrder, !noGAS, usesygus, useUC, newenc, fixcrel, syguspath, useDataGrds, debug);
   return 0;
 }

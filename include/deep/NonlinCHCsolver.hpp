@@ -89,10 +89,12 @@ namespace ufo
     Expr mpzZero;
 
     bool hornspec = false;
+    bool dg = false;
 
     public:
 
-    NonlinCHCsolver (CHCs& r, int _b, int dbg = 0) : m_efac(r.m_efac), ruleManager(r), u(m_efac), strenBound(_b), SYGUS_BIN(""), z3(m_efac), debug(dbg)
+    NonlinCHCsolver (CHCs& r, int _b, bool _dg, int dbg = 0)
+      : m_efac(r.m_efac), ruleManager(r), u(m_efac), strenBound(_b), SYGUS_BIN(""), z3(m_efac), dg(_dg), debug(dbg)
     {
       specDecl = mkTerm<string>(specName, m_efac);
       for (auto & a : ruleManager.chcs)
@@ -2645,39 +2647,58 @@ namespace ufo
     void printGhSoln() {
       Expr l = ghostVars[0];
       Expr r;
-/*
-      for(auto& m: grds2hs) {
-        if(isOpX<MULT>(m.second->left())) {
-          r = mk<ITE>(m.first,
-                mk<DIV>(m.second->right(),m.second->left()->left()));
+      Expr phi;
+      ExprVector phiV;
+      bool zero = true;
+
+      if(!u.isSat(fcBodyInvVars,mkNeg(loopGuard))) {
+        if(debug >= 3) outs() << "ZERO LOOP EXE IS NOT POSSIBLE ON INPUT\n";
+        zero = false;
+      }
+
+      auto m = grds2gh.rbegin();
+
+      auto b = grds2gh.rend();
+
+      for(; m != b; m++) {
+        if(!zero && m == grds2gh.rbegin()) {
+          if(isOpX<MULT>(m->second->left())) {
+            r = mk<DIV>(m->second->right(),m->second->left()->left());
+          }
+          else {
+            r = m->second->right();
+          }
+        }
+        else if(m == grds2gh.rbegin()) {
+          if(isOpX<MULT>(m->second->left())) {
+            r = mk<ITE>(m->first,mk<DIV>(m->second->right(),m->second->left()->left()), mpzZero);
+          }
+          else {
+            r = mk<ITE>(m->first,m->second->right(), mpzZero);
+          }
         }
         else {
-          r = mk<ITE>(m.first,m.second->right());
+          if(isOpX<MULT>(m->second->left())) {
+            r = mk<ITE>(m->first,mk<DIV>(m->second->right(),m->second->left()->left()), r);
+          }
+          else {
+            r = mk<ITE>(m->first,m->second->right(), r);
+          }
         }
       }
-*/
-      outs() << "gh = ";
-      for(auto& m: grds2gh) {
-        if(m.first == mk<TRUE>(m_efac)) continue;
-        outs() << "ite(";
-        outs() << m.first << ", ";
-        if(isOpX<MULT>(m.second->left())) {
-          outs() << "(div " << m.second->right();
-          outs() << " " << m.second->left()->left() << "), ";
-        }
-        else {
-          outs() << m.second->right() << ", ";
-        }
-      }
-      // SANITY CHECK that the guards and Qr is unsat so that we know it is
-      // possible that the loop won't execute in some executions of the program.
-      outs() << "0)\n";
+      l = mk<EQ>(l,r);
+      u.print(l);
+      outs() << "\n";
     }
 
     Expr implyWeakening(Expr e) {
       Expr l;
       Expr j = e;
-      if(e->arity() != 2) return e;
+      outs() << "  e: " << e << "  j: " << j << "\n";
+      if(e->left()->arity() != 2) {
+        if(debug >= 2) outs() << "arity != 2\n";
+        return e;
+      }
 
       if(isOpX<EQ>(e)) {
         if(containsOp<UN_MINUS>(e->left())) {
@@ -2687,17 +2708,21 @@ namespace ufo
             if(i > 0) {
               if(isOpX<UN_MINUS>(l->left())) {
                 j = mk<LT>(l->left()->left(),l->right());
+                outs() << "  j: " << j << "\n";
               }
               else {
                 j = mk<LT>(l->right()->left(),l->left());
+                outs() << "  j: " << j << "\n";
               }
             }
             else {
               if(isOpX<UN_MINUS>(l->left())) {
                 j = mk<LT>(l->right(),l->left()->left());
+                outs() << "  j: " << j << "\n";
               }
               else {
                 j = mk<LT>(l->left(),l->right()->left());
+                outs() << "  j: " << j << "\n";
               }
             }
           }
@@ -2711,12 +2736,25 @@ namespace ufo
     boost::tribool boundSolve(Expr block, Result_t prevRes = Result_t::UNKNOWN) {
       map<Expr,ExprSet> bounds;
       dataGrds.clear();
+      if(debug >= 2) {
+        outs() << "EXPLOREBOUNDS\n";
+        outs() << "=============\n";
+      }
       boost::tribool res = exploreBounds(bounds, block); // maybe hold previously computed bounds in a global ExprSet to avoid duplication.
+      if(debug >= 2) {
+        outs() << "EXPLOREBOUNDS is finished\n";
+      }
       // See if anything comes from using previous concrete datacands
 //      if(!res) res = exploreBounds(bounds, mkNeg(disjoin(concrtBounds,m_efac)));
       ExprSet grds;
-      for(auto& e: dataGrds) grds.insert(implyWeakening(e));
-      if(debug >= 2) for(auto& e: grds) outs() << "  grd: " << e << "\n";
+      if(dg) {
+        for(auto& e: dataGrds) {
+          Expr w = implyWeakening(e);
+          if(debug >= 3) outs() << "Adding guard from data: " << w << "\n";
+          grds.insert(w);
+        }
+      }
+//      if(debug >= 2) for(auto& e: grds) outs() << "  grd: " << e << "\n";
 
       // check for previously explored bound.
       for(auto& prev: usedGhCands) {
@@ -2807,8 +2845,7 @@ namespace ufo
         if(u.isSat(mkNeg(grd), loopGuard)) {
           //Expr mdl = u.getModel();
           if(boundSolve(mkNeg(grd),res_t)) return true;
-        //  else if(prevRes == Result_t::UNSAT) return true;
-          else return false;
+          //else return false;
         }
         else return true;
       }
@@ -2827,6 +2864,7 @@ namespace ufo
         printCands(true,candidates);
       }
       else {
+        candidates.clear();
         if(guessAndSolve() == Result_t::UNSAT) {
           outs() << "G&S\n";
           u.removeRedundantConjuncts(candidates[invDecl]);
@@ -3211,21 +3249,25 @@ namespace ufo
     }
   };
 
-  inline void solveNonlin(string smt, int inv, int stren, bool maximal, const vector<string> & relsOrder, bool useGAS, bool usesygus, bool useUC, bool newenc, bool fixCRels, string syguspath, int debug = 0)
+  inline void solveNonlin(string smt, int inv, int stren, bool maximal, const vector<string> & relsOrder, bool useGAS, bool usesygus, bool useUC, bool newenc, bool fixCRels, string syguspath, bool dg, int debug = 0)
   {
     ExprFactory m_efac;
     EZ3 z3(m_efac);
     CHCs ruleManager(m_efac, z3);
     ruleManager.parse(smt);
-    NonlinCHCsolver spec(ruleManager, stren, debug);
+    NonlinCHCsolver spec(ruleManager, stren, dg, debug);
     if(debug >= 3) outs() << "invDecl: " << ruleManager.invRel << "\n";
     if(debug >= 3)
       for(auto& e: ruleManager.invVars[ruleManager.invRel])
         outs() << "invVar: " << e << "\n";
-    if(!ruleManager.hasQuery) {
+    if(!ruleManager.hasQuery && ruleManager.chcs.size() == 2) {
       if(debug >= 2) ruleManager.print();
       spec.setUpQueryAndSpec();
       if(debug >= 3) outs() << "invDecl: " << ruleManager.invRel << "\nStart solving\n";
+    }
+    else {
+      outs() << "Unsupported format\n";
+      assert(0);
     }
 
     spec.boundSolve();
