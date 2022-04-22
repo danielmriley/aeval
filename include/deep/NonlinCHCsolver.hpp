@@ -90,11 +90,12 @@ namespace ufo
 
     bool hornspec = false;
     bool dg = false;
+    bool printGsSoln = false;
 
     public:
 
-    NonlinCHCsolver (CHCs& r, int _b, bool _dg, int dbg = 0)
-      : m_efac(r.m_efac), ruleManager(r), u(m_efac), strenBound(_b), SYGUS_BIN(""), z3(m_efac), dg(_dg), debug(dbg)
+    NonlinCHCsolver (CHCs& r, int _b, bool _dg, bool pssg, int dbg = 0)
+      : m_efac(r.m_efac), ruleManager(r), u(m_efac), strenBound(_b), SYGUS_BIN(""), z3(m_efac), dg(_dg), printGsSoln(pssg), debug(dbg)
     {
       specDecl = mkTerm<string>(specName, m_efac);
       for (auto & a : ruleManager.chcs)
@@ -282,7 +283,7 @@ namespace ufo
       replaceRule(tr_new);
 
       fcBodyInvVars = replaceAll(fcBodyInvVars, fc->srcVars[0], invVars);
-      outs() << "fcBodyInvVars: " << fcBodyInvVars << "\n";
+      if(debug >= 4) outs() << "fcBodyInvVars: " << fcBodyInvVars << "\n";
 
     for (auto & a : ruleManager.chcs)       // r.chcs changed by r.addRule, so pointers to its elements are broken
       if (a.isInductive) tr = &a;
@@ -1914,7 +1915,7 @@ namespace ufo
       CHCs nrm(m_efac, z3);
       nrm.parse(newsmt);
       if(debug >= 2) outs() << "getWeakerSoln\n";
-      NonlinCHCsolver newNonlin(nrm, 1, debug);
+      NonlinCHCsolver newNonlin(nrm, 1, 1, 1, debug);
       ExprVector query;
 
       Result_t res = newNonlin.guessAndSolve();
@@ -2304,7 +2305,7 @@ namespace ufo
       nrm.parse(newsmt);
       if(debug >= 3) outs() << "solveWeakCHC\n";
       nrm.print();
-      NonlinCHCsolver newNonlin(nrm, 1, debug);
+      NonlinCHCsolver newNonlin(nrm, 1, 1, 1, debug);
       ExprVector query;
 
       Result_t res = newNonlin.guessAndSolve();
@@ -2649,18 +2650,17 @@ namespace ufo
       Expr r;
       Expr phi;
       ExprVector phiV;
-      bool zero = true;
+      bool zero = true, good = false;
 
       if(!u.isSat(fcBodyInvVars,mkNeg(loopGuard))) {
         if(debug >= 3) outs() << "ZERO LOOP EXE IS NOT POSSIBLE ON INPUT\n";
         zero = false;
       }
-
       auto m = grds2gh.rbegin();
-
       auto b = grds2gh.rend();
 
       for(; m != b; m++) {
+        good = true;
         if(!zero && m == grds2gh.rbegin()) {
           if(isOpX<MULT>(m->second->left())) {
             r = mk<DIV>(m->second->right(),m->second->left()->left());
@@ -2686,17 +2686,19 @@ namespace ufo
           }
         }
       }
-      l = mk<EQ>(l,r);
-      u.print(l);
-      outs() << "\n";
+      if(r != NULL) {
+        l = mk<EQ>(l,r);
+        u.print(l);
+        outs() << "\n";
+      }
+
     }
 
     Expr implyWeakening(Expr e) {
       Expr l;
       Expr j = e;
-      outs() << "  e: " << e << "  j: " << j << "\n";
       if(e->left()->arity() != 2) {
-        if(debug >= 2) outs() << "arity != 2\n";
+        if(debug >= 5) outs() << "arity != 2\n";
         return e;
       }
 
@@ -2708,21 +2710,17 @@ namespace ufo
             if(i > 0) {
               if(isOpX<UN_MINUS>(l->left())) {
                 j = mk<LT>(l->left()->left(),l->right());
-                outs() << "  j: " << j << "\n";
               }
               else {
                 j = mk<LT>(l->right()->left(),l->left());
-                outs() << "  j: " << j << "\n";
               }
             }
             else {
               if(isOpX<UN_MINUS>(l->left())) {
                 j = mk<LT>(l->right(),l->left()->left());
-                outs() << "  j: " << j << "\n";
               }
               else {
                 j = mk<LT>(l->left(),l->right()->left());
-                outs() << "  j: " << j << "\n";
               }
             }
           }
@@ -2793,14 +2791,17 @@ namespace ufo
         }
         usedGhCands.insert(*b); // to remember what has been previously used.
 
-        if(debug >= 2) outs() << "Cands going to G&S\n";
-
-        printCands(false);
+        if(debug >= 2) {
+          outs() << "Cands going to G&S\n";
+          printCands(false);
+        }
         Result_t res_t = guessAndSolve();
         if(debug >= 2) outs() << "finished G&S\n";
         u.removeRedundantConjuncts(candidates[invDecl]);
         u.removeRedundantConjuncts(candidates[specDecl]);
-        printCands(false);
+        if(debug >= 2) {
+          printCands(false);
+        }
 /*
         if(!contains( // if G&S removed the ghCand then clear and move on.
               normalize(conjoin(candidates[specDecl],m_efac),ghostVars[1]),
@@ -2841,11 +2842,10 @@ namespace ufo
         }
 
         Expr grd = disjoin(grds,m_efac);
-        outs() << "grd: " << grd << "\n";
-        if(u.isSat(mkNeg(grd), loopGuard)) {
+        if(debug >= 4) outs() << "grd: " << grd << "\n";
+        if(u.isSat(mkNeg(grd), fcBodyInvVars, loopGuard)) {
           //Expr mdl = u.getModel();
           if(boundSolve(mkNeg(grd),res_t)) return true;
-          //else return false;
         }
         else return true;
       }
@@ -2858,21 +2858,18 @@ namespace ufo
       if(boundSolve(block)) {
         u.removeRedundantConjuncts(candidates[invDecl]);
         u.removeRedundantConjuncts(candidates[specDecl]);
-        outs() << "-----------\n";
+        outs() << "unsat\n";
         printGhSoln();
-        outs() << "-----------\n";
-        printCands(true,candidates);
+        if(printGsSoln) printCands(true,candidates);
       }
       else {
         candidates.clear();
         if(guessAndSolve() == Result_t::UNSAT) {
-          outs() << "G&S\n";
+          outs() << "G&S: unsat\n";
           u.removeRedundantConjuncts(candidates[invDecl]);
           u.removeRedundantConjuncts(candidates[specDecl]);
-          outs() << "-----------\n";
           printGhSoln();
-          outs() << "-----------\n";
-          printCands(true,candidates);
+          if(printGsSoln) printCands(true,candidates);
         }
         else outs() << "unknown\n";
       }
@@ -3249,13 +3246,13 @@ namespace ufo
     }
   };
 
-  inline void solveNonlin(string smt, int inv, int stren, bool maximal, const vector<string> & relsOrder, bool useGAS, bool usesygus, bool useUC, bool newenc, bool fixCRels, string syguspath, bool dg, int debug = 0)
+  inline void solveNonlin(string smt, int inv, int stren, bool maximal, const vector<string> & relsOrder, bool useGAS, bool usesygus, bool useUC, bool newenc, bool fixCRels, string syguspath, bool dg, bool pgss, int debug = 0)
   {
     ExprFactory m_efac;
     EZ3 z3(m_efac);
     CHCs ruleManager(m_efac, z3);
     ruleManager.parse(smt);
-    NonlinCHCsolver spec(ruleManager, stren, dg, debug);
+    NonlinCHCsolver spec(ruleManager, stren, dg, pgss, debug);
     if(debug >= 3) outs() << "invDecl: " << ruleManager.invRel << "\n";
     if(debug >= 3)
       for(auto& e: ruleManager.invVars[ruleManager.invRel])
