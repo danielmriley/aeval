@@ -2652,8 +2652,13 @@ namespace ufo
       ExprVector phiV;
       bool zero = true, good = false;
 
+      if(!u.isSat(fcBodyInvVars,loopGuard)) {
+        if(debug >= 3) outs() << "LOOP NEVER EXECUTES\n";
+        zero = true;
+      }
+
       if(!u.isSat(fcBodyInvVars,mkNeg(loopGuard))) {
-        if(debug >= 3) outs() << "ZERO LOOP EXE IS NOT POSSIBLE ON INPUT\n";
+        if(debug >= 3) outs() << "ZERO LOOP EXECUTIONS IS NOT POSSIBLE ON INPUT\n";
         zero = false;
       }
       auto m = grds2gh.rbegin();
@@ -2688,6 +2693,11 @@ namespace ufo
       }
       if(r != NULL) {
         l = mk<EQ>(l,r);
+        u.print(l);
+        outs() << "\n";
+      }
+      else if(zero && !good) {
+        l = mk<EQ>(l,mpzZero);
         u.print(l);
         outs() << "\n";
       }
@@ -2734,6 +2744,11 @@ namespace ufo
     boost::tribool boundSolve(Expr block, Result_t prevRes = Result_t::UNKNOWN) {
       map<Expr,ExprSet> bounds;
       dataGrds.clear();
+      if(!u.isSat(fcBodyInvVars,loopGuard)) {
+        if(debug >= 3) outs() << "PROGRAM WILL NEVER ENTER LOOP\n";
+        return true;
+      }
+
       if(debug >= 2) {
         outs() << "EXPLOREBOUNDS\n";
         outs() << "=============\n";

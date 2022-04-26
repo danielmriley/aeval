@@ -1,6 +1,4 @@
 (declare-rel inv (Int Int))
-(declare-var i Int)
-(declare-var i1 Int)
 (declare-var j Int)
 (declare-var j1 Int)
 (declare-var d Int)
@@ -8,8 +6,8 @@
 
 (rule (inv j d))
 
-(rule (=> 
-    (and 
+(rule (=>
+    (and
         (inv j d)
         (> d 0)
         (> j 0)
