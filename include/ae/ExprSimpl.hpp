@@ -3076,7 +3076,7 @@ namespace ufo
       }
     }
   }
-/*
+
   inline static Expr normalizeAtom(Expr fla, ExprVector& intVars)
   {
     if (isOp<ComparissonOp>(fla) && isNumeric(fla->left()))
@@ -3202,10 +3202,10 @@ namespace ufo
     }
     return fla;
   }
-*/
+
   // follows similar procedure to normaizeAtom above but will set the lhs to lhsVar
   // and the rhs to the remaining expr.
-  inline static Expr normalizeAtom(Expr fla, ExprVector& intVars, Expr lhsVar = 0)
+  inline static Expr normalizeAtom(Expr fla, ExprVector& intVars, Expr lhsVar)
     {
       // Changes made as requested.
       // Handles cases of lhsVar being specified and when one is not specified.
@@ -4240,7 +4240,7 @@ namespace ufo
     cnj.insert(newCnjs.begin(), newCnjs.end());
     if (toRepeat) simplifyPropagate(cnj);
   }
-  
+
   void pprint(Expr exp, int inden, bool upper);
 
   template<typename Range> static void pprint(Range& exprs, int inden = 0)

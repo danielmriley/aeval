@@ -3,6 +3,7 @@
 
 #include "HornNonlin.hpp"
 #include "DataLearner.hpp"
+#include "DataLearner2.hpp"
 
 #include <fstream>
 #include <chrono>
@@ -91,11 +92,12 @@ namespace ufo
     bool hornspec = false;
     bool dg = false;
     bool printGsSoln = false;
+    bool data2 = false;
 
     public:
 
-    NonlinCHCsolver (CHCs& r, int _b, bool _dg, bool pssg, int dbg = 0)
-      : m_efac(r.m_efac), ruleManager(r), u(m_efac), strenBound(_b), SYGUS_BIN(""), z3(m_efac), dg(_dg), printGsSoln(pssg), debug(dbg)
+    NonlinCHCsolver (CHCs& r, int _b, bool _dg, bool pssg, bool d2, int dbg = 0)
+      : m_efac(r.m_efac), ruleManager(r), u(m_efac), strenBound(_b), SYGUS_BIN(""), z3(m_efac), dg(_dg), printGsSoln(pssg), data2(d2), debug(dbg)
     {
       specDecl = mkTerm<string>(specName, m_efac);
       for (auto & a : ruleManager.chcs)
@@ -427,6 +429,14 @@ namespace ufo
       }
     }
 
+    boost::tribool dataForBound2(map<Expr, ExprSet>& candMap, Expr block) {
+      DataLearner2 dl2(ruleManager, z3, debug);
+      Expr invs = mk<TRUE>(m_efac);
+      boost::tribool res = dl2.connect(invDecl, block, invs, loopGuard);
+      candMap[invDecl] = dl2.getDataCands(invDecl);
+      return res;
+    }
+
     boost::tribool dataForBound(map<Expr, ExprSet>& candMap, Expr block) {
       if(debug >= 2)
         outs() << "\nUSING DATA\n===========\n";
@@ -491,9 +501,9 @@ namespace ufo
       //block = mkNeg(block);
       if(block == mk<FALSE>(m_efac)) return false;
 
-      map<Expr, ExprSet> ghBoundMap;
+      if(!data2) res = dataForBound(ghCandMap, block);
+      else res = dataForBound2(ghCandMap, block);
 
-      res = dataForBound(ghCandMap, block);
       filterNonGhExp(ghCandMap[invDecl]);
       if(ghCandMap[invDecl].empty()) return false;
 
@@ -3261,13 +3271,15 @@ namespace ufo
     }
   };
 
-  inline void solveNonlin(string smt, int inv, int stren, bool maximal, const vector<string> & relsOrder, bool useGAS, bool usesygus, bool useUC, bool newenc, bool fixCRels, string syguspath, bool dg, bool pgss, int debug = 0)
+  inline void solveNonlin(string smt, int inv, int stren, bool maximal, const vector<string> & relsOrder, bool useGAS,
+                          bool usesygus, bool useUC, bool newenc, bool fixCRels, string syguspath, bool dg,
+                          bool pgss, bool data2, int debug = 0)
   {
     ExprFactory m_efac;
     EZ3 z3(m_efac);
     CHCs ruleManager(m_efac, z3);
     ruleManager.parse(smt);
-    NonlinCHCsolver spec(ruleManager, stren, dg, pgss, debug);
+    NonlinCHCsolver spec(ruleManager, stren, dg, pgss, data2, debug);
     if(debug >= 3) outs() << "invDecl: " << ruleManager.invRel << "\n";
     if(debug >= 3)
       for(auto& e: ruleManager.invVars[ruleManager.invRel])
