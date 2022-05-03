@@ -435,7 +435,6 @@ namespace ufo
       Expr invs = mk<TRUE>(m_efac);
       boost::tribool res = dl2.connect(invDecl, block, invs, loopGuard);
       candMap[invDecl] = dl2.getDataCands(invDecl);
-      outs() << "HERE2324\n";
       return res;
     }
 
@@ -505,9 +504,7 @@ namespace ufo
 
       if(!data2) res = dataForBound(ghCandMap, block);
       else res = dataForBound2(ghCandMap, block);
-      outs() << "HERE\n";
       filterNonGhExp(ghCandMap[invDecl]);
-      outs() << "HERE\n";
       if(ghCandMap[invDecl].empty()) return false;
 
       ExprSet temp;
@@ -518,7 +515,6 @@ namespace ufo
         temp.insert(e);
       }
       ghCandMap[invDecl].swap(temp);
-      outs() << "HERE\n";
       if(debug >= 2) {
         outs() << "filtered cands:\n";
         if(!ghCandMap[invDecl].empty()) for(auto& g: ghCandMap[invDecl]) outs() << "g: " << g << "\n";
@@ -2745,7 +2741,7 @@ namespace ufo
           if(isOpX<MPZ>(e->right()) && e->right() != mpzZero) {
             cpp_int i = lexical_cast<cpp_int>(e->right());
             l = e->left();
-            outs() << "l: " << l << "\n";
+//            outs() << "l: " << l << "\n";
             if(i > 0) {
               if(containsOp<UN_MINUS>(l->left())) {
                 j = mk<LT>(additiveInverse(l->left()),l->right());
@@ -2763,7 +2759,7 @@ namespace ufo
               }
             }
           }
-          outs() << "- - - j: " << j << "\n";
+//          outs() << "- - - j: " << j << "\n";
 //        }
       }
 
@@ -2798,14 +2794,14 @@ namespace ufo
 //      if(debug >= 2) for(auto& e: grds) outs() << "  grd: " << e << "\n";
 
       // check for previously explored bound.
-      for(auto& prev: usedGhCands) {
+/*      for(auto& prev: usedGhCands) {
         auto i = bounds[invDecl].begin(), end = bounds[invDecl].end();
         while(i != end) {
           if(prev == *i) i = bounds[invDecl].erase(i);
           else i++;
         }
       }
-      if(bounds[invDecl].size() == 0) res = false;
+*/      if(bounds[invDecl].size() == 0) res = false;
 
       if(debug >= 2) {
         outs() << "\nBounds found this iteration\n";
@@ -2817,7 +2813,7 @@ namespace ufo
       for(auto b = bounds[invDecl].begin(), end = bounds[invDecl].end(); b != end && res; b++) {
         candidates.clear();
 
-        if(debug >= 2) outs() << "- - - b: " << *b << "\n";
+        if(debug >= 2) outs() << "\n- - - b: " << *b << "\n";
 
         candidates[specDecl].insert(replaceAll(*b, tr->srcVars[0], fc->srcVars[0]));
         candidates[invDecl].insert(*b);

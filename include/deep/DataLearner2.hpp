@@ -69,7 +69,7 @@ namespace ufo
 
             }
           }
-          outs() << "\n";
+          if(debug >= 2) outs() << "\n";
           // ADD or SUBTRACT each equation from another to generate data candidates.
           for(int i = 0; i < ev.size(); i++) {
             dc[srcRel].insert(normalize(ev[i]));
