@@ -42,6 +42,7 @@ namespace ufo
 
     ExprFactory &m_efac;
     EZ3 z3;
+    ZSolver<EZ3> smt;
     SMTUtils u;
     CHCs& ruleManager;
     int varCnt = 0;
@@ -97,7 +98,7 @@ namespace ufo
     public:
 
     NonlinCHCsolver (CHCs& r, int _b, bool _dg, bool pssg, bool d2, int dbg = 0)
-      : m_efac(r.m_efac), ruleManager(r), u(m_efac), strenBound(_b), SYGUS_BIN(""), z3(m_efac), dg(_dg), printGsSoln(pssg), data2(d2), debug(dbg)
+      : m_efac(r.m_efac), ruleManager(r), u(m_efac), strenBound(_b), SYGUS_BIN(""), z3(m_efac), smt(z3), dg(_dg), printGsSoln(pssg), data2(d2), debug(dbg)
     {
       specDecl = mkTerm<string>(specName, m_efac);
       for (auto & a : ruleManager.chcs)
@@ -422,7 +423,7 @@ namespace ufo
     {
       for(auto i = candSet.begin(); i != candSet.end(); ) {
         if(!contains(*i, ghostVars[0])) {
-          dataGrds.insert(*i);
+          if(dg) dataGrds.insert(*i);
           i = candSet.erase(i);
         }
         else i++;
@@ -434,6 +435,7 @@ namespace ufo
       Expr invs = mk<TRUE>(m_efac);
       boost::tribool res = dl2.connect(invDecl, block, invs, loopGuard);
       candMap[invDecl] = dl2.getDataCands(invDecl);
+      outs() << "HERE2324\n";
       return res;
     }
 
@@ -503,8 +505,9 @@ namespace ufo
 
       if(!data2) res = dataForBound(ghCandMap, block);
       else res = dataForBound2(ghCandMap, block);
-
+      outs() << "HERE\n";
       filterNonGhExp(ghCandMap[invDecl]);
+      outs() << "HERE\n";
       if(ghCandMap[invDecl].empty()) return false;
 
       ExprSet temp;
@@ -515,10 +518,10 @@ namespace ufo
         temp.insert(e);
       }
       ghCandMap[invDecl].swap(temp);
-
+      outs() << "HERE\n";
       if(debug >= 2) {
         outs() << "filtered cands:\n";
-        if(!ghCandMap[invDecl].empty()) pprint(ghCandMap[invDecl],2);
+        if(!ghCandMap[invDecl].empty()) for(auto& g: ghCandMap[invDecl]) outs() << "g: " << g << "\n";
         else outs() << "  none.\n";
       }
 
@@ -2630,30 +2633,43 @@ namespace ufo
       }
       return diff;
     }
+    map<Expr,Expr> grds2gh; // associate a guard (phi(vars)) with a precond of gh (f(vars))
 
-    ExprSet parseForGuards(ExprSet& grds) { // return bool
-      ExprSet exp;
+    void parseForGuards(map<Expr,Expr>& grds) {
       if(debug >= 3) outs() << "Begin parsing for guards\n";
-      for(auto e = candidates[specDecl].begin(); e != candidates[specDecl].end() ; e++) {
-        if(contains(*e,ghostVars[0]) || contains(*e,ghostVars[1])) {
-          // add the ghost formula here. size is one and is Equality of form gh = ....
-        }
-        else {
-          Expr r = replaceAll(*e, fc->srcVars[0],invVars);
-          exp.insert(normalize(r));
-        }
-      }
-      if(exp.empty()) exp.insert(mk<TRUE>(m_efac));
-      grds.insert(conjoin(exp, m_efac));
+      // get a DNF form if there are disj in the result from G&S.
+      ExprVector projections, vars2keep;
+
+      u.flatten(conjoin(candidates[specDecl],m_efac), projections, false, vars2keep, [](Expr a, ExprVector& b){return a;});
+
       if(debug >= 3) {
-        outs() << "End parsing for guards\n";
+        outs() << "\n   Projections\n=================\n";
+        for(auto& g : projections) {
+          outs() << "  " << g << "\n";
+        }
+        outs() << "=================\n";
       }
-      return exp;
+      ExprSet t,p,g;
+      for(auto e = projections.begin(); e != projections.end() ; e++) {
+        t.clear(); p.clear(); g.clear();
+        getConj(*e, t);
+        for(auto& ee: t) {
+          if(contains(ee,ghostVars[0]) || contains(ee,ghostVars[1])) {
+            Expr r = replaceAll(ee, fc->srcVars[0],invVars);
+            g.insert(normalize(r));
+          }
+          else {
+            Expr r = replaceAll(ee, fc->srcVars[0],invVars);
+            p.insert(normalize(r));
+          }
+        }
+        grds[conjoin(p,m_efac)] = conjoin(g,m_efac);
+      }
+      if(debug >= 3) { outs() << "End parsing for guards\n"; }
     }
 
     map<Expr, ExprSet> ghCandMap;
     ExprSet usedGhCands; // remember previously failed usedGhCands.
-    map<Expr,Expr> grds2gh; // associate a guard (phi(vars)) with a precond of gh (f(vars))
 
     void printGhSoln() {
       Expr l = ghostVars[0];
@@ -2661,6 +2677,8 @@ namespace ufo
       Expr phi;
       ExprVector phiV;
       bool zero = true, good = false;
+
+      for(auto&g: grds2gh) g.second = normalize(g.second,l);
 
       if(!u.isSat(fcBodyInvVars,loopGuard)) {
         if(debug >= 3) outs() << "LOOP NEVER EXECUTES\n";
@@ -2717,58 +2735,58 @@ namespace ufo
     Expr implyWeakening(Expr e) {
       Expr l;
       Expr j = e;
-      if(e->left()->arity() != 2) {
-        if(debug >= 5) outs() << "arity != 2\n";
-        return e;
+      if(e->arity() <= 1 || e->left()->arity() != 2) {
+        if(debug >= 3) outs() << "invalid Expr: " << e << "\n";
+        return normalize(e);
       }
 
       if(isOpX<EQ>(e)) {
-        if(containsOp<UN_MINUS>(e->left())) {
+//        if(containsOp<UN_MINUS>(e->left())) {
           if(isOpX<MPZ>(e->right()) && e->right() != mpzZero) {
             cpp_int i = lexical_cast<cpp_int>(e->right());
             l = e->left();
+            outs() << "l: " << l << "\n";
             if(i > 0) {
-              if(isOpX<UN_MINUS>(l->left())) {
-                j = mk<LT>(l->left()->left(),l->right());
+              if(containsOp<UN_MINUS>(l->left())) {
+                j = mk<LT>(additiveInverse(l->left()),l->right());
               }
               else {
-                j = mk<LT>(l->right()->left(),l->left());
+                j = mk<LT>(additiveInverse(l->right()),l->left());
               }
             }
             else {
-              if(isOpX<UN_MINUS>(l->left())) {
-                j = mk<LT>(l->right(),l->left()->left());
+              if(containsOp<UN_MINUS>(l->left())) {
+                j = mk<LT>(l->right(),additiveInverse(l->left()));
               }
               else {
-                j = mk<LT>(l->left(),l->right()->left());
+                j = mk<LT>(l->left(),additiveInverse(l->right()));
               }
             }
           }
-        }
+          outs() << "- - - j: " << j << "\n";
+//        }
       }
 
-      if(u.implies(e,j)) e = j;
+      if(u.implies(e,j)) {
+        if(debug >= 3) outs() << "=== Passed implication check === \n";
+        e = j;
+      }
       return e;
     }
 
-    boost::tribool boundSolve(Expr block, Result_t prevRes = Result_t::UNKNOWN) {
+    boost::tribool boundSolve(Expr block) {
       map<Expr,ExprSet> bounds;
       dataGrds.clear();
+
       if(!u.isSat(fcBodyInvVars,loopGuard)) {
         if(debug >= 3) outs() << "PROGRAM WILL NEVER ENTER LOOP\n";
         return true;
       }
-
       if(debug >= 2) {
-        outs() << "EXPLOREBOUNDS\n";
-        outs() << "=============\n";
+        outs() << "  EXPLOREBOUNDS\n";
+        outs() << "=================\n";
       }
       boost::tribool res = exploreBounds(bounds, block); // maybe hold previously computed bounds in a global ExprSet to avoid duplication.
-      if(debug >= 2) {
-        outs() << "EXPLOREBOUNDS is finished\n";
-      }
-      // See if anything comes from using previous concrete datacands
-//      if(!res) res = exploreBounds(bounds, mkNeg(disjoin(concrtBounds,m_efac)));
       ExprSet grds;
       if(dg) {
         for(auto& e: dataGrds) {
@@ -2790,27 +2808,20 @@ namespace ufo
       if(bounds[invDecl].size() == 0) res = false;
 
       if(debug >= 2) {
-        outs() << "Bounds found this iteration\n";
+        outs() << "\nBounds found this iteration\n";
         for(auto& e: bounds[invDecl]) {
           outs() << "  " << e << "\n";
         }
       }
-      if(res && debug >= 3) {
-        outs() << "res is true\n";
-      }
-      else if(debug >= 3) {
-        outs() << "res is false\n";
-      }
 
-      if(debug >= 2 && bounds[invDecl].size() > 0) outs() << "\nentering loop\n";
-      for(auto b = bounds[invDecl].begin(), end = bounds[invDecl].end(); b != end && res; b++) { // change to go over iterators.
+      for(auto b = bounds[invDecl].begin(), end = bounds[invDecl].end(); b != end && res; b++) {
         candidates.clear();
 
         if(debug >= 2) outs() << "- - - b: " << *b << "\n";
 
         candidates[specDecl].insert(replaceAll(*b, tr->srcVars[0], fc->srcVars[0]));
         candidates[invDecl].insert(*b);
-        for(auto& e: grds) {
+        for(auto& e: grds) { // insert the data guards.
           candidates[specDecl].insert(replaceAll(e, tr->srcVars[0], fc->srcVars[0]));
           candidates[invDecl].insert(e);
         }
@@ -2818,16 +2829,21 @@ namespace ufo
 
         if(debug >= 2) {
           outs() << "Cands going to G&S\n";
+          outs() << "==================\n";
           printCands(false);
+          outs() << "==================\n";
         }
         Result_t res_t = guessAndSolve();
         if(debug >= 2) outs() << "finished G&S\n";
         u.removeRedundantConjuncts(candidates[invDecl]);
         u.removeRedundantConjuncts(candidates[specDecl]);
         if(debug >= 2) {
-          printCands(false);
+        outs() << "==================\n";
+        printCands(false);
+        outs() << "==================\n";
         }
-/*
+/*      The problem with the code below is that because of the normalizations
+        we do now the Exprs do not always match and are not caught.
         if(!contains( // if G&S removed the ghCand then clear and move on.
               normalize(conjoin(candidates[specDecl],m_efac),ghostVars[1]),
                 replaceAll(*b, tr->srcVars[0], fc->srcVars[0]))) {
@@ -2851,26 +2867,31 @@ namespace ufo
         }
 
         // If you're here then G&S returned UNSAT
+        if(debug >= 2) outs() << "=====> unsat\n\n";
+
+        parseForGuards(grds2gh); // Associates guards (pre(Vars)) with Expr gh = f()
+                            // They are stored in grds2gh map.
+
         if(debug >= 3) {
-          printCands(false);
+          outs() << "\n    Guards\n==============\n";
+          for(auto& g: grds2gh) {
+            outs() << g.first << "\n";
+          }
+          outs() << "==============\n";
         }
 
-        parseForGuards(grds);
-        // add assertion to say no gh vars are in cands
-        // Associate grds with the precond.
-        grds2gh[conjoin(grds, m_efac)] = *b;
-
-        if(debug >= 3) pprint(grds,2);
-
+        // end of parsing guards.
+        grds.clear();
         for(auto& g: grds2gh) {
           grds.insert(g.first);
         }
-
         Expr grd = disjoin(grds,m_efac);
         if(debug >= 4) outs() << "grd: " << grd << "\n";
         if(u.isSat(mkNeg(grd), fcBodyInvVars, loopGuard)) {
-          //Expr mdl = u.getModel();
-          if(boundSolve(mkNeg(grd),res_t)) return true;
+
+          if(boundSolve(mkNeg(grd))) {
+            return true;
+          }
         }
         else return true;
       }
@@ -2889,7 +2910,7 @@ namespace ufo
       }
       else {
         candidates.clear();
-        if(guessAndSolve() == Result_t::UNSAT) {
+        if(false){//guessAndSolve() == Result_t::UNSAT) {
           outs() << "G&S: unsat\n";
           u.removeRedundantConjuncts(candidates[invDecl]);
           u.removeRedundantConjuncts(candidates[specDecl]);
@@ -2902,233 +2923,7 @@ namespace ufo
 
     void maximalSolve (bool useGAS = true, bool usesygus = false, bool useUC = false, bool fixCRels = false)
     {
-      int itr = 0;
-      bool firstSMTCall = !useGAS;
-      ExprVector allRels = getAllRels();
-      ExprVector rels = useUC ? getUnderConsRels() : allRels;
 
-      if(debug >= 5) {
-        for(auto& e: allRels) {
-          outs() << "allRels: rel: " << e << "\n";
-        }
-        for(auto& e: rels) {
-          outs() << "rels: rel: " << e << "\n";
-        }
-      }
-
-      if (useGAS) {
-        Result_t res;
-        if (!usesygus) {
-          res = Result_t::UNSAT;//guessAndSolve();
-
-        }  else {
-          ExprVector tmpfrels;
-          res = weakenUsingSygus(allRels, tmpfrels, true);
-        }
-
-        itr++;
-        if (hasArrays) {
-          switch (res) {
-            case Result_t::UNSAT: printCands(); break;
-            case Result_t::UNKNOWN: outs() << "unknown\n"; break;
-            case Result_t::SAT: outs() << "sat\n"; break;
-          }
-          return;
-        }
-
-        if (res == Result_t::UNSAT && rels.size() == 0) {
-          outs() << "Total iterations: "  << itr << "\n";
-          //debug
-          for (auto hr : ruleManager.chcs) {
-            if (!checkCHC(hr, candidates)) {
-              outs() << "something is wrong!(after GAS)\n";
-              assert(0);
-            }
-          }
-          printCands(true, candidates);
-          return;
-        }
-
-        if (res == Result_t::SAT) {
-          outs() << "sat\n";
-          return;
-        }
-
-        if (res == Result_t::UNKNOWN){
-          // outs() << "unknown\n";
-          // return;
-          // outs() << "GAS is uk\n";
-          firstSMTCall = true;
-        }
-      }
-
-      Expr block = mk<FALSE>(m_efac);
-      bounds.clear();
-      ExprSet grds; // hold the guards (phi) of the f(vars) /\ phi(vars) expression)
-      Result_t res_t;
-
-      while (true) { // spechorn loop (now..)
-        boost::tribool res;
-        Result_t maxRes;
-        ExprVector weakenRels;
-        ExprVector fixedRels = !firstSMTCall && fixCRels ? vecDiff(allRels, rels) : ExprVector() ;
-        map<Expr, Expr> smtSoln;
-
-        if(debug) outs() << "current iteration: "<< itr << "\n";
-        // Add data candidates here.
-        if(ghCandMap[invDecl].empty() || bounds.size() == 1) {
-          if(debug >= 3) outs() << "\nEXPLORE BOUNDS\n==============\n";
-          res = exploreBounds(ghCandMap, mkNeg(block));
-          if(debug >= 4) outs() << "Left exploreBounds\n";
-        }
-
-        if(debug >= 3) {
-          for(auto& e : ghCandMap[invDecl]) { // print bounds found
-            outs() << "- - - GH_CAND FROM DATA: " << e << "\n";
-          }
-        }
-
-        if(!res && ghCandMap[invDecl].empty()) {
-        // short circuit here because loop can't be unrolled with the block.
-          if(debug >= 2) {
-            outs() << "\n* * * DATALEARNER CANNOT UNROLL WITH BLOCK * * *\n";
-          }
-          printCands(true,candidates);
-          break;
-        }
-        candidates.clear();
-        bounds.clear();
-        for(auto& rel: fc->srcRelations) {
-          for(auto e = ghCandMap[invDecl].begin(); e != ghCandMap[invDecl].end(); e++) {
-
-            Expr in = replaceAll(*e, tr->srcVars[0], fc->srcVars[0]);
-            //bounds.insert(in);
-            candidates[rel].insert(in);
-            if(debug >= 4) {
-              outs() << "Cand added to rel: " << rel;
-              outs() << " : " << in <<"\n";
-            }
-            break;
-          }
-        }
-
-        for(auto& rel: decls) {
-          for(auto e = ghCandMap[invDecl].begin(); e != ghCandMap[invDecl].end(); e++) {
-            bounds.insert(*e);
-            candidates[rel].insert(*e);
-            if(debug >= 4) {
-              outs() << "Cand added to rel: " << rel;
-              outs() << " :: " << *e <<"\n";
-            }
-            ghCandMap[invDecl].erase(*e);
-            break;
-          }
-        }
-        res_t = guessAndSolve();
-        if(debug >= 2) {
-          outs() << "Result_t after G&S: ";
-          if(res_t == Result_t::UNSAT) outs() << "unsat";
-          else outs() << "unknown";
-          outs() << "\nCands after G&S:\n";
-          printCands(false);
-        }
-        if(res_t == Result_t::UNKNOWN) {
-          candidates.clear();
-          continue;
-        }
-        //parse cands of pre for grds.
-        parseForGuards(grds);
-        if(debug >= 3) pprint(grds,2);
-
-        //need to check that all the guards from data have been checked.
-        if(res_t == Result_t::UNSAT && !u.isSat(mkNeg(disjoin(grds,m_efac)), fcBodyInvVars)) {
-          if(debug >= 5) outs() << "=========> breaking main loop\n";
-          printCands(true,candidates);
-          break;
-        }
-        // set block to be the conj of !grds.
-        block = conjoin(bounds,m_efac);
-        if(debug >= 5) outs() << "=========> continue\n";
-        if(!hornspec) continue;
-// ****************************************************************************
-
-        maxRes = firstSMTCall ? checkMaximalSMT(weakenRels, fixedRels, smtSoln) : checkMaximalSMT(weakenRels, fixedRels, smtSoln, rels);
-        itr++;
-
-        if (maxRes == Result_t::UNSAT) {
-          if(debug >= 2) outs() << "Total iterations: "  << itr << "\n";
-
-          //debug
-          ruleManager.print();
-          for (auto hr : ruleManager.chcs) {
-            if (!checkCHC(hr, candidates)) { // Some benches are failing here... Why?
-              outs() << "something is wrong!(after SMT unsat)\n";
-
-              assert(0);
-            }
-          }
-          printCands(true, candidates);
-          return;
-
-        } else if (maxRes == Result_t::UNKNOWN){
-          if (firstSMTCall) {
-            outs() << "unknown\n";
-          } else {
-            //debug
-            for (auto hr : ruleManager.chcs) {
-              if (!checkCHC(hr, candidates)) {
-                outs() << "something is wrong(after SMT uk)!\n";
-                assert(0);
-              }
-            }
-            printCands(true, candidates, true);
-          }
-          return;
-        }
-
-        if (firstSMTCall || !useGAS) {
-          firstSMTCall  = false;
-          for (auto ce : smtSoln) {
-            candidates[ce.first].clear();
-            candidates[ce.first].insert(ce.second);
-          }
-          continue;
-        }
-        printCands(false);
-        // Use the model from maximalSMT to make a new block EXPR.
-        continue;
-
-        if(debug >= 3) outs() << "Entering weakenUsingSygus\n"; // Change this to use DL with model from check.
-        Result_t chcres = usesygus ? weakenUsingSygus(weakenRels, fixedRels) : weakenUsingCHC(weakenRels, fixedRels);
-        if(debug >= 3) outs() << "Left weakenUsingSygus\n";
-
-        if (chcres == Result_t::UNKNOWN) {
-          for (auto ce : smtSoln) {
-            // if (find(fixedRels.begin(), fixedRels.end(), ce.first) == fixedRels.end()) {
-            candidates[ce.first].clear();
-            candidates[ce.first].insert(ce.second);
-            // }
-          }
-        }
-
-        //debug
-        // outs() << "SOLN:\n";
-        // for (auto ce : candidates) {
-        //   outs() << *(ce.first) << "->\n";
-        //   for (auto c : ce.second) {
-        //     outs() << *c <<"\n";
-        //   }
-        // }
-        for (auto hr : ruleManager.chcs) {
-          if (!checkCHC(hr, candidates)) {
-            outs() << "something is wrong (after CHC)!\n";
-            assert(0);
-          }
-        }
-        if(debug >= 5) outs() << "End of loop\n";
-        if(debug >= 2) printCands(false);
-
-      }
     }
 
     void nonmaximalSolve(bool useGAS, bool usesygus)

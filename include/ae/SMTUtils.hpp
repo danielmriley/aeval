@@ -257,6 +257,67 @@ namespace ufo
       return bool((!isSat(assumptions, false)));
     }
 
+    void getTrueLiterals(Expr ex, ZSolver<EZ3>::Model &m, ExprSet& lits, bool splitEqs = true)
+    {
+      ExprVector ites;
+      getITEs(ex, ites);
+      if (ites.empty())
+      {
+        getLiterals(ex, lits, splitEqs);
+        for (auto it = lits.begin(); it != lits.end(); ){
+          if (isOpX<TRUE>(m.eval(*it))) ++it;
+          else it = lits.erase(it);
+        }
+      }
+      else
+      {
+        // eliminate ITEs first
+        for (auto it = ites.begin(); it != ites.end();)
+        {
+          if (isOpX<TRUE>(m((*it)->left())))
+          {
+            ex = replaceAll(ex, *it, (*it)->right());
+            ex = mk<AND>(ex, (*it)->left());
+          }
+          else if (isOpX<FALSE>(m((*it)->left())))
+          {
+            ex = replaceAll(ex, *it, (*it)->last());
+            ex = mk<AND>(ex, mkNeg((*it)->left()));
+          }
+          else
+          {
+            ex = replaceAll(ex, *it, (*it)->right()); // TODO
+            ex = mk<AND>(ex, mk<EQ>((*it)->right(), (*it)->last()));
+          }
+          it = ites.erase(it);
+        }
+        return getTrueLiterals(ex, m, lits, splitEqs);
+      }
+    }
+
+    Expr getTrueLiterals(Expr ex, bool splitEqs = true)
+    {
+      ExprSet lits;
+      getModelPtr();
+      if (m == NULL) return NULL;
+      getTrueLiterals(ex, *m, lits, splitEqs);
+      return conjoin(lits, efac);
+    }
+
+    bool flatten(Expr fla, ExprVector& prjcts, bool splitEqs, ExprVector& vars,
+                 function<Expr(Expr, ExprVector& vars)> qe) // lazy DNF-ization
+    {
+      smt.reset();
+      Expr tmp = fla;
+      while (isSat(tmp, false))
+      {
+        prjcts.push_back(qe(getTrueLiterals(fla, splitEqs), vars)); // if qe is identity, then it's pure DNF
+        if (prjcts.back() == NULL) return false;
+        tmp = mk<NEG>(prjcts.back());
+      }
+      return true;
+    }
+
     /**
      * ITE-simplifier (prt 2)
      */
