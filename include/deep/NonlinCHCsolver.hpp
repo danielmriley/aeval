@@ -1449,7 +1449,7 @@ namespace ufo
     bool multiHoudini(vector<HornRuleExt*>& worklist, bool recur = true)
     {
       if (!anyProgress(worklist)) {
-        if(debug >= 3) outs() << "No progress\n";
+        if(debug >= 5) outs() << "No progress\n";
         return false;
       }
       auto candidatesTmp = candidates;
@@ -2682,7 +2682,7 @@ namespace ufo
       }
 
       if(!u.isSat(fcBodyInvVars,mkNeg(loopGuard))) {
-        if(debug >= 3) outs() << "ZERO LOOP EXECUTIONS IS NOT POSSIBLE ON INPUT\n";
+        if(debug >= 3) outs() << "ZERO LOOP EXECUTIONS IS NOT POSSIBLE\n";
         zero = false;
       }
       auto m = grds2gh.rbegin();
@@ -2707,7 +2707,15 @@ namespace ufo
           }
         }
         else {
-          if(isOpX<MULT>(m->second->left())) {
+          if(!zero && m->first == mk<TRUE>(m_efac)) {
+            if(isOpX<MULT>(m->second->left())) {
+              r = mk<DIV>(m->second->right(),m->second->left()->left());
+            }
+            else {
+              r = m->second->right();
+            }
+          }
+          else if(isOpX<MULT>(m->second->left())) {
             r = mk<ITE>(m->first,mk<DIV>(m->second->right(),m->second->left()->left()), r);
           }
           else {
@@ -2770,6 +2778,26 @@ namespace ufo
       return e;
     }
 
+    bool checkForMerge(Expr b, ExprSet& grds, map<Expr,Expr>& gg) {
+      ExprSet knownGrds, knownF;
+
+      for(auto& m: gg) {
+        knownGrds.insert(m.first);
+        knownF.insert(m.second);
+      }
+      if(knownF.size() == 1) {
+        knownGrds.insert(grds.begin(),grds.end());
+        if(!u.isSat(mkNeg(disjoin(knownGrds,m_efac)))) {
+          gg.clear();
+          gg[conjoin(knownGrds,m_efac)] = *knownF.begin();
+          grds.clear();
+          grds.insert(conjoin(knownGrds,m_efac));
+          return true;
+        }
+      }
+      return false;
+    }
+
     boost::tribool boundSolve(Expr block) {
       map<Expr,ExprSet> bounds;
       dataGrds.clear();
@@ -2814,6 +2842,8 @@ namespace ufo
         candidates.clear();
 
         if(debug >= 2) outs() << "\n- - - b: " << *b << "\n";
+
+        bool merge = checkForMerge(*b, grds, grds2gh);
 
         candidates[specDecl].insert(replaceAll(*b, tr->srcVars[0], fc->srcVars[0]));
         candidates[invDecl].insert(*b);

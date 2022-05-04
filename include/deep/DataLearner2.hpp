@@ -24,8 +24,8 @@ namespace ufo
     int debug;
 
   public:
-    DataLearner2(CHCs& r, EZ3& z3, int debug = 0) :
-      ruleManager(r), bnd(ruleManager, (debug > 0)), m_efac(r.m_efac) {}
+    DataLearner2(CHCs& r, EZ3& z3, int _debug = 0) :
+      ruleManager(r), bnd(ruleManager, (_debug > 0)), m_efac(r.m_efac), debug(_debug) {}
 
       boost::tribool connect(Expr srcRel = NULL, Expr block = NULL,
         Expr invs = NULL, Expr preCond = NULL)
