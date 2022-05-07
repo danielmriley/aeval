@@ -266,6 +266,7 @@ namespace ufo
 
       for (auto &r: fp.m_rules)
       {
+        hasArrays |= containsOp<ARRAY_TY>(r);
         chcs.push_back(HornRuleExt());
         HornRuleExt& hr = chcs.back();
 

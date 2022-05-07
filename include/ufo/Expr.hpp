@@ -2459,6 +2459,14 @@ namespace expr
           return isOpX<SELECT> (e);
         }
       };
+      class IsStore : public std::unary_function<Expr,bool>
+      {
+      public:
+        bool operator () (Expr e)
+        {
+          return isOpX<STORE> (e);
+        }
+      };
     }
   }
 }

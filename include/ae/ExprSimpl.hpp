@@ -2538,6 +2538,25 @@ namespace ufo
     return res;
   }
 
+  void getQVars (Expr exp, map<Expr, ExprVector>& vars);
+
+
+  void getExtraVars(Expr fla, ExprVector& vars, ExprSet& allVars)
+  {
+    filter (fla, bind::IsConst (), inserter (allVars, allVars.begin()));
+    minusSets(allVars, vars);
+    map<Expr, ExprVector> qv;
+    getQVars (fla, qv);
+    for (auto & q : qv) minusSets(allVars, q.second);
+  }
+
+  bool hasOnlyVars(Expr fla, ExprVector& vars)
+  {
+    ExprSet allVars;
+    getExtraVars(fla, vars, allVars);
+    return allVars.empty();
+  }
+
   inline static bool isLinearCombination(Expr term)
   {
     // an approximation of..

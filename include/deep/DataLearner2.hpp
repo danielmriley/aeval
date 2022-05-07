@@ -44,7 +44,7 @@ namespace ufo
           int n = invVars[srcRel].size();
           for(int i = 0; i < n; i++) {
             for(int j = i + 1; j < n; j++) {
-              Expr r1,r2,l1,l2;
+              Expr r1,r2,l1,l2,l,r;
               r1 = mkMPZ(cpp_int(e2[j] - e1[j]),m_efac);
               r2 = mk<MINUS>(invVars[srcRel][i], mkMPZ(cpp_int(e1[i]),m_efac));
               l1 = mkMPZ(cpp_int(e2[i] - e1[i]),m_efac);
@@ -61,15 +61,15 @@ namespace ufo
               else {
                 l1 = mk<MULT>(l1,l2);
               }
-              l1 = mk<EQ>(r1,l1);
-              l1 = simplifyArithm(l1);
-              l1 = normalize(l1);
-              ev.push_back(l1);
-              if(debug >= 2) outs() << "  CONNECT: " << *ev.back() << "\n";
+              l = mk<EQ>(r1,l1);
+              l = simplifyArithm(l);
+              l = normalize(l);
+              ev.push_back(l);
+              if(debug >= 4) outs() << "  CONNECT: " << *ev.back() << "\n";
 
             }
           }
-          if(debug >= 2) outs() << "\n";
+          if(debug >= 4) outs() << "\n";
           // ADD or SUBTRACT each equation from another to generate data candidates.
           for(int i = 0; i < ev.size(); i++) {
             dc[srcRel].insert(normalize(ev[i]));
@@ -79,14 +79,14 @@ namespace ufo
               l = mk<EQ>(l,r);
               l = normalize(l);
               dc[srcRel].insert(l);
-              if(debug >= 2) outs() << "  CONNECT: " << l << "\n";
+              if(debug >= 4) outs() << "  CONNECT: " << l << "\n";
 
               r = mk<PLUS>(ev[i]->right(), ev[j]->right());
               l = mk<PLUS>(ev[i]->left(), ev[j]->left());
               l = mk<EQ>(l,r);
               l = normalize(l);
               dc[srcRel].insert(l);
-              if(debug >= 2) outs() << "  CONNECT: " << l << "\n";
+              if(debug >= 4) outs() << "  CONNECT: " << l << "\n";
             }
           }
         }

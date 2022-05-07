@@ -466,6 +466,32 @@ namespace ufo
       }
     }
 
+    Expr findSelect(int t, int i)
+    {
+      outs() << "HERE\n";
+      Expr tr = ruleManager.chcs[t].body;
+      ExprVector& srcVars = ruleManager.chcs[t].srcVars[0];
+      ExprVector st;
+      filter (tr, IsStore (), inserter(st, st.begin()));
+      for (auto & s : st)
+      {
+        if (!contains(s->left(), srcVars[i])) continue;
+        if (!isOpX<INT_TY>(typeOf(s)->last())) continue;
+        if (!hasOnlyVars(s, srcVars)) continue;
+        return mk<SELECT>(s->left(), s->right());
+      }
+      st.clear();
+      filter (tr, IsSelect (), inserter(st, st.begin()));
+      for (auto & s : st)
+      {
+        if (!contains(s->left(), srcVars[i])) continue;
+        if (!isOpX<INT_TY>(typeOf(s->left())->last())) continue;
+        if (!hasOnlyVars(s, srcVars)) continue;
+        return s;
+      }
+      return NULL;
+    }
+
     void getOptimConstr(vector<ExprVector>& versVars, int vs, ExprVector& diseqs)
     {
       for (auto v : versVars)
@@ -507,7 +533,7 @@ namespace ufo
           ExprVector& dtVars,
 				  vector<vector<double> >& models,
           Expr gh_cond, Expr invs, Expr preCond,
-          int k = 9)
+          int k = 10)
     {
       assert (gh_cond != NULL);
       if(debug) {
@@ -537,18 +563,18 @@ namespace ufo
           {
             mainInds.push_back(i);
             vars.push_back(var);
-          }/*
+          }
           else if (isConst<ARRAY_TY> (var) && ruleManager.hasArrays)
           {
-            for (auto it : ruleManager.iterators[srcRel])
+            Expr v = findSelect(loop[0], i);
+            if (v != NULL)
             {
-              vars.push_back(mk<SELECT>(var, srcVars[it]));
-              mainInds.push_back(-1 * it - 1); // to be on the negative side
-              arrInds.push_back(i);
+              vars.push_back(v);
+              mainInds.push_back(-i - 1);  // to be on the negative side
+//              varsMask.push_back(srcVars[i]);
             }
-          }*/
+          }
         }
-
         if (vars.size() < 2 && cyc == ruleManager.cycles.size() - 1)
           continue; // does not make much sense to run with only one var when it is the last cycle
         dtVars = vars;
@@ -556,7 +582,7 @@ namespace ufo
         auto & prefix = ruleManager.prefixes[cyc];
         vector<int> trace;
         int l = 0;                        // starting index (before the loop)
-        //if (ruleManager.hasArrays) l++; // first iter is usually useless
+        if (ruleManager.hasArrays) l++; // first iter is usually useless
 
         if(gh_cond == mk<TRUE>(m_efac)) trace.push_back(0);
         for (int j = 0; j < k; j++)
@@ -567,14 +593,13 @@ namespace ufo
         ExprVector ssa;
         getSSA(trace, ssa);
         int traceSz = trace.size();
-  //      pprint( conjoin(ssa, m_efac));
+  //      pprint(ssa,2));
         // compute vars for opt constraint
         vector<ExprVector> versVars;
         ExprSet allVars;
         ExprVector diseqs;
         fillVars(srcRel, vars, l, loop.size(), mainInds, arrInds, versVars, allVars);
         getOptimConstr(versVars, vars.size(), diseqs);
-
         Expr cntvar = bind::intConst(mkTerm<string> ("_ST_cnt", m_efac));
         allVars.insert(cntvar);
         allVars.insert(bindVars.back().begin(), bindVars.back().end());
