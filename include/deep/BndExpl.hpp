@@ -141,7 +141,11 @@ namespace ufo
         bindVars2.clear();
         HornRuleExt& hr = ruleManager.chcs[step];
         Expr body = hr.body;
-        if (!hr.isFact && extraLemmas != NULL) body = mk<AND>(extraLemmas, body);
+        if(!hr.isInductive || !hr.isQuery) {
+          ExprVector preVars = ruleManager.chcs[0].srcVars[0];
+          body = replaceAll(body, preVars, srcVars);
+          if(extraLemmas != NULL) body = mk<AND>(extraLemmas, body);
+        }
 
         for (int i = 0; i < srcVars.size(); i++)
         {
@@ -468,7 +472,6 @@ namespace ufo
 
     Expr findSelect(int t, int i)
     {
-      outs() << "HERE\n";
       Expr tr = ruleManager.chcs[t].body;
       ExprVector& srcVars = ruleManager.chcs[t].srcVars[0];
       ExprVector st;
@@ -522,10 +525,6 @@ namespace ufo
       preCond = replaceAll(preCond, srcVars, bindVars[bindVars.size() - 1]);
       ssa.push_back(mk<AND>(gh_zero, mkNeg(preCond)));
       ssa.push_back(gh_cond);
-      //bindVars.pop_back();
-
-      //pprint(ssa,2);
-      //outs() << "\n\n";
     }
 
     boost::tribool unrollAndExecuteTerm(
@@ -566,13 +565,14 @@ namespace ufo
           }
           else if (isConst<ARRAY_TY> (var) && ruleManager.hasArrays)
           {
+            /*
             Expr v = findSelect(loop[0], i);
             if (v != NULL)
             {
               vars.push_back(v);
               mainInds.push_back(-i - 1);  // to be on the negative side
 //              varsMask.push_back(srcVars[i]);
-            }
+}*/
           }
         }
         if (vars.size() < 2 && cyc == ruleManager.cycles.size() - 1)
@@ -593,7 +593,200 @@ namespace ufo
         ExprVector ssa;
         getSSA(trace, ssa);
         int traceSz = trace.size();
-  //      pprint(ssa,2));
+        //pprint(ssa,2);
+        // compute vars for opt constraint
+        vector<ExprVector> versVars;
+        ExprSet allVars;
+        ExprVector diseqs;
+        fillVars(srcRel, vars, l, loop.size(), mainInds, arrInds, versVars, allVars);
+        getOptimConstr(versVars, vars.size(), diseqs);
+        Expr cntvar = bind::intConst(mkTerm<string> ("_ST_cnt", m_efac));
+        allVars.insert(cntvar);
+        allVars.insert(bindVars.back().begin(), bindVars.back().end());
+        ssa.insert(ssa.begin(), mk<EQ>(cntvar, mkplus(diseqs, m_efac)));
+
+        bool toContinue = false;
+        bool noopt = false;
+        while (true)
+        {
+          setGhostCond(ssa, gh_cond, preCond);
+          if (bindVars.size() <= 1)
+          {
+            if (debug) outs () << "Unable to solve the BMC formula for " <<  srcRel << " and gh_cond " << gh_cond <<"\n";
+          //  toContinue = true;
+            return false;
+          }
+
+          if (u.isSat(conjoin(ssa, m_efac)))
+          {
+            break;
+          }
+          else
+          {
+            if (trace.size() == traceSz)
+            {
+              trace.pop_back();
+              ssa.pop_back();
+              ssa.pop_back(); // remove the gh conds
+              bindVars.pop_back();
+            }
+            else
+            {
+              trace.resize(trace.size()-loop.size());
+              ssa.pop_back();
+              ssa.resize(ssa.size()-loop.size());
+              bindVars.resize(bindVars.size()-loop.size());
+            }
+
+          }
+        }
+
+        ExprMap allModels;
+        u.getOptModel<GT>(allVars, allModels, cntvar);
+
+        ExprSet gh_condVars;
+        set<int> gh_condVarsIndex; // Get gh_cond vars here
+        filter(gh_cond, bind::IsConst(), inserter(gh_condVars, gh_condVars.begin()));
+        for (auto & a : gh_condVars)
+          gh_condVarsIndex.insert(getVarIndex(a, srcVars));
+
+        if (debug) outs () << "\nUnroll and execute the cycle for " <<  srcRel << " and cond " << gh_cond <<"\n";
+        for (int j = 0; j < versVars.size(); j++)
+        {
+          if(j >= trace.size()) break;
+          vector<double> model;
+          if (debug) outs () << "  model for " << j+1 << ":\t[";
+          bool toSkip = false;
+          SMTUtils u2(m_efac);
+          ExprSet equalities;
+
+          for (auto i: gh_condVarsIndex)
+          {
+            Expr srcVar = srcVars[i];
+            Expr bvar = versVars[j][i];
+            if (isOpX<SELECT>(bvar)) bvar = bvar->left();
+            Expr m = allModels[bvar];
+            if (m == NULL) { toSkip = true; break; }
+            equalities.insert(mk<EQ>(srcVar, m));
+          }
+          if (toSkip) continue;
+          equalities.insert(gh_cond);
+
+          if (u2.isSat(equalities)) //exclude models that don't satisfy gh_cond
+          {
+            vector<double> model;
+
+            for (int i = 0; i < vars.size(); i++) {
+              Expr bvar = versVars[j][i];
+              Expr m = allModels[bvar];
+              double value;
+              if (m != NULL && isOpX<MPZ>(m))
+              {
+                if (lexical_cast<cpp_int>(m) > max_double ||
+                    lexical_cast<cpp_int>(m) < -max_double)
+                {
+                  toSkip = true;
+                  break;
+                }
+                value = lexical_cast<double>(m);
+              }
+              else
+              {
+                toSkip = true;
+                break;
+              }
+              model.push_back(value);
+              if (debug) outs () << *bvar << " = " << *m << ", ";
+              if (j == 0)
+              {
+                if (isOpX<SELECT>(bvar))
+                  concrInvs[srcRel].insert(mk<EQ>(vars[i]->left(), allModels[bvar->left()]));
+                else
+                  concrInvs[srcRel].insert(mk<EQ>(vars[i], m));
+              }
+            }
+            if (!toSkip) models.push_back(model);
+          }
+          else
+          {
+            if (debug) outs () << "   <  skipping  >      ";
+          }
+          if (debug) outs () << "\b\b]\n";
+        }
+      }
+
+      return true;
+    }
+
+    boost::tribool unrollAndExecuteTermPhase(
+          Expr srcRel,
+          ExprVector& dtVars,
+				  vector<vector<double> >& models,
+          Expr gh_cond, Expr invs, Expr preCond,
+          Expr a, Expr b,
+          int k = 10)
+    {
+      assert (gh_cond != NULL);
+      if(debug) {
+        outs() << "Exploring execution of " << srcRel << "\n";
+      }
+
+      // helper var
+      string str = to_string(numeric_limits<double>::max());
+      str = str.substr(0, str.find('.'));
+      cpp_int max_double = lexical_cast<cpp_int>(str);
+
+      //outs() << "cycles.size(): " << ruleManager.cycles.size() << "\n";
+      for (int cyc = 0; cyc < ruleManager.cycles.size(); cyc++)
+      {
+        //if(debug) outs() << "cycle: " << cyc << "\n";
+        vector<int> mainInds;
+        vector<int> arrInds;
+        auto & loop = ruleManager.cycles[cyc];
+        if (srcRel != ruleManager.chcs[loop[0]].srcRelation) continue;
+        if (models.size() > 0) continue;
+
+        ExprVector vars;
+        for (int i = 0; i < srcVars.size(); i++)
+        {
+          Expr var = srcVars[i];
+          if (bind::isIntConst(var))
+          {
+            mainInds.push_back(i);
+            vars.push_back(var);
+          }
+          else if (isConst<ARRAY_TY> (var) && ruleManager.hasArrays)
+          {
+            /*
+            Expr v = findSelect(loop[0], i);
+            if (v != NULL)
+            {
+              vars.push_back(v);
+              mainInds.push_back(-i - 1);  // to be on the negative side
+//              varsMask.push_back(srcVars[i]);
+}*/
+          }
+        }
+        if (vars.size() < 2 && cyc == ruleManager.cycles.size() - 1)
+          continue; // does not make much sense to run with only one var when it is the last cycle
+        dtVars = vars;
+
+        auto & prefix = ruleManager.prefixes[cyc];
+        vector<int> trace;
+        int l = 0;                        // starting index (before the loop)
+        if (ruleManager.hasArrays) l++; // first iter is usually useless
+
+        if(gh_cond == mk<TRUE>(m_efac)) trace.push_back(0);
+        for (int j = 0; j < k; j++)
+          for (int m = 0; m < loop.size(); m++)
+            trace.push_back(loop[m]);
+
+        int backCHC = -1;
+        ExprVector ssa;
+        ssa.push_back(a);
+        getSSA(trace, ssa);
+        int traceSz = trace.size();
+        //pprint(ssa,2);
         // compute vars for opt constraint
         vector<ExprVector> versVars;
         ExprSet allVars;

@@ -516,8 +516,8 @@ namespace ufo
       }
       ghCandMap[invDecl].swap(temp);
       if(debug >= 2) {
-        outs() << "filtered cands:\n";
-        if(!ghCandMap[invDecl].empty()) for(auto& g: ghCandMap[invDecl]) outs() << "g: " << g << "\n";
+        outs() << "filtered cands found:\n";
+        if(!ghCandMap[invDecl].empty()) outs() << ghCandMap[invDecl].size() << "\n";
         else outs() << "  none.\n";
       }
 
@@ -2635,6 +2635,7 @@ namespace ufo
       if(debug >= 3) outs() << "Begin parsing for guards\n";
       // get a DNF form if there are disj in the result from G&S.
       ExprVector projections, vars2keep;
+      Expr pc = ghostVars[0];
 
       u.flatten(conjoin(candidates[specDecl],m_efac), projections, false, vars2keep, [](Expr a, ExprVector& b){return a;});
 
@@ -2649,17 +2650,19 @@ namespace ufo
       for(auto e = projections.begin(); e != projections.end() ; e++) {
         t.clear(); p.clear(); g.clear();
         getConj(*e, t);
+        int c = 0;
         for(auto& ee: t) {
           if(contains(ee,ghostVars[0]) || contains(ee,ghostVars[1])) {
+            c++;
             Expr r = replaceAll(ee, fc->srcVars[0],invVars);
-            if(containsOp<EQ>(r)) g.insert(normalize(r));
+            if(containsOp<EQ>(r)) g.insert(r);
           }
           else {
             Expr r = replaceAll(ee, fc->srcVars[0],invVars);
             p.insert(normalize(r));
           }
         }
-        grds[conjoin(p,m_efac)] = conjoin(g,m_efac);
+        if(c == 1) grds[conjoin(p,m_efac)] = conjoin(g,m_efac);
       }
       if(debug >= 3) { outs() << "End parsing for guards\n"; }
     }
@@ -2674,7 +2677,9 @@ namespace ufo
       ExprVector phiV;
       bool zero = true, good = false;
       outs() << "Solution\n========\n";
-      for(auto&g: grds2gh) g.second = normalize(g.second,l);
+      for(auto& g: grds2gh) {
+        g.second = normalize(g.second,l);
+      }
 
       if(!u.isSat(fcBodyInvVars,loopGuard)) {
         if(debug >= 3) outs() << "LOOP NEVER EXECUTES\n";
@@ -2819,17 +2824,37 @@ namespace ufo
       return false;
     }
 
-    void sortBounds(ExprVector& bounds) {
+    void bubbleSort(ExprVector& v) {
       // Bubble sort because it's easy....
-      for(int i = 0; i < bounds.size(); i++) {
-        for(int j = i + 1; j < bounds.size(); j++) {
-          if(bounds[i]->right()->arity() > bounds[j]->right()->arity()) {
-            Expr e = bounds[i];
-            bounds[i] = bounds[j];
-            bounds[j] = e;
+      for(int i = 0; i < v.size(); i++) {
+        for(int j = i + 1; j < v.size(); j++) {
+          if(v[i]->right()->arity() > v[j]->right()->arity()) {
+            Expr e = v[i];
+            v[i] = v[j];
+            v[j] = e;
           }
         }
       }
+    }
+
+    void sortBounds(ExprVector& bounds) {
+      ExprVector holdMPZ, holdOther;
+
+      for(int i = 0; i < bounds.size(); i++) {
+        Expr e = normalize(bounds[i]);
+        if(isOpX<MPZ>(e->right()) && e->right() != mpzZero) {
+          holdMPZ.push_back(e);
+        }
+        else {
+          holdOther.push_back(e);
+        }
+      }
+      bubbleSort(holdOther);
+      bubbleSort(holdMPZ);
+      bounds.clear();
+      for(auto& v : holdOther) bounds.push_back(normalize(v, ghostVars[0]));
+      for(auto& v : holdMPZ) bounds.push_back(normalize(v, ghostVars[0]));
+
     }
 
     boost::tribool boundSolve(Expr block) {
@@ -2846,15 +2871,14 @@ namespace ufo
       }
       boost::tribool res = exploreBounds(bounds, block); // maybe hold previously computed bounds in a global ExprSet to avoid duplication.
       ExprSet grds;
-      //grds.insert(mk<GT>(mk<MINUS>(invVars[0],invVars[1]),mk<MINUS>(invVars[1],invVars[2])));
+
       if(dg) {
         for(auto& e: dataGrds) {
-          outs() << "GOING TO IW\n";
           Expr w = implyWeakening(e);
 
           if(debug >= 3) outs() << "Adding guard from data: " << w << "\n";
-          grds.insert(w);
-          if(w->arity() > 0) {
+          if(!isOpX<EQ>(w)) grds.insert(w);
+          if(w->arity() > 0 && isOpX<EQ>(w)) {
             grds.insert(mk<GEQ>(w->left(),w->right()));
             grds.insert(mk<LEQ>(w->left(),w->right()));
           }
@@ -2874,7 +2898,9 @@ namespace ufo
 
       // sort bounds
       ExprVector boundsV;
-      for(auto& e: bounds[invDecl]) if(!isOpX<MULT>(e->left())) boundsV.push_back(e);
+      for(auto& e: bounds[invDecl])
+        if(!isOpX<MULT>(e->left()))
+          boundsV.push_back(e);
       sortBounds(boundsV);
 
       if(debug >= 2) {
@@ -2883,82 +2909,94 @@ namespace ufo
           outs() << "  " << e << "\n";
         }
       }
-      if(grds.size() < 1) grds.insert(mk<TRUE>(m_efac));
+      bool rerun = false;
       for(auto b = boundsV.begin(), end = boundsV.end(); b != end && res; b++) {
-        for(auto c = grds.begin(), endg = grds.end(); c != endg && res; c++){
-          candidates.clear();
+        candidates.clear();
 
-          if(debug >= 2) outs() << "\n- - - b: " << *b << "\n";
+        if(debug >= 2) outs() << "\n- - - b: " << *b << "\n\n";
 
-          bool merge = checkForMerge(*b, *c, grds, grds2gh);
+        checkForMerge(*b, grds, grds2gh);
 
-          candidates[specDecl].insert(replaceAll(*b, tr->srcVars[0], fc->srcVars[0]));
-          candidates[invDecl].insert(*b);
-          //for(auto& e: grds) { // insert the data guards.
-            candidates[specDecl].insert(replaceAll(*c, tr->srcVars[0], fc->srcVars[0]));
-            candidates[invDecl].insert(*c);
-          //}
-          //usedGhCands.insert(*b); // to remember what has been previously used.
-
-          if(debug >= 2) {
-            outs() << "Cands going to G&S\n";
-            outs() << "==================\n";
-            printCands(false);
-            outs() << "==================\n";
+        if(rerun) {
+          if(debug >= 2) outs() << "RERUN\n=====\n";
+          b--;
+          for(auto& e: fgrds2gh) {
+            candidates[specDecl].insert(replaceAll(e.first, tr->srcVars[0], fc->srcVars[0]));
+            candidates[invDecl].insert(e.first);
           }
+        }
+        else {
+          for(auto& e: grds) { // insert the data guards.
+            candidates[specDecl].insert(replaceAll(e, tr->srcVars[0], fc->srcVars[0]));
+            candidates[invDecl].insert(e);
+          }
+        }
+        candidates[specDecl].insert(replaceAll(*b, tr->srcVars[0], fc->srcVars[0]));
+        candidates[invDecl].insert(*b);
 
-          Result_t res_t = guessAndSolve();
-          if(debug >= 2) outs() << "finished G&S\n";
-          u.removeRedundantConjuncts(candidates[invDecl]);
-          u.removeRedundantConjuncts(candidates[specDecl]);
-          if(debug >= 2) {
+        if(debug >= 2) {
+          outs() << "Cands going to G&S\n";
           outs() << "==================\n";
+          outs() << "cand: ";
+          pprint(candidates[specDecl]);
           printCands(false);
           outs() << "==================\n";
-          }
-
-          if(res_t == Result_t::UNKNOWN) {
-            if(debug) {
-              parseForGuards(fgrds2gh);
-              for(auto& e : fgrds2gh) outs() << "fg: " << e.first << "\n";
-              
-            }
-
-            candidates.clear();
-            if(debug >= 2) outs() << "=====> unknown\n\n";
-            continue;
-          }
-
-          // If you're here then G&S returned UNSAT
-          if(debug >= 2) outs() << "=====> unsat\n\n";
-
-          parseForGuards(grds2gh); // Associates guards (pre(Vars)) with Expr gh = f()
-                              // They are stored in grds2gh map.
-
-          if(debug >= 3) {
-            outs() << "\n    Guards\n==============\n";
-            for(auto& g: grds2gh) {
-              outs() << g.first << "\n";
-            }
-            outs() << "==============\n";
-          }
-
-          // end of parsing guards.
-          ExprSet grds2;
-          for(auto& g: grds2gh) {
-            grds2.insert(g.first);
-          }
-          Expr grd = disjoin(grds2,m_efac);
-          if(debug >= 4) outs() << "grd: " << grd << "\n";
-          if(u.isSat(mkNeg(grd), fcBodyInvVars, loopGuard)) {
-
-            if(boundSolve(mkNeg(grd))) {
-              return true;
-            }
-          }
-          else return true;
         }
-      }
+
+        Result_t res_t = guessAndSolve();
+        u.removeRedundantConjuncts(candidates[invDecl]);
+        u.removeRedundantConjuncts(candidates[specDecl]);
+        if(debug >= 2) {
+        outs() << "==================\n";
+        printCands(false);
+        outs() << "==================\n";
+        }
+
+        if(res_t == Result_t::UNKNOWN) {
+          parseForGuards(fgrds2gh);
+          for(auto& e : fgrds2gh) outs() << "fg: " << e.first << "\n";
+          candidates.clear();
+          if(!rerun) {
+            rerun = true;
+          }
+          else {
+            rerun = false;
+          }
+
+          if(debug >= 2) outs() << "=====> unknown\n\n";
+          continue;
+        }
+
+        // If you're here then G&S returned UNSAT
+        if(debug >= 2) outs() << "=====> unsat\n\n";
+        rerun = false;
+
+        parseForGuards(grds2gh); // Associates guards (pre(Vars)) with Expr gh = f()
+                            // They are stored in grds2gh map.
+
+        if(debug >= 3) {
+          outs() << "\n    Guards\n==============\n";
+          for(auto& g: grds2gh) {
+            outs() << g.first << "\n";
+          }
+          outs() << "==============\n";
+        }
+
+        // end of parsing guards.
+        ExprSet grds2;
+        for(auto& g: grds2gh) {
+          grds2.insert(g.first);
+        }
+        Expr grd = disjoin(grds2,m_efac);
+        if(debug >= 4) outs() << "grd: " << grd << "\n";
+        if(u.isSat(mkNeg(grd), fcBodyInvVars, loopGuard)) {
+
+          if(boundSolve(mkNeg(grd))) {
+            return true;
+          }
+        }
+        else return true;
+        }
       return false;
     }
 
