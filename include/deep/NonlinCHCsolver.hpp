@@ -518,7 +518,7 @@ namespace ufo
       }
       ghCandMap[invDecl].swap(temp);
       if(debug >= 2) {
-        outs() << "filtered cands found:\n";
+        outs() << "filtered cands found: ";
         if(!ghCandMap[invDecl].empty()) outs() << ghCandMap[invDecl].size() << "\n";
         else outs() << "  none.\n";
       }
@@ -2787,6 +2787,7 @@ namespace ufo
           }
           g.clear();
           g.insert(join);
+          grds[conjoin(p,m_efac)] = conjoin(g,m_efac);
         }
       }
       if(debug >= 3) { outs() << "End parsing for guards\n"; }
