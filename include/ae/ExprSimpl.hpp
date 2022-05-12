@@ -3271,7 +3271,7 @@ namespace ufo
       // Normalizes with consts on the RHS in all cases except when lhsVar coefs add to zero.
       // then the form is 0 = ...
       fla = simplifyArithm(fla);
-  //      outs() << "fla: " << fla << "\n";
+//      outs() << "fla: " << fla << "\n";
       if (isOp<ComparissonOp>(fla) && isNumeric(fla->left()))
       {
         Expr lhs = fla->left();
@@ -3283,8 +3283,8 @@ namespace ufo
           lhsVar = mkMPZ(0, fla->getFactory());
           lhs = mk<PLUS>(lhs, lhsVar);
       }
-    //    outs() << "lhs: " << lhs << "\n";
-    //    outs() << "rhs: " << rhs << "\n";
+//        outs() << "lhs: " << lhs << "\n";
+//        outs() << "rhs: " << rhs << "\n";
 
         bool onLhs = contains(lhs,lhsVar);
         bool onRhs = contains(rhs,lhsVar);
@@ -3298,12 +3298,15 @@ namespace ufo
         for(auto& a: lhsVec) {
           all.push_back(additiveInverse(a));
         }
-    //      outs() << "lhsVec set\n";
+//        if(rhs == mkMPZ(0,fla->getFactory()))
+//          all.push_back(mkMPZ(0,fla->getFactory()));
+
+//          outs() << "lhsVec set\n";
 
         vector<cpp_int> coefs;
         map<Expr,cpp_int> allMap;
         for(auto& e: all) {
-    //        outs() << "loop: " << e << "\n";
+//            outs() << "loop: " << e << "\n";
           cpp_int c = 1;
           if (isOpX<MPZ>(e))
           {
@@ -3323,6 +3326,7 @@ namespace ufo
             }
           }
           else if(isOpX<UN_MINUS>(e)) {
+//            outs() << "UN_MINUS\n";
             allMap[additiveInverse(e)] += -1;
           }
           else {
@@ -3345,11 +3349,12 @@ namespace ufo
             e.second = e.second * -1;
           }
         }
+  //      outs() << "AFTER GCD\n";
         ExprVector newRhs, newLhs;
         // A change in how the Exprs are put back together needs to happen in the case that
     //      outs() << "setting up new Exprs\n";
         for(auto& e: allMap) {
-    //        outs() << "allMap: " << e.first << " coef: " << e.second << "\n";
+//            outs() << "allMap: " << e.first << " coef: " << e.second << "\n";
           if(e.first == lhsVar && !nullvar) {
             if(e.second == 0) { // LHS needs to have an Expr so set it to zero.
               newLhs.push_back(mkMPZ(0,fla->getFactory()));
@@ -3374,11 +3379,18 @@ namespace ufo
               newRhs.push_back(mkMPZ(e.second,fla->getFactory()));
             }
           }
+//          outs() << "newLHS.back " << newLhs.back() <<"\n";
+//          outs() << "newRHS.back " << newRhs.back() <<"\n";
+
         }
-    //      outs() << "Making return Expr\n";
+//          outs() << "Making return Expr\n";
+//          outs() << "RHS size: " << newRhs.size() << "\n";
+//          outs() << "LHS size: " << newLhs.size() << "\n";
+        if(newRhs.size() == 0) {
+          newRhs.push_back(mkMPZ(0,fla->getFactory()));          
+        }
         Expr r = (newRhs.size() == 1) ? *newRhs.begin(): mknary<PLUS>(newRhs);
         Expr l = (newLhs.size() == 1) ? *newLhs.begin(): mknary<PLUS>(newLhs);
-    //      outs() << "Expr: " << l << " = " << r << "\n";
 
         if(nullvar) return reBuildCmp(fla,additiveInverse(r),additiveInverse(l));
         else return reBuildCmp(fla,l,r);

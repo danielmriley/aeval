@@ -2755,13 +2755,14 @@ namespace ufo
         }
         t.clear();
         t.swap(temp);
-
         int c = 0;
         for(auto& ee: t) {
           if(contains(ee,ghostVars[0]) || contains(ee,ghostVars[1])) {
             c++;
             Expr r = replaceAll(ee, fc->srcVars[0],invVars);
-            if(containsOp<EQ>(r)) g.insert(normalize(r, ghostVars[1]));
+
+            r = normalize(r, pc);
+            if(containsOp<EQ>(r)) g.insert(r);
           }
           else {
             Expr r = replaceAll(ee, fc->srcVars[0],invVars);
@@ -2770,7 +2771,22 @@ namespace ufo
         }
         if(g.size() == 1) grds[conjoin(p,m_efac)] = conjoin(g,m_efac);
         else {
-          outs() << "g.size > 1\n";
+          Expr join = *g.begin();
+          auto i = g.begin(), end = g.end();
+          i++;
+          for(;i!=end;i++) {
+            join = mk<EQ>(join->right(),(*i)->right());
+            join = normalize(join);
+            p.insert(join);
+          }
+          for(auto& d: g) {
+            if(d->right()->arity() > 0) {
+              join = d;
+              break;
+            }
+          }
+          g.clear();
+          g.insert(join);
         }
       }
       if(debug >= 3) { outs() << "End parsing for guards\n"; }
@@ -3071,7 +3087,6 @@ namespace ufo
           else {
             rerun = false;
           }
-
           if(debug >= 2) outs() << "=====> unknown\n\n";
           continue;
         }
@@ -3094,7 +3109,7 @@ namespace ufo
         // end of parsing guards.
         ExprSet grds2;
         for(auto& g: grds2gh) {
-          grds2.insert(g.first);
+          getConj(g.first,grds2);
         }
         Expr grd = disjoin(grds2,m_efac);
         if(debug >= 4) outs() << "grd: " << grd << "\n";
@@ -3133,9 +3148,7 @@ namespace ufo
     }
 
     void maximalSolve (bool useGAS = true, bool usesygus = false, bool useUC = false, bool fixCRels = false)
-    {
-
-    }
+    {}
 
     void nonmaximalSolve(bool useGAS, bool usesygus)
     {
@@ -3278,7 +3291,7 @@ namespace ufo
 
     void printPhases() {
       outs() << "Phases\n======\n";
-      pprint(phases,2);
+      for(auto& p: phases) outs() << p << "\n";
     }
   };
 
@@ -3301,7 +3314,6 @@ namespace ufo
     }
 
     spec.collectPhaseGuards();
-    spec.printPhases();
     spec.boundSolve();
   };
 }
