@@ -714,7 +714,7 @@ namespace ufo
           if (debug) outs () << "\b\b]\n";
         }
       }
-
+      if(models.size() <= 1) return false;
       return true;
     }
 

@@ -2732,11 +2732,14 @@ namespace ufo
     void parseForGuards(map<Expr,Expr>& grds) {
       if(debug >= 3) outs() << "Begin parsing for guards\n";
       // get a DNF form if there are disj in the result from G&S.
-      ExprVector projections, vars2keep;
+      ExprVector projections, prjcts, vars2keep;
       Expr pc = ghostVars[0];
 
-      u.flatten(conjoin(candidates[specDecl],m_efac), projections, false, vars2keep, [](Expr a, ExprVector& b){return a;});
+      u.flatten(conjoin(candidates[specDecl],m_efac), prjcts, false, vars2keep, [](Expr a, ExprVector& b){return a;});
 
+      for(auto& p : prjcts) {
+        projections.push_back(replaceAll(p, fc->srcVars[0],invVars));
+      }
       if(debug >= 3) {
         outs() << "\n   Projections\n=================\n";
         for(auto& g : projections) {
@@ -2746,6 +2749,7 @@ namespace ufo
       }
       ExprSet t,p,g;
       for(auto e = projections.begin(); e != projections.end() ; e++) {
+        outs() << "Parsing projections\n";
         t.clear(); p.clear(); g.clear();
         getConj(*e, t);
 
@@ -2755,14 +2759,12 @@ namespace ufo
         }
         t.clear();
         t.swap(temp);
-        int c = 0;
         for(auto& ee: t) {
           if(contains(ee,ghostVars[0]) || contains(ee,ghostVars[1])) {
-            c++;
             Expr r = replaceAll(ee, fc->srcVars[0],invVars);
 
             r = normalize(r, pc);
-            if(containsOp<EQ>(r)) g.insert(r);
+            if(isOpX<EQ>(r)) g.insert(r);
           }
           else {
             Expr r = replaceAll(ee, fc->srcVars[0],invVars);
@@ -2770,11 +2772,12 @@ namespace ufo
           }
         }
         if(g.size() == 1) grds[conjoin(p,m_efac)] = conjoin(g,m_efac);
-        else {
+        else if(g.size() > 1) {
           Expr join = *g.begin();
           auto i = g.begin(), end = g.end();
           i++;
           for(;i!=end;i++) {
+            if(!isOpX<EQ>(*i)) continue;
             join = mk<EQ>(join->right(),(*i)->right());
             join = normalize(join);
             p.insert(join);
@@ -3046,17 +3049,17 @@ namespace ufo
           if(debug >= 2) outs() << "RERUN\n=====\n";
           b--;
           for(auto& e: fgrds2gh) {
-            candidates[specDecl].insert(replaceAll(e.first, tr->srcVars[0], fc->srcVars[0]));
+          //  candidates[specDecl].insert(replaceAll(e.first, tr->srcVars[0], fc->srcVars[0]));
             candidates[invDecl].insert(e.first);
           }
         }
         else {
           for(auto& e: grds) { // insert the data guards.
-            candidates[specDecl].insert(replaceAll(e, tr->srcVars[0], fc->srcVars[0]));
+          //  candidates[specDecl].insert(replaceAll(e, tr->srcVars[0], fc->srcVars[0]));
             candidates[invDecl].insert(e);
           }
         }
-        candidates[specDecl].insert(replaceAll(*b, tr->srcVars[0], fc->srcVars[0]));
+      //  candidates[specDecl].insert(replaceAll(*b, tr->srcVars[0], fc->srcVars[0]));
         candidates[invDecl].insert(*b);
 
         if(debug >= 2) {
@@ -3080,7 +3083,8 @@ namespace ufo
 
         if(res_t == Result_t::UNKNOWN) {
           parseForGuards(fgrds2gh);
-          for(auto& e : fgrds2gh) outs() << "fg: " << e.first << "\n";
+          if(debug >= 4)
+            for(auto& e : fgrds2gh) outs() << "fg: " << e.first << "\n";
           candidates.clear();
           if(!rerun) {
             rerun = true;
@@ -3110,13 +3114,16 @@ namespace ufo
         // end of parsing guards.
         ExprSet grds2;
         for(auto& g: grds2gh) {
-          getConj(g.first,grds2);
+          grds2.insert(g.first);
+          //getConj(g.first,grds2);
         }
+        if(grds2.empty()) grds2.insert(mk<TRUE>(m_efac));
         Expr grd = disjoin(grds2,m_efac);
+        grd = mkNeg(grd);
         if(debug >= 4) outs() << "grd: " << grd << "\n";
-        if(u.isSat(mkNeg(grd), fcBodyInvVars, loopGuard)) {
+        if(u.isSat(grd, fcBodyInvVars, loopGuard)) {
 
-          if(boundSolve(mkNeg(grd))) {
+          if(boundSolve(grd)) {
             return true;
           }
         }
