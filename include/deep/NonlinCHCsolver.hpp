@@ -88,6 +88,7 @@ namespace ufo
     ExprSet bounds;
     ExprSet concrtBounds;
     ExprSet dataGrds;
+    ExprSet phases;
     Expr mpzZero;
 
     bool hornspec = false;
@@ -98,7 +99,8 @@ namespace ufo
     public:
 
     NonlinCHCsolver (CHCs& r, int _b, bool _dg, bool pssg, bool d2, int dbg = 0)
-      : m_efac(r.m_efac), ruleManager(r), u(m_efac), strenBound(_b), SYGUS_BIN(""), z3(m_efac), smt(z3), dg(_dg), printGsSoln(pssg), data2(d2), debug(dbg)
+      : m_efac(r.m_efac), ruleManager(r), u(m_efac), strenBound(_b), SYGUS_BIN(""),
+        z3(m_efac), smt(z3), dg(_dg), printGsSoln(pssg), data2(d2), debug(dbg)
     {
       specDecl = mkTerm<string>(specName, m_efac);
       for (auto & a : ruleManager.chcs)
@@ -525,15 +527,52 @@ namespace ufo
       return res;
     }
 
-    bool checkAllOver (bool checkQuery = false)
-    {
-      for (auto & hr : ruleManager.chcs)
+    bool checkAllOver (bool checkQuery = false, bool weak = true)
+     {
+       for (auto & hr : ruleManager.chcs)
+       {
+         if (hr.isQuery && !checkQuery) continue;
+         if (!checkCHC(hr, candidates)) return false;
+       }
+      if (weak)
       {
-        if (hr.isQuery && !checkQuery) continue;
-        if (!checkCHC(hr, candidates)) return false;
+        if (debug >= 1) outs () << "try weakening\n";
+
+        for (auto & a : candidates)
+        {
+          ExprSet cannot;
+          while (true)
+          {
+            auto it = a.second.begin();
+            for (; it != a.second.end();)
+            {
+              Expr cand = *it;
+              if (find(cannot.begin(), cannot.end(), cand) != cannot.end() ||
+                  lexical_cast<string>(cand).find("gh") != std::string::npos)  // hack for now
+              {
+                ++it;
+                continue;
+              }
+
+              if (debug >= 5) outs () << "can remove: " << cand << " for " << a.first << "?\n";
+              it = a.second.erase(it);
+              auto res = checkAllOver(checkQuery, false);
+              if (debug >= 5)   outs () << "checkAllOver (nest):  " << res << "\n";
+              if (!res)
+              {
+                cannot.insert(cand);
+                break;
+              }
+            }
+
+            auto res = (it == a.second.end());
+            a.second.insert(cannot.begin(), cannot.end());
+            if (res) break;
+          }
+        }
       }
-      return true;
-    }
+       return true;
+     }
 
     bool checkCHC (HornRuleExt& hr, map<Expr, ExprSet>& annotations)
     {
@@ -2631,6 +2670,65 @@ namespace ufo
     }
     map<Expr,Expr> grds2gh,fgrds2gh; // associate a guard (phi(vars)) with a precond of gh (f(vars))
 
+    void collectPhaseGuards() {
+      BndExpl bnd(ruleManager, (debug > 0));
+      ExprSet cands;
+      vector<int>& cycle = ruleManager.cycles[0];
+      HornRuleExt* hr = &ruleManager.chcs[cycle[0]];
+      Expr rel = hr->srcRelation;
+      int invNum = getVarIndex(invDecl, decls);
+      ExprVector& srcVars = tr->srcVars[invNum];
+      ExprVector& dstVars = tr->dstVars;
+      assert(srcVars.size() == dstVars.size());
+      ExprSet dstVarsSet;
+      for(auto& d: dstVars) dstVarsSet.insert(d);
+      cycle.pop_back();
+      cycle.push_back(1);
+      for(auto& v: cycle) outs() << v << "\n";
+      Expr ssa = bnd.toExpr(cycle);
+
+      ssa = replaceAll(ssa, bnd.bindVars.back(), dstVars);
+      ssa = rewriteSelectStore(ssa);
+      retrieveDeltas(ssa, srcVars, dstVars, cands);
+
+      ExprVector vars2keep, prjcts, prjcts1, prjcts2;
+      bool hasArray = false;
+      for (int i = 0; i < srcVars.size(); i++)
+        if (containsOp<ARRAY_TY>(srcVars[i]))
+        {
+          hasArray = true;
+          vars2keep.push_back(dstVars[i]);
+        }
+        else
+          vars2keep.push_back(srcVars[i]);
+
+        u.flatten(ssa, prjcts1, false, vars2keep, keepQuantifiersRepl);
+
+        for (auto p : prjcts1)
+        {
+          if (hasArray)
+          {
+  //          getConj(replaceAll(p, dstVars, srcVars), cands);
+            p = ufo::eliminateQuantifiers(p, dstVarsSet);
+            p = weakenForVars(p, dstVars);
+          }
+          else
+          {
+            p = weakenForVars(p, dstVars);
+            p = simplifyArithm(normalize(p));
+    //        getConj(p, cands);
+          }
+          prjcts.push_back(p);
+          if (debug >= 2) outs() << "Generated MBP: " << p << "\n";
+        }
+
+        u.removeRedundantConjunctsVec(prjcts);
+
+        for(auto& p: prjcts) {
+          phases.insert(simplifyArithm(p));
+        }
+    }
+
     void parseForGuards(map<Expr,Expr>& grds) {
       if(debug >= 3) outs() << "Begin parsing for guards\n";
       // get a DNF form if there are disj in the result from G&S.
@@ -2650,19 +2748,30 @@ namespace ufo
       for(auto e = projections.begin(); e != projections.end() ; e++) {
         t.clear(); p.clear(); g.clear();
         getConj(*e, t);
+
+        ExprSet temp;
+        for(auto& a: t) {
+          temp.insert(normalize(a));
+        }
+        t.clear();
+        t.swap(temp);
+
         int c = 0;
         for(auto& ee: t) {
           if(contains(ee,ghostVars[0]) || contains(ee,ghostVars[1])) {
             c++;
             Expr r = replaceAll(ee, fc->srcVars[0],invVars);
-            if(containsOp<EQ>(r)) g.insert(r);
+            if(containsOp<EQ>(r)) g.insert(normalize(r, ghostVars[1]));
           }
           else {
             Expr r = replaceAll(ee, fc->srcVars[0],invVars);
             p.insert(normalize(r));
           }
         }
-        if(c == 1) grds[conjoin(p,m_efac)] = conjoin(g,m_efac);
+        if(g.size() == 1) grds[conjoin(p,m_efac)] = conjoin(g,m_efac);
+        else {
+          outs() << "g.size > 1\n";
+        }
       }
       if(debug >= 3) { outs() << "End parsing for guards\n"; }
     }
@@ -2854,7 +2963,6 @@ namespace ufo
       bounds.clear();
       for(auto& v : holdOther) bounds.push_back(normalize(v, ghostVars[0]));
       for(auto& v : holdMPZ) bounds.push_back(normalize(v, ghostVars[0]));
-
     }
 
     boost::tribool boundSolve(Expr block) {
@@ -2939,13 +3047,14 @@ namespace ufo
           outs() << "==================\n";
           outs() << "cand: ";
           pprint(candidates[specDecl]);
+          outs() << "\n";
           printCands(false);
           outs() << "==================\n";
         }
 
         Result_t res_t = guessAndSolve();
-        u.removeRedundantConjuncts(candidates[invDecl]);
-        u.removeRedundantConjuncts(candidates[specDecl]);
+        //u.removeRedundantConjuncts(candidates[invDecl]);
+        //u.removeRedundantConjuncts(candidates[specDecl]);
         if(debug >= 2) {
         outs() << "==================\n";
         printCands(false);
@@ -2972,7 +3081,7 @@ namespace ufo
         rerun = false;
 
         parseForGuards(grds2gh); // Associates guards (pre(Vars)) with Expr gh = f()
-                            // They are stored in grds2gh map.
+                                 // They are stored in grds2gh map.
 
         if(debug >= 3) {
           outs() << "\n    Guards\n==============\n";
@@ -3166,6 +3275,11 @@ namespace ufo
     {
       SYGUS_BIN=sp;
     }
+
+    void printPhases() {
+      outs() << "Phases\n======\n";
+      pprint(phases,2);
+    }
   };
 
   inline void solveNonlin(string smt, int inv, int stren, bool maximal, const vector<string> & relsOrder, bool useGAS,
@@ -3177,20 +3291,17 @@ namespace ufo
     CHCs ruleManager(m_efac, z3);
     ruleManager.parse(smt);
     NonlinCHCsolver spec(ruleManager, stren, dg, pgss, data2, debug);
-    if(debug >= 3) outs() << "invDecl: " << ruleManager.invRel << "\n";
-    if(debug >= 3)
-      for(auto& e: ruleManager.invVars[ruleManager.invRel])
-        outs() << "invVar: " << e << "\n";
     if(!ruleManager.hasQuery && ruleManager.chcs.size() == 2) {
       if(debug >= 2) ruleManager.print();
       spec.setUpQueryAndSpec();
-      if(debug >= 3) outs() << "invDecl: " << ruleManager.invRel << "\nStart solving\n";
     }
     else {
       outs() << "Unsupported format\n";
       assert(0);
     }
 
+    spec.collectPhaseGuards();
+    spec.printPhases();
     spec.boundSolve();
   };
 }

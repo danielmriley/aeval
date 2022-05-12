@@ -433,6 +433,17 @@ namespace ufo
       }
     }
 
+    void removeRedundantConjunctsVec(ExprVector& exps)
+    {
+      ExprVector expsn;
+      for (auto e : exps)
+      {
+        e = removeRedundantConjuncts(e);
+        if (!isOpX<TRUE>(e)) expsn.push_back(e);
+      }
+      exps = expsn;
+    }
+
     /**
      * Remove some redundant disjuncts from the formula
      */

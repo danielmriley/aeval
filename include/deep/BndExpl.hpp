@@ -142,7 +142,7 @@ namespace ufo
         HornRuleExt& hr = ruleManager.chcs[step];
         Expr body = hr.body;
         if(!hr.isInductive || !hr.isQuery) {
-          ExprVector preVars = ruleManager.chcs[0].srcVars[0];
+          ExprVector preVars = ruleManager.chcs[1].srcVars[0];
           body = replaceAll(body, preVars, srcVars);
           if(extraLemmas != NULL) body = mk<AND>(extraLemmas, body);
         }
