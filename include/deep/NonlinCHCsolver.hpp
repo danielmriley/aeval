@@ -88,7 +88,7 @@ namespace ufo
     ExprSet bounds;
     ExprSet concrtBounds;
     ExprSet dataGrds;
-    ExprSet phases;
+    ExprVector phases;
     Expr mpzZero;
 
     bool hornspec = false;
@@ -154,25 +154,6 @@ namespace ufo
       rule->isInductive = hr->isInductive;
       rule->isQuery = hr->isQuery;
       rule->body = hr->body;
-
-/*      vector<HornRuleExt> chcsOld = chcs;
-      chcs.clear();
-      if(!hr->isInductive && !hr->isQuery) {
-        addRule(hr);
-        if(chcsOld.size() >= 2) chcs.push_back(chcsOld[1]);
-        if(chcsOld.size() >= 3) chcs.push_back(chcsOld[2]);
-      }
-      else if(hr->isInductive) {
-        if(chcsOld.size() >= 1) chcs.push_back(chcsOld[0]);
-        addRule(hr);
-        if(chcsOld.size() >= 3) chcs.push_back(chcsOld[2]);
-      }
-      else if(hr->isQuery) {
-        if(chcsOld.size() >= 1) chcs.push_back(chcsOld[0]);
-        if(chcsOld.size() >= 2) chcs.push_back(chcsOld[1]);
-        addRule(hr);
-      }
-*/
     }
 
     void replaceRule(HornRuleExt* hr) {
@@ -227,9 +208,7 @@ namespace ufo
       ruleManager.invVars[specDecl].clear();
       ruleManager.addDeclAndVars(specDecl,specVars);
 
-
       replaceRule(fc_new);
-
 
       fcBodyInvVars = fc_new->body;
       ExprSet temp;
@@ -432,6 +411,48 @@ namespace ufo
       }
     }
 
+    int phaseNum = 0;
+
+    void miniHoudini(ExprSet& dst) {
+      ExprSet src;
+      for(auto& d: dst) {
+        Expr dpr = mkNeg(replaceAll(d,invVars,invVarsPr));
+        if(!u.isSat(fc->body, dpr)) { }
+        else continue;
+        if(!u.isSat(d, tr->body, dpr)) src.insert(d);
+      }
+      dst.clear();
+      for(auto& d : src) {
+        if(d->left()->arity() <= 1 && d->right()->arity() <= 1) dst.insert(d);
+      }
+      for(auto& d: dst) outs() << "d: " << d << "\n";
+    }
+
+    boost::tribool dataForBoundPhase(map<Expr, ExprSet>& candMap, Expr block) {
+      DataLearner2 dl2(ruleManager, z3, debug);
+      Expr invs = mk<TRUE>(m_efac);
+      outs() << "data from Phases\n";
+      Expr a, b;
+      if(phaseNum < phases.size()) {
+        if(phaseNum == 0) {
+          ExprSet src, dst;
+          mutateHeuristic(fcBodyInvVars,dst);
+          miniHoudini(dst);
+          a = conjoin(dst,m_efac);
+          b = phases[phaseNum];
+        }
+        else {
+          a = phases[phaseNum-1];
+          b = phases[phaseNum];
+        }
+
+        phaseNum++;
+      }
+      boost::tribool res = dl2.connectPhase(invDecl, block, invs, loopGuard, a, b);
+      candMap[invDecl] = dl2.getDataCands(invDecl);
+      return res;
+    }
+
     boost::tribool dataForBound2(map<Expr, ExprSet>& candMap, Expr block) {
       DataLearner2 dl2(ruleManager, z3, debug);
       Expr invs = mk<TRUE>(m_efac);
@@ -504,7 +525,8 @@ namespace ufo
       //block = mkNeg(block);
       if(block == mk<FALSE>(m_efac)) return false;
 
-      if(!data2) res = dataForBound(ghCandMap, block);
+      if(phases.size() > 1) res = dataForBoundPhase(ghCandMap, block);
+      else if(!data2) res = dataForBound(ghCandMap, block);
       else res = dataForBound2(ghCandMap, block);
       filterNonGhExp(ghCandMap[invDecl]);
       if(ghCandMap[invDecl].empty()) return false;
@@ -2670,6 +2692,35 @@ namespace ufo
     }
     map<Expr,Expr> grds2gh,fgrds2gh; // associate a guard (phi(vars)) with a precond of gh (f(vars))
 
+    void sortPhases() {
+      printPhases();
+      for(int i = 0; i < phases.size(); i++) {
+        for(int j = i; j < phases.size(); j++) {
+          if(i == 0) {
+            Expr check = mk<AND>(fcBodyInvVars, phases[j]);
+            outs() << "check: " << check << "\n";
+            if(u.isSat(check)) {
+              outs() << "swapping : " << phases[i] << " and " << phases[j] << "\n";
+              Expr e = phases[0];
+              phases[0] = phases[j];
+              phases[j] = e;
+            }
+          }
+          else {
+            Expr check = mk<AND>(tr->body,phases[i-1],replaceAll(phases[j],invVars,invVarsPr));
+            outs() << "check: " << check << "\n";
+            if(!u.isSat(check)) {
+              outs() << "swapping : " << phases[i-1] << " and " << phases[j] << "\n";
+              Expr e = phases[i-1];
+              phases[i-1] = phases[j];
+              phases[j] = e;
+            }
+          }
+        }
+      }
+      printPhases();
+    }
+
     void collectPhaseGuards() {
       BndExpl bnd(ruleManager, (debug > 0));
       ExprSet cands;
@@ -2725,8 +2776,18 @@ namespace ufo
         u.removeRedundantConjunctsVec(prjcts);
 
         for(auto& p: prjcts) {
-          phases.insert(simplifyArithm(p));
+          if(emptyIntersect(p,loopGuard)) {
+            phases.push_back(simplifyArithm(p));
+          }
+          else {
+            ExprSet temp;
+            getConj(p, temp);
+            for(auto& t: temp) {
+              if(t != loopGuard) phases.push_back(t);
+            }
+          }
         }
+        sortPhases();
     }
 
     void parseForGuards(map<Expr,Expr>& grds) {
@@ -2761,13 +2822,12 @@ namespace ufo
         t.swap(temp);
         for(auto& ee: t) {
           if(contains(ee,ghostVars[0]) || contains(ee,ghostVars[1])) {
-            Expr r = replaceAll(ee, fc->srcVars[0],invVars);
-
+            Expr r = ee;
             r = normalize(r, pc);
             if(isOpX<EQ>(r)) g.insert(r);
           }
           else {
-            Expr r = replaceAll(ee, fc->srcVars[0],invVars);
+            Expr r = ee;
             p.insert(normalize(r));
           }
         }
@@ -2783,7 +2843,7 @@ namespace ufo
             p.insert(join);
           }
           for(auto& d: g) {
-            if(d->right()->arity() > 0) {
+            if(!isOpX<MPZ>(d)) {
               join = d;
               break;
             }
@@ -3041,8 +3101,6 @@ namespace ufo
       for(auto b = boundsV.begin(), end = boundsV.end(); b != end && res; b++) {
         candidates.clear();
 
-        if(debug >= 2) outs() << "\n- - - b: " << *b << "\n\n";
-
         checkForMerge(*b, grds, grds2gh);
 
         if(rerun) {
@@ -3061,6 +3119,8 @@ namespace ufo
         }
       //  candidates[specDecl].insert(replaceAll(*b, tr->srcVars[0], fc->srcVars[0]));
         candidates[invDecl].insert(*b);
+
+        if(debug >= 2) outs() << "\n- - - b: " << *b << "\n\n";
 
         if(debug >= 2) {
           outs() << "Cands going to G&S\n";
@@ -3093,6 +3153,9 @@ namespace ufo
             rerun = false;
           }
           if(debug >= 2) outs() << "=====> unknown\n\n";
+          if(std::next(b) == end) {
+            if(phaseNum < phases.size()) boundSolve(mk<TRUE>(m_efac));
+          }
           continue;
         }
 

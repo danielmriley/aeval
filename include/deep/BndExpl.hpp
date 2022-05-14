@@ -508,8 +508,32 @@ namespace ufo
             diseqs.push_back(mk<ITE>(mk<NEQ>(versVars[j][i], versVars[k][i]), mkMPZ(1, m_efac), mkMPZ(0, m_efac)));
     }
 
+    void setGhostCondPhase(ExprVector& ssa, Expr gh_cond, Expr preCond, Expr a, Expr b)
+    {
+      outs() << "preCondphase: " << preCond << "\n";
+      Expr gh_zero = ssa.back();
+      Expr ssa_last = gh_zero;
+      ssa.pop_back();
+      ExprSet g;
+      getConj(gh_zero, g);
+      ExprVector g2;
+      for(auto& c: g) g2.push_back(c);
+      gh_zero = g2.back();
+      gh_zero = mk<EQ>(gh_zero->left(), mkTerm(mpz_class(0), m_efac));
+      g2.push_back(gh_zero);
+      gh_zero = conjoin(g2, m_efac);
+
+      b = replaceAll(b, srcVars, bindVars[bindVars.size() - 1]);
+//      a = replaceAll(a, srcVars, bindVars[bindVars.size() - 1]);
+      ssa.push_back(mk<AND>(gh_zero, mkNeg(b)));
+
+      pprint(ssa,2); outs() << "\n";
+    }
+
     void setGhostCond(ExprVector& ssa, Expr gh_cond, Expr preCond)
     {
+      outs() << "preCond: " << preCond << "\n";
+
       Expr gh_zero = ssa.back();
       Expr ssa_last = gh_zero;
       ssa.pop_back();
@@ -783,10 +807,15 @@ namespace ufo
 
         int backCHC = -1;
         ExprVector ssa;
+        trace[0] = 1;
         ssa.push_back(a);
         getSSA(trace, ssa);
+
+        for(int i = 1; i < ssa.size() - 1; i++) {
+          Expr bb = replaceAll(b,srcVars,bindVars[i-1]);
+          ssa[i] = mk<AND>(ssa[i],bb);
+        }
         int traceSz = trace.size();
-        //pprint(ssa,2);
         // compute vars for opt constraint
         vector<ExprVector> versVars;
         ExprSet allVars;
@@ -802,7 +831,7 @@ namespace ufo
         bool noopt = false;
         while (true)
         {
-          setGhostCond(ssa, gh_cond, preCond);
+          setGhostCondPhase(ssa, gh_cond, preCond, a, b);
           if (bindVars.size() <= 1)
           {
             if (debug) outs () << "Unable to solve the BMC formula for " <<  srcRel << " and gh_cond " << gh_cond <<"\n";
@@ -818,6 +847,7 @@ namespace ufo
           {
             if (trace.size() == traceSz)
             {
+              if(debug) outs() << "Reducing ssa size\n";
               trace.pop_back();
               ssa.pop_back();
               ssa.pop_back(); // remove the gh conds
