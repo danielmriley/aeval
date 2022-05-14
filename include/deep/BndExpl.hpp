@@ -808,7 +808,7 @@ namespace ufo
         int backCHC = -1;
         ExprVector ssa;
         trace[0] = 1;
-        ssa.push_back(a);
+      //  ssa.push_back(a);
         getSSA(trace, ssa);
 
         for(int i = 1; i < ssa.size() - 1; i++) {
