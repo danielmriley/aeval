@@ -95,13 +95,12 @@ namespace ufo
     bool dg = false;
     bool printGsSoln = false;
     bool data2 = false;
-    bool doPhases = false;
 
     public:
 
-    NonlinCHCsolver (CHCs& r, int _b, bool _dg, bool pssg, bool d2, bool _dp, int dbg = 0)
+    NonlinCHCsolver (CHCs& r, int _b, bool _dg, bool pssg, bool d2, int dbg = 0)
       : m_efac(r.m_efac), ruleManager(r), u(m_efac), strenBound(_b), SYGUS_BIN(""),
-        z3(m_efac), smt(z3), dg(_dg), printGsSoln(pssg), data2(d2), doPhases(_dp), debug(dbg)
+        z3(m_efac), smt(z3), dg(_dg), printGsSoln(pssg), data2(d2), debug(dbg)
     {
       specDecl = mkTerm<string>(specName, m_efac);
       for (auto & a : ruleManager.chcs)
@@ -526,7 +525,7 @@ namespace ufo
       //block = mkNeg(block);
       if(block == mk<FALSE>(m_efac)) return false;
 
-      if(doPhases) res = dataForBoundPhase(ghCandMap, block);
+      if(phases.size() > 1) res = dataForBoundPhase(ghCandMap, block);
       else if(!data2) res = dataForBound(ghCandMap, block);
       else res = dataForBound2(ghCandMap, block);
       filterNonGhExp(ghCandMap[invDecl]);
@@ -1986,7 +1985,7 @@ namespace ufo
       CHCs nrm(m_efac, z3);
       nrm.parse(newsmt);
       if(debug >= 2) outs() << "getWeakerSoln\n";
-      NonlinCHCsolver newNonlin(nrm, 1, 1, 1, 1, debug);
+      NonlinCHCsolver newNonlin(nrm, 1, 1, 1, debug);
       ExprVector query;
 
       Result_t res = newNonlin.guessAndSolve();
@@ -2376,7 +2375,7 @@ namespace ufo
       nrm.parse(newsmt);
       if(debug >= 3) outs() << "solveWeakCHC\n";
       nrm.print();
-      NonlinCHCsolver newNonlin(nrm, 1, 1, 1, 1, debug);
+      NonlinCHCsolver newNonlin(nrm, 1, 1, 1, debug);
       ExprVector query;
 
       Result_t res = newNonlin.guessAndSolve();
@@ -2777,7 +2776,16 @@ namespace ufo
         u.removeRedundantConjunctsVec(prjcts);
 
         for(auto& p: prjcts) {
-          phases.push_back(simplifyArithm(p));
+          if(emptyIntersect(p,loopGuard)) {
+            phases.push_back(simplifyArithm(p));
+          }
+          else {
+            ExprSet temp;
+            getConj(p, temp);
+            for(auto& t: temp) {
+              if(t != loopGuard) phases.push_back(t);
+            }
+          }
         }
         sortPhases();
     }
@@ -3360,13 +3368,13 @@ namespace ufo
 
   inline void solveNonlin(string smt, int inv, int stren, bool maximal, const vector<string> & relsOrder, bool useGAS,
                           bool usesygus, bool useUC, bool newenc, bool fixCRels, string syguspath, bool dg,
-                          bool pgss, bool data2, bool doPhases, int debug = 0)
+                          bool pgss, bool data2, int debug = 0)
   {
     ExprFactory m_efac;
     EZ3 z3(m_efac);
     CHCs ruleManager(m_efac, z3);
     ruleManager.parse(smt);
-    NonlinCHCsolver spec(ruleManager, stren, dg, pgss, data2, doPhases, debug);
+    NonlinCHCsolver spec(ruleManager, stren, dg, pgss, data2, debug);
     if(!ruleManager.hasQuery && ruleManager.chcs.size() == 2) {
       if(debug >= 2) ruleManager.print();
       spec.setUpQueryAndSpec();
