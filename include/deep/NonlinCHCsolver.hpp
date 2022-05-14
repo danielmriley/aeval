@@ -95,12 +95,13 @@ namespace ufo
     bool dg = false;
     bool printGsSoln = false;
     bool data2 = false;
+    bool doPhases = false;
 
     public:
 
-    NonlinCHCsolver (CHCs& r, int _b, bool _dg, bool pssg, bool d2, int dbg = 0)
+    NonlinCHCsolver (CHCs& r, int _b, bool _dg, bool pssg, bool d2, bool _dp, int dbg = 0)
       : m_efac(r.m_efac), ruleManager(r), u(m_efac), strenBound(_b), SYGUS_BIN(""),
-        z3(m_efac), smt(z3), dg(_dg), printGsSoln(pssg), data2(d2), debug(dbg)
+        z3(m_efac), smt(z3), dg(_dg), printGsSoln(pssg), data2(d2), doPhases(_dp), debug(dbg)
     {
       specDecl = mkTerm<string>(specName, m_efac);
       for (auto & a : ruleManager.chcs)
@@ -525,7 +526,7 @@ namespace ufo
       //block = mkNeg(block);
       if(block == mk<FALSE>(m_efac)) return false;
 
-      if(phases.size() > 1) res = dataForBoundPhase(ghCandMap, block);
+      if(doPhases) res = dataForBoundPhase(ghCandMap, block);
       else if(!data2) res = dataForBound(ghCandMap, block);
       else res = dataForBound2(ghCandMap, block);
       filterNonGhExp(ghCandMap[invDecl]);
@@ -1258,6 +1259,21 @@ namespace ufo
       }
     }
 
+    void printCandsEx(bool ppr = true) {
+      for(auto& a: candidates) {
+        outs() << "(define-fun " << *a.first << " (";
+        for (auto & b : ruleManager.invVars[a.first])
+        {
+          outs() << "(" << *b << " " << u.varType(b) << ")";
+        }
+        outs() << ") Bool\n";
+
+        if(ppr) pprint(a.second, 3);
+        else u.print(conjoin(a.second,m_efac));
+        outs() << "\n\n";
+      }
+    }
+
     void printCands(bool unsat = true, map<Expr, ExprSet> partialsolns = map<Expr,ExprSet>(), bool nonmaximal = false, bool simplify = false)
     {
       printCands(unsat, partialsolns, nonmaximal, simplify, outs());
@@ -1985,7 +2001,7 @@ namespace ufo
       CHCs nrm(m_efac, z3);
       nrm.parse(newsmt);
       if(debug >= 2) outs() << "getWeakerSoln\n";
-      NonlinCHCsolver newNonlin(nrm, 1, 1, 1, debug);
+      NonlinCHCsolver newNonlin(nrm, 1, 1, 1, 1, debug);
       ExprVector query;
 
       Result_t res = newNonlin.guessAndSolve();
@@ -2375,7 +2391,7 @@ namespace ufo
       nrm.parse(newsmt);
       if(debug >= 3) outs() << "solveWeakCHC\n";
       nrm.print();
-      NonlinCHCsolver newNonlin(nrm, 1, 1, 1, debug);
+      NonlinCHCsolver newNonlin(nrm, 1, 1, 1, 1, debug);
       ExprVector query;
 
       Result_t res = newNonlin.guessAndSolve();
@@ -2776,21 +2792,12 @@ namespace ufo
         u.removeRedundantConjunctsVec(prjcts);
 
         for(auto& p: prjcts) {
-          if(emptyIntersect(p,loopGuard)) {
-            phases.push_back(simplifyArithm(p));
-          }
-          else {
-            ExprSet temp;
-            getConj(p, temp);
-            for(auto& t: temp) {
-              if(t != loopGuard) phases.push_back(t);
-            }
-          }
+          phases.push_back(simplifyArithm(p));
         }
         sortPhases();
     }
 
-    void parseForGuards(map<Expr,Expr>& grds) {
+    void parseForGuards() {
       if(debug >= 3) outs() << "Begin parsing for guards\n";
       // get a DNF form if there are disj in the result from G&S.
       ExprVector projections, prjcts, vars2keep;
@@ -2810,7 +2817,6 @@ namespace ufo
       }
       ExprSet t,p,g;
       for(auto e = projections.begin(); e != projections.end() ; e++) {
-        outs() << "Parsing projections\n";
         t.clear(); p.clear(); g.clear();
         getConj(*e, t);
 
@@ -2820,37 +2826,47 @@ namespace ufo
         }
         t.clear();
         t.swap(temp);
+        int c = 0;
+        ExprSet toBeRenamed;
         for(auto& ee: t) {
           if(contains(ee,ghostVars[0]) || contains(ee,ghostVars[1])) {
-            Expr r = ee;
+            c++;
+            Expr r = replaceAll(ee, fc->srcVars[0],invVars);
+
             r = normalize(r, pc);
-            if(isOpX<EQ>(r)) g.insert(r);
+            if(containsOp<EQ>(r) && r->left() == pc) g.insert(r);
+            else toBeRenamed.insert(r);
           }
           else {
-            Expr r = ee;
+            Expr r = replaceAll(ee, fc->srcVars[0],invVars);
             p.insert(normalize(r));
           }
         }
-        if(g.size() == 1) grds[conjoin(p,m_efac)] = conjoin(g,m_efac);
-        else if(g.size() > 1) {
+        // if(g.size() == 1) grds[conjoin(p,m_efac)] = conjoin(g,m_efac);
+        // else
+        {
           Expr join = *g.begin();
           auto i = g.begin(), end = g.end();
           i++;
+          for (auto & a : toBeRenamed)
+            p.insert(replaceAll(a, pc, join->right()));
           for(;i!=end;i++) {
-            if(!isOpX<EQ>(*i)) continue;
             join = mk<EQ>(join->right(),(*i)->right());
             join = normalize(join);
             p.insert(join);
           }
           for(auto& d: g) {
-            if(!isOpX<MPZ>(d)) {
+            if(isOpX<MPZ>(d->right())) {
               join = d;
               break;
             }
           }
-          g.clear();
-          g.insert(join);
-          grds[conjoin(p,m_efac)] = conjoin(g,m_efac);
+
+          if (grds2gh[conjoin(p,m_efac)] != NULL)
+          {
+            assert(0 && "ERROR: guards already assigned\n");
+          }
+          grds2gh[conjoin(p,m_efac)] = join;
         }
       }
       if(debug >= 3) { outs() << "End parsing for guards\n"; }
@@ -3045,7 +3061,7 @@ namespace ufo
       for(auto& v : holdMPZ) bounds.push_back(normalize(v, ghostVars[0]));
     }
 
-    boost::tribool boundSolve(Expr block) {
+    boost::tribool boundSolveRec(Expr block) {
       map<Expr,ExprSet> bounds;
       dataGrds.clear();
 
@@ -3054,7 +3070,7 @@ namespace ufo
         return true;
       }
       if(debug >= 2) {
-        outs() << "  EXPLOREBOUNDS\n";
+        outs() << "  EXPLOREBOUNDS:  " << block << "\n";
         outs() << "=================\n";
       }
       boost::tribool res = exploreBounds(bounds, block); // maybe hold previously computed bounds in a global ExprSet to avoid duplication.
@@ -3125,10 +3141,7 @@ namespace ufo
         if(debug >= 2) {
           outs() << "Cands going to G&S\n";
           outs() << "==================\n";
-          outs() << "cand: ";
-          pprint(candidates[specDecl]);
-          outs() << "\n";
-          printCands(false);
+          printCandsEx(true);
           outs() << "==================\n";
         }
 
@@ -3142,9 +3155,9 @@ namespace ufo
         }
 
         if(res_t == Result_t::UNKNOWN) {
-          parseForGuards(fgrds2gh);
-          if(debug >= 4)
-            for(auto& e : fgrds2gh) outs() << "fg: " << e.first << "\n";
+          // parseForGuards(fgrds2gh);
+          // if(debug >= 4)
+          //   for(auto& e : fgrds2gh) outs() << "fg: " << e.first << "\n";
           candidates.clear();
           if(!rerun) {
             rerun = true;
@@ -3154,7 +3167,7 @@ namespace ufo
           }
           if(debug >= 2) outs() << "=====> unknown\n\n";
           if(std::next(b) == end) {
-            if(phaseNum < phases.size()) boundSolve(mk<TRUE>(m_efac));
+            if(phaseNum < phases.size()) boundSolveRec(mk<TRUE>(m_efac));
           }
           continue;
         }
@@ -3163,7 +3176,7 @@ namespace ufo
         if(debug >= 2) outs() << "=====> unsat\n\n";
         rerun = false;
 
-        parseForGuards(grds2gh); // Associates guards (pre(Vars)) with Expr gh = f()
+        parseForGuards(); // Associates guards (pre(Vars)) with Expr gh = f()
                                  // They are stored in grds2gh map.
 
         if(debug >= 3) {
@@ -3178,27 +3191,26 @@ namespace ufo
         ExprSet grds2;
         for(auto& g: grds2gh) {
           grds2.insert(g.first);
-          //getConj(g.first,grds2);
         }
-        if(grds2.empty()) grds2.insert(mk<TRUE>(m_efac));
         Expr grd = disjoin(grds2,m_efac);
-        grd = mkNeg(grd);
         if(debug >= 4) outs() << "grd: " << grd << "\n";
-        if(u.isSat(grd, fcBodyInvVars, loopGuard)) {
-
-          if(boundSolve(grd)) {
+        if(u.isSat(mkNeg(grd), fcBodyInvVars, loopGuard)) {
+          if(boundSolveRec(mkNeg(grd))) {
             return true;
           }
         }
-        else return true;
+        else
+        {
+          return true;
         }
+      }
       return false;
     }
 
     void boundSolve()
     {
       Expr block = mk<TRUE>(m_efac);
-      if(boundSolve(block)) {
+      if(boundSolveRec(block)) {
         u.removeRedundantConjuncts(candidates[invDecl]);
         u.removeRedundantConjuncts(candidates[specDecl]);
         outs() << "unsat\n";
@@ -3368,13 +3380,13 @@ namespace ufo
 
   inline void solveNonlin(string smt, int inv, int stren, bool maximal, const vector<string> & relsOrder, bool useGAS,
                           bool usesygus, bool useUC, bool newenc, bool fixCRels, string syguspath, bool dg,
-                          bool pgss, bool data2, int debug = 0)
+                          bool pgss, bool data2, bool doPhases, int debug = 0)
   {
     ExprFactory m_efac;
     EZ3 z3(m_efac);
     CHCs ruleManager(m_efac, z3);
     ruleManager.parse(smt);
-    NonlinCHCsolver spec(ruleManager, stren, dg, pgss, data2, debug);
+    NonlinCHCsolver spec(ruleManager, stren, dg, pgss, data2, doPhases, debug);
     if(!ruleManager.hasQuery && ruleManager.chcs.size() == 2) {
       if(debug >= 2) ruleManager.print();
       spec.setUpQueryAndSpec();
