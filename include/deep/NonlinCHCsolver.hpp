@@ -90,6 +90,7 @@ namespace ufo
     ExprSet dataGrds;
     ExprVector phases;
     Expr mpzZero;
+    vector<pair<Expr, Expr>> phasePairs;
 
     bool hornspec = false;
     bool dg = false;
@@ -2708,15 +2709,87 @@ namespace ufo
     }
     map<Expr,Expr> grds2gh,fgrds2gh; // associate a guard (phi(vars)) with a precond of gh (f(vars))
 
-    void sortPhases() {
-      printPhases();
+    vector<pair<Expr,Expr > > pairPhases() {
+      vector<pair<Expr,Expr > > pp;
+      Expr init = fcBodyInvVars;
+      for(auto& p : phases) {
+        Expr check = mk<AND>(init, p);
+        if(u.isSat(check)) {
+          pp.push_back(std::make_pair(init,p));
+        }
+        check = mk<AND>(mkNeg(replaceAll(loopGuard,invVars,invVarsPr)), tr->body, p);
+        if(u.isSat(check)) {
+          pp.push_back(std::make_pair(p,mkNeg(loopGuard)));
+        }
+      }
       for(int i = 0; i < phases.size(); i++) {
+        for(int j = 0; j < phases.size(); j++) {
+          if(i == j) continue;
+          Expr check = mk<AND>(tr->body,phases[i],replaceAll(phases[j],invVars,invVarsPr));
+          if(u.isSat(check)) {
+            pp.push_back(std::make_pair(phases[i],phases[j]));
+          }
+        }
+      }
+      return pp;
+    }
+
+    void printPath(ExprVector& path) {
+      outs() << "PATH: ";
+      for(int i = 0; i < path.size(); i++) {
+        if(i > 0) outs() << " --> ";
+        outs() << path[i];
+      }
+      outs() << "\n";
+    }
+
+    void printPhasePairs(vector<pair<Expr,Expr>> pp) {
+      outs() << "\n";
+      for(auto& v: pp) {
+        outs() << v.first << " --> " << v.second << "\n";
+      }
+      outs() << "\n";
+    }
+
+    ExprVector sortPhases() {
+      printPhases();
+      ExprVector path;
+      vector<pair<Expr,Expr>> temp;
+      temp = phasePairs;
+      int initCount = 0;
+      printPhasePairs(temp);
+      for(auto p = temp.begin(); p != temp.end(); ) {
+        if(p->first == fcBodyInvVars) {
+          initCount++;
+          path.push_back(p->first);
+          path.push_back(p->second);
+          p = temp.erase(p);
+        }
+        else { p++; }
+      }
+      printPhasePairs(temp);
+      if(initCount != 1) {
+        path.clear();
+        return path;
+      }
+      while(!temp.empty()) {
+        for(auto& p : temp) {
+          for(auto& e: path) {
+            if(p.second == e) {
+              path.clear(); return path;
+            }
+          }
+          if(path.back() == p.first) {
+            path.push_back(p.second);
+            temp.erase(std::find(temp.begin(),temp.end(),p));
+          }
+        }
+      }
+/*      for(int i = 0; i < phases.size(); i++) {
         for(int j = i; j < phases.size(); j++) {
           if(i == 0) {
             Expr check = mk<AND>(fcBodyInvVars, phases[j]);
-            outs() << "check: " << check << "\n";
             if(u.isSat(check)) {
-              outs() << "swapping : " << phases[i] << " and " << phases[j] << "\n";
               Expr e = phases[0];
               phases[0] = phases[j];
               phases[j] = e;
@@ -2724,9 +2797,7 @@ namespace ufo
           }
           else {
             Expr check = mk<AND>(tr->body,phases[i-1],replaceAll(phases[j],invVars,invVarsPr));
-            outs() << "check: " << check << "\n";
             if(!u.isSat(check)) {
-              outs() << "swapping : " << phases[i-1] << " and " << phases[j] << "\n";
               Expr e = phases[i-1];
               phases[i-1] = phases[j];
               phases[j] = e;
@@ -2734,7 +2805,9 @@ namespace ufo
           }
         }
       }
-      printPhases();
+*/
+      printPath(path);
+      return path;
     }
 
     void collectPhaseGuards() {
@@ -2793,6 +2866,14 @@ namespace ufo
 
         for(auto& p: prjcts) {
           phases.push_back(simplifyArithm(p));
+        }
+        phasePairs = pairPhases();
+        if(debug >= 3) {
+          outs() << "\n";
+          for(auto& v: phasePairs) {
+            outs() << v.first << " --> " << v.second << "\n";
+          }
+          outs() << "\n";
         }
         sortPhases();
     }

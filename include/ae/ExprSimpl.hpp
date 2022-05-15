@@ -3136,7 +3136,7 @@ namespace ufo
     }
   }
 
-/*  inline static Expr normalizeAtom(Expr fla, ExprVector& intVars)
+  inline static Expr normalizeAtom(Expr fla, ExprVector& intVars)
   {
     if (isOp<ComparissonOp>(fla) && isNumeric(fla->left()))
     {
@@ -3260,18 +3260,18 @@ namespace ufo
       }
     }
     return fla;
-  }*/
+  }
 
   // follows similar procedure to normaizeAtom above but will set the lhs to lhsVar
   // and the rhs to the remaining expr.
-  inline static Expr normalizeAtom(Expr fla, ExprVector& intVars, Expr lhsVar = 0)
+  inline static Expr normalizeAtom(Expr fla, ExprVector& intVars, Expr lhsVar )
     {
       // Changes made as requested.
       // Handles cases of lhsVar being specified and when one is not specified.
       // Normalizes with consts on the RHS in all cases except when lhsVar coefs add to zero.
       // then the form is 0 = ...
       fla = simplifyArithm(fla);
-//      outs() << "fla: " << fla << "\n";
+      outs() << "fla: " << fla << "\n";
       if (isOp<ComparissonOp>(fla) && isNumeric(fla->left()))
       {
         Expr lhs = fla->left();
@@ -3387,7 +3387,7 @@ namespace ufo
 //          outs() << "RHS size: " << newRhs.size() << "\n";
 //          outs() << "LHS size: " << newLhs.size() << "\n";
         if(newRhs.size() == 0) {
-          newRhs.push_back(mkMPZ(0,fla->getFactory()));          
+          newRhs.push_back(mkMPZ(0,fla->getFactory()));
         }
         Expr r = (newRhs.size() == 1) ? *newRhs.begin(): mknary<PLUS>(newRhs);
         Expr l = (newLhs.size() == 1) ? *newLhs.begin(): mknary<PLUS>(newLhs);
