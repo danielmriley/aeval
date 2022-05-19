@@ -1881,12 +1881,13 @@ namespace ufo
       }
 
       outs () << "round 1 candidates:\n";
-      printCandsEx(false);
+      printCandsEx();
 
       auto candidatesTmp = candidates;
       multiHoudini(worklist);
       if (checkAllOver(true, true, src, dst)) return Result_t::UNSAT;
 
+      Expr learnedLemmasInv = conjoin(candidates[invDecl], m_efac);
       candidates = candidatesTmp;
       for (auto & a : candidatesTmp[invDecl])
       {
@@ -1901,14 +1902,11 @@ namespace ufo
           varsPr.push_back(tr->dstVars[i]);
         }
         if (vars.size() > 2) continue;
-        // outs () << "prop " << a << ":\n";
 
         auto b = replaceAll(
-                  keepQuantifiers(mk<AND>(a, tr->body), varsPr),
+                  keepQuantifiers(mk<AND>(a, learnedLemmasInv, tr->body), varsPr),
                   varsPr, vars);
-        // outs () << "   => prop " << b << "\n";
         getConj(mk<AND>(a, b), candidates[invDecl]);
-        // candidates[invDecl].insert({a, b});
       }
       outs () << "round 2 candidates:\n";
       printCandsEx();
@@ -2949,7 +2947,7 @@ namespace ufo
     vector<ExprVector> paths;
     bool sortPhases() {
       ExprSet init;
-      for(auto & p : paths) {
+      for(auto & p : phasePairs) {
         if(p.first == fcBodyInvVars) {
           init.insert(p.first);
         }
@@ -3404,7 +3402,7 @@ namespace ufo
       getConj(dst, grdsDst);
       genCands(grdsDst, ghostVars[0]);
       getConj(src, grds);
-      // genCandsImpl(grds, src, dst);   // this may be needed 
+      // genCandsImpl(grds, src, dst);   // this may be needed
 
       if(dg) {
         for(auto& e: dataGrds) {
@@ -3473,6 +3471,14 @@ namespace ufo
         candidates[specDecl].insert(replaceAll(*b, tr->srcVars[0], fc->srcVars[0]));
         candidates[invDecl].insert(*b);
 
+        ExprSet factCands;
+        getConj(keepQuantifiers(fc->body, fc->srcVars[0]), factCands);
+        for (auto & c : factCands)
+        {
+          candidates[specDecl].insert(c);
+          candidates[invDecl].insert(replaceAll(c, fc->srcVars[0], tr->srcVars[0]));
+        }
+
         if(debug >= 2) outs() << "\n- - - b: " << *b << "\n\n";
 
         //
@@ -3540,10 +3546,7 @@ namespace ufo
         }
         Expr grd = disjoin(grds2,m_efac);
         if(debug >= 4) outs() << "grd: " << grd << "\n";
-        outs () << "  >>> term?  " << mkNeg(grd) << "  /\\ "  << src << "\n";
         if(u.isSat(mkNeg(grd), src)) {
-          outs () << "sat:\n";
-          outs () << u.getModel() << "\n";
           if(boundSolveRec(src, dst, mkNeg(grd))) {
             return true;
           }
@@ -3597,7 +3600,7 @@ namespace ufo
         int i;
         for (i = p.size() - 2; i >= 0; i--)
         {
-          if (isOpX<TRUE>(p[i])) break; // hack for now
+          if (p[i] == fcBodyInvVars) break; // hack for now
           boundSolve(p[i], p[i+1]);
 
           res = NULL;
