@@ -1,0 +1,21 @@
+(declare-rel inv (Int Int Int))
+(declare-var x0 Int)
+(declare-var x1 Int)
+(declare-var x2 Int)
+(declare-var y0 Int)
+(declare-var y1 Int)
+(declare-var t0 Int)
+(declare-var t1 Int)
+
+(rule (=> true (inv x0 y0 t0)))
+
+(rule (=> (and
+        (inv x0 y0 t0)
+        (> x0 0)
+        (= x1 (- x0 1))
+        (= t1 x1)
+        (= x2 y0)
+        (= y1 t1)
+        )
+        (inv x2 y1 t1)
+))
