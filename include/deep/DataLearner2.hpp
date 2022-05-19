@@ -113,7 +113,7 @@ namespace ufo
         }
         else
         {
-          outs () << "BMC formula unsat\n";
+          if(debug) outs () << "BMC formula unsat\n";
         }
         return res;
       }

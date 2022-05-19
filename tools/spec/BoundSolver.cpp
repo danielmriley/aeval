@@ -95,7 +95,7 @@ int main (int argc, char ** argv)
   bool data2 = getBoolValue("--data2", false, argc, argv);
   bool doPhases = getBoolValue("--phase-data", false, argc, argv);
 
-  outs() << "SpecTerm v1.0\n";
+  //outs() << "SpecHorn v1.0\n";
 
   if (fixcrel && !useUC) {
     outs() << "Can't use --fixcrel wihout --useuc\n";

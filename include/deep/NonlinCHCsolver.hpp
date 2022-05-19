@@ -644,7 +644,7 @@ namespace ufo
       }
       if(debug >= 6) { outs() << "checkList:\n"; pprint(checkList, 2); }
       auto res = bool(!u.isSat(checkList));
-      if (!res && hr.isQuery) outs () << "   model:  " << u.getModel() << "\n";
+      //if (!res && hr.isQuery) outs () << "   model:  " << u.getModel() << "\n";
       return res;
     }
 
@@ -1835,8 +1835,8 @@ namespace ufo
 
           Expr n = mk<AND>(reBuildCmp(a, mk<MINUS>(a->left(), a->right()), v),
                            reBuildCmp(b, mk<MINUS>(b->left(), b->right()), v));
-          outs () << "   -> " << n << "\n";
-          outs () << "      => " << eliminateQuantifier(n, v) << "\n";
+        //  outs () << "   -> " << n << "\n";
+        //  outs () << "      => " << eliminateQuantifier(n, v) << "\n";
           newCands.insert(eliminateQuantifier(n, v));
         }
       }
@@ -1880,8 +1880,8 @@ namespace ufo
         worklist.push_back(&hr);
       }
 
-      outs () << "round 1 candidates:\n";
-      printCandsEx();
+      //outs () << "round 1 candidates:\n";
+      //printCandsEx();
 
       auto candidatesTmp = candidates;
       multiHoudini(worklist);
@@ -1908,8 +1908,8 @@ namespace ufo
                   varsPr, vars);
         getConj(mk<AND>(a, b), candidates[invDecl]);
       }
-      outs () << "round 2 candidates:\n";
-      printCandsEx();
+      //outs () << "round 2 candidates:\n";
+      //printCandsEx();
       candidatesTmp = candidates;
       multiHoudini(worklist);
       if (checkAllOver(true, true, src, dst)) return Result_t::UNSAT;
@@ -1921,8 +1921,8 @@ namespace ufo
         candidates[specDecl].insert(replaceAll(c, tr->srcVars[0], fc->srcVars[0]));
         candidates[invDecl].insert(c);
       }
-      outs () << "round 3 candidates:\n";
-      printCandsEx();
+      //outs () << "round 3 candidates:\n";
+      //printCandsEx();
       multiHoudini(worklist);
       if (checkAllOver(true, true, src, dst)) return Result_t::UNSAT;
 
@@ -1948,8 +1948,8 @@ namespace ufo
         candidates[invDecl].insert(c);
       }
 
-      outs () << "round 4 candidates:\n";
-      printCandsEx();
+      //outs () << "round 4 candidates:\n";
+      //printCandsEx();
       multiHoudini(worklist);
       if (checkAllOver(true, true, src, dst)) return Result_t::UNSAT;
 
@@ -2969,13 +2969,16 @@ namespace ufo
         assert (paths.size() > len && "No paths found\n");
       }
 
-      for (auto & p : paths)
-      {
-        outs () << "Found path: ";
-        for (auto & pp : p)
-          outs () << pp << " -> ";
-        outs () << "\n";
+      if(debug >=4) {
+        for (auto & p : paths)
+        {
+          outs () << "Found path: ";
+          for (auto & pp : p)
+            outs () << pp << " -> ";
+          outs () << "\n";
+        }
       }
+
       return true;
     }
 
@@ -3015,7 +3018,7 @@ namespace ufo
       for(auto& d: dstVars) dstVarsSet.insert(d);
       cycle.pop_back();
       cycle.push_back(1);
-      for(auto& v: cycle) outs() << v << "\n";
+//      for(auto& v: cycle) outs() << v << "\n";
       Expr ssa = bnd.toExpr(cycle);
 
       ssa = replaceAll(ssa, bnd.bindVars.back(), dstVars);
@@ -3085,9 +3088,11 @@ namespace ufo
         for (auto & r : res)
         {
           phases.push_back(conjoin(r, m_efac));
-          outs () << "  comb: ";
-          pprint(r);
-          outs () << "\n";
+          if(debug >= 3) {
+            outs () << "  comb: ";
+            pprint(r);
+            outs () << "\n";
+          }
         }
 
         pairPhases();
@@ -3113,8 +3118,8 @@ namespace ufo
 
       u.flatten(conjoin(candidates[specDecl], m_efac), prjcts, false, vars2keep, [](Expr a, ExprVector& b){return a;});
 
-      outs () << "flattening:  \n";
-      pprint(candidates[specDecl], 2);
+      //outs () << "flattening:  \n";
+      //pprint(candidates[specDecl], 2);
 
       for(auto& p : prjcts) {
         projections.push_back(replaceAll(p, fc->srcVars[0], invVars));
@@ -3176,7 +3181,7 @@ namespace ufo
             assert(0 && "ERROR: guards already assigned\n");
           }
           grds2gh[conjoin(p,m_efac)] = join->right();  // GF: DS
-          outs () << "   adding grds2gh: " << conjoin(p,m_efac) << " -> " << join << "\n";
+          //outs () << "   adding grds2gh: " << conjoin(p,m_efac) << " -> " << join << "\n";
         }
       }
       if(debug >= 3) { outs() << "End parsing for guards\n"; }
@@ -3561,7 +3566,7 @@ namespace ufo
 
     void boundSolve(Expr src, Expr dst)
     {
-      outs () << "boundSolve: " << src << " -> " << dst << "\n";
+      if(debug >= 2) outs () << "boundSolve: " << src << " -> " << dst << "\n";
       Expr block = mk<TRUE>(m_efac);
       if(boundSolveRec(src, dst, block)) {
         // u.removeRedundantConjuncts(candidates[invDecl]);
@@ -3589,11 +3594,13 @@ namespace ufo
       ExprSet finals;
       for (auto & p : paths)
       {
-        outs () << "   - - - - - next path - - - - -\n";
-        for (auto & pp : p)
-          outs () << pp << " -> ";
-        outs () << "\n";
-        outs () << "   - - - - - - - - - - - - - - -\n";
+        if(debug >=2) {
+          outs () << "   - - - - - next path - - - - -\n";
+          for (auto & pp : p)
+            outs () << pp << " -> ";
+          outs () << "\n";
+          outs () << "   - - - - - - - - - - - - - - -\n";
+        }
 
         assert(p.size() > 1);
         Expr res;

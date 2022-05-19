@@ -510,7 +510,7 @@ namespace ufo
 
     void setGhostCondPhase(ExprVector& ssa, Expr gh_cond, Expr preCond, Expr a, Expr b)
     {
-      outs() << "preCondphase: " << preCond << "\n";
+      //outs() << "preCondphase: " << preCond << "\n";
       Expr gh_zero = ssa.back();
       Expr ssa_last = gh_zero;
       ssa.pop_back();
@@ -527,12 +527,12 @@ namespace ufo
 //      a = replaceAll(a, srcVars, bindVars[bindVars.size() - 1]);
       ssa.push_back(mk<AND>(gh_zero, mkNeg(b)));
 
-      pprint(ssa,2); outs() << "\n";
+      //pprint(ssa,2); outs() << "\n";
     }
 
     void setGhostCond(ExprVector& ssa, Expr gh_cond, Expr preCond)
     {
-      outs() << "preCond: " << preCond << "\n";
+    //  outs() << "preCond: " << preCond << "\n";
 
       Expr gh_zero = ssa.back();
       Expr ssa_last = gh_zero;
@@ -810,7 +810,7 @@ namespace ufo
         getSSA(trace, ssa);
         ssa.push_back(replaceAll(dst, srcVars, bindVars[bindVars.size() - 1]));
 
-        pprint(ssa, 5);
+        //pprint(ssa, 5);
 
         // for(int i = 1; i < ssa.size() - 1; i++) {
         //   Expr bb = replaceAll(b,srcVars,bindVars[i-1]);
