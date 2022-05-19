@@ -1876,6 +1876,16 @@ namespace ufo
     return fla;
   }
 
+  bool hasMPZ(Expr e)
+  {
+    if (!isOp<ComparissonOp>(e)) return false; // unknown
+
+    ExprVector all;
+    getAddTerm(mk<MINUS>(e->left(), e->right()), all);
+    for (auto &a : all) if (isOpX<MPZ>(a)) return true;
+    return false;
+  }
+
   /* find expressions of type expr = arrayVar in e and store it in output */
   inline static void getArrayEqualExprs(Expr e, Expr arrayVar, ExprVector & output)
   {
@@ -3271,7 +3281,6 @@ namespace ufo
       // Normalizes with consts on the RHS in all cases except when lhsVar coefs add to zero.
       // then the form is 0 = ...
       fla = simplifyArithm(fla);
-      outs() << "fla: " << fla << "\n";
       if (isOp<ComparissonOp>(fla) && isNumeric(fla->left()))
       {
         Expr lhs = fla->left();
@@ -4468,6 +4477,68 @@ namespace ufo
   }
 
 
+    inline static void distribDisjoin(ExprSet& dsj1, ExprSet& dsj2, ExprSet& comm)
+    {
+      for (auto it1 = dsj1.begin(); it1 != dsj1.end(); )
+      {
+        bool found = false;
+        for (auto it2 = dsj2.begin(); it2 != dsj2.end(); )
+        {
+          if (*it1 == *it2)
+          {
+            found = true;
+            comm.insert(*it1);
+            it1 = dsj1.erase(it1);
+            it2 = dsj2.erase(it2);
+            break;
+          }
+          else ++it2;
+        }
+        if (!found) ++it1;
+      }
+    }
+
+    inline static Expr distribDisjoin(Expr d1, Expr d2)
+    {
+      auto & efac = d1->getFactory();
+      ExprSet dsj1, dsj2, comm;
+      getConj(d1, dsj1);
+      getConj(d2, dsj2);
+      distribDisjoin (dsj1, dsj2, comm);
+      comm.insert(mk<OR>(conjoin(dsj1, efac), conjoin(dsj2, efac)));
+      return conjoin(comm, d1->getFactory());
+    }
+
+    template <typename T> static Expr distribDisjoin(T& d, ExprFactory &efac)
+    {
+      if (d.size() <= 1) return disjoin(d, efac);
+
+      ExprSet comm;
+      vector<ExprSet> dsjs;
+      dsjs.push_back(ExprSet());
+      auto it = d.begin();
+      getConj(*it, dsjs.back());
+      comm = dsjs.back();
+      for (it = std::next(it); it != d.end(); ++it)
+      {
+        ExprSet updComm, tmp;
+        dsjs.push_back(ExprSet());
+        getConj(*it, dsjs.back());
+        tmp = dsjs.back();
+        distribDisjoin (comm, tmp, updComm);
+        comm = updComm;
+      }
+
+      ExprSet toDisj;
+      for (auto a : dsjs)
+      {
+        minusSets(a, comm);
+        toDisj.insert(conjoin(a, efac));
+      }
+      comm.insert(disjoin(toDisj, efac));
+      return conjoin(comm, efac);
+    }
+
   void pprint(Expr exp, int inden, bool upper);
 
   template<typename Range> static void pprint(Range& exprs, int inden = 0)
@@ -4511,7 +4582,12 @@ namespace ufo
       outs () << string(inden, ' ') << "[!\n";
       flas.insert(exp->left());
     }
-    if (flas.empty()) outs () << string(inden, ' ') << exp;
+    if (isOpX<IMPL>(exp))
+    {
+      outs () << string(inden, ' ') << exp->left() << "  ==>  "
+                << exp->right();
+    }
+    else if (flas.empty()) outs () << string(inden, ' ') << exp;
     else
     {
       pprint(flas, inden + 2);

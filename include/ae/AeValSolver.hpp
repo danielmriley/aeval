@@ -752,6 +752,12 @@ namespace ufo
     return (conjoin(cnj, efac));
   };
 
+  inline static Expr eliminateQuantifier(Expr fla, Expr var)
+  {
+    ExprSet varsSet = {var};
+    return eliminateQuantifiers(fla, varsSet);
+  }
+
   template<typename Range> static Expr eliminateQuantifiersRepl(Expr fla, Range& vars)
   {
     fla = simplifyArithm(simpleQE(fla, vars));

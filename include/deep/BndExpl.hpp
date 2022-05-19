@@ -743,12 +743,12 @@ namespace ufo
     }
 
     boost::tribool unrollAndExecuteTermPhase(
+          Expr src, Expr dst,
           Expr srcRel,
           ExprVector& dtVars,
 				  vector<vector<double> >& models,
-          Expr gh_cond, Expr invs, Expr preCond,
-          Expr a, Expr b,
-          int k = 10)
+          Expr gh_cond, // Expr invs, Expr preCond,
+          int k = 2)
     {
       assert (gh_cond != NULL);
       if(debug) {
@@ -800,72 +800,71 @@ namespace ufo
         int l = 0;                        // starting index (before the loop)
         if (ruleManager.hasArrays) l++; // first iter is usually useless
 
-        if(gh_cond == mk<TRUE>(m_efac)) trace.push_back(0);
+        if(isOpX<TRUE>(gh_cond)) trace.push_back(0);
         for (int j = 0; j < k; j++)
           for (int m = 0; m < loop.size(); m++)
             trace.push_back(loop[m]);
 
-        int backCHC = -1;
         ExprVector ssa;
-        trace[0] = 1;
-        ssa.push_back(a);
+        ssa.push_back(src);
         getSSA(trace, ssa);
+        ssa.push_back(replaceAll(dst, srcVars, bindVars[bindVars.size() - 1]));
 
-        for(int i = 1; i < ssa.size() - 1; i++) {
-          Expr bb = replaceAll(b,srcVars,bindVars[i-1]);
-          ssa[i] = mk<AND>(ssa[i],bb);
-        }
+        pprint(ssa, 5);
+
+        // for(int i = 1; i < ssa.size() - 1; i++) {
+        //   Expr bb = replaceAll(b,srcVars,bindVars[i-1]);
+        //   ssa[i] = mk<AND>(ssa[i],bb);
+        // }
         int traceSz = trace.size();
         // compute vars for opt constraint
         vector<ExprVector> versVars;
         ExprSet allVars;
         ExprVector diseqs;
         fillVars(srcRel, vars, l, loop.size(), mainInds, arrInds, versVars, allVars);
-        getOptimConstr(versVars, vars.size(), diseqs);
-        Expr cntvar = bind::intConst(mkTerm<string> ("_ST_cnt", m_efac));
-        allVars.insert(cntvar);
-        allVars.insert(bindVars.back().begin(), bindVars.back().end());
-        ssa.insert(ssa.begin(), mk<EQ>(cntvar, mkplus(diseqs, m_efac)));
+        // getOptimConstr(versVars, vars.size(), diseqs);
+        // Expr cntvar = bind::intConst(mkTerm<string> ("_ST_cnt", m_efac));
+        // allVars.insert(cntvar);
+        // allVars.insert(bindVars.back().begin(), bindVars.back().end());
+        // ssa.insert(ssa.begin(), mk<EQ>(cntvar, mkplus(diseqs, m_efac)));
 
         bool toContinue = false;
-        bool noopt = false;
-        while (true)
-        {
-          setGhostCondPhase(ssa, gh_cond, preCond, a, b);
-          if (bindVars.size() <= 1)
-          {
-            if (debug) outs () << "Unable to solve the BMC formula for " <<  srcRel << " and gh_cond " << gh_cond <<"\n";
-          //  toContinue = true;
-            return false;
-          }
+        bool noopt = true;
 
-          if (u.isSat(conjoin(ssa, m_efac)))
-          {
-            break;
-          }
-          else
-          {
-            if (trace.size() == traceSz)
-            {
-              if(debug) outs() << "Reducing ssa size\n";
-              trace.pop_back();
-              ssa.pop_back();
-              ssa.pop_back(); // remove the gh conds
-              bindVars.pop_back();
-            }
-            else
-            {
-              trace.resize(trace.size()-loop.size());
-              ssa.pop_back();
-              ssa.resize(ssa.size()-loop.size());
-              bindVars.resize(bindVars.size()-loop.size());
-            }
 
-          }
-        }
+          // setGhostCondPhase(ssa, gh_cond, preCond, a, b);
+          // if (bindVars.size() <= 1)
+          // {
+          //   if (debug) outs () << "Unable to solve the BMC formula for " <<  srcRel << " and gh_cond " << gh_cond <<"\n";
+          // //  toContinue = true;
+          //   return false;
+          // }
+
+          if (!u.isSat(ssa)) return false;
+
+          // else
+          // {
+          //   if (trace.size() == traceSz)
+          //   {
+          //     if(debug) outs() << "Reducing ssa size\n";
+          //     trace.pop_back();
+          //     ssa.pop_back();
+          //     ssa.pop_back(); // remove the gh conds
+          //     bindVars.pop_back();
+          //   }
+          //   else
+          //   {
+          //     trace.resize(trace.size()-loop.size());
+          //     ssa.pop_back();
+          //     ssa.resize(ssa.size()-loop.size());
+          //     bindVars.resize(bindVars.size()-loop.size());
+          //   }
+          //
+          // }
 
         ExprMap allModels;
-        u.getOptModel<GT>(allVars, allModels, cntvar);
+        // u.getOptModel<GT>(allVars, allModels, cntvar);
+        u.getModel(allVars, allModels);
 
         ExprSet gh_condVars;
         set<int> gh_condVarsIndex; // Get gh_cond vars here
@@ -877,63 +876,32 @@ namespace ufo
         for (int j = 0; j < versVars.size(); j++)
         {
           if(j >= trace.size()) break;
-          vector<double> model;
           if (debug) outs () << "  model for " << j+1 << ":\t[";
           bool toSkip = false;
-          SMTUtils u2(m_efac);
-          ExprSet equalities;
-
-          for (auto i: gh_condVarsIndex)
-          {
-            Expr srcVar = srcVars[i];
+          vector<double> model;
+          for (int i = 0; i < vars.size(); i++) {
             Expr bvar = versVars[j][i];
-            if (isOpX<SELECT>(bvar)) bvar = bvar->left();
             Expr m = allModels[bvar];
-            if (m == NULL) { toSkip = true; break; }
-            equalities.insert(mk<EQ>(srcVar, m));
-          }
-          if (toSkip) continue;
-          equalities.insert(gh_cond);
-
-          if (u2.isSat(equalities)) //exclude models that don't satisfy gh_cond
-          {
-            vector<double> model;
-
-            for (int i = 0; i < vars.size(); i++) {
-              Expr bvar = versVars[j][i];
-              Expr m = allModels[bvar];
-              double value;
-              if (m != NULL && isOpX<MPZ>(m))
-              {
-                if (lexical_cast<cpp_int>(m) > max_double ||
-                    lexical_cast<cpp_int>(m) < -max_double)
-                {
-                  toSkip = true;
-                  break;
-                }
-                value = lexical_cast<double>(m);
-              }
-              else
+            double value;
+            if (m != NULL && isOpX<MPZ>(m))
+            {
+              if (lexical_cast<cpp_int>(m) > max_double ||
+                  lexical_cast<cpp_int>(m) < -max_double)
               {
                 toSkip = true;
                 break;
               }
-              model.push_back(value);
-              if (debug) outs () << *bvar << " = " << *m << ", ";
-              if (j == 0)
-              {
-                if (isOpX<SELECT>(bvar))
-                  concrInvs[srcRel].insert(mk<EQ>(vars[i]->left(), allModels[bvar->left()]));
-                else
-                  concrInvs[srcRel].insert(mk<EQ>(vars[i], m));
-              }
+              value = lexical_cast<double>(m);
             }
-            if (!toSkip) models.push_back(model);
+            else
+            {
+              toSkip = true;
+              break;
+            }
+            model.push_back(value);
+            if (debug) outs () << *bvar << " = " << *m << ", ";
           }
-          else
-          {
-            if (debug) outs () << "   <  skipping  >      ";
-          }
+          if (!toSkip) models.push_back(model);
           if (debug) outs () << "\b\b]\n";
         }
       }

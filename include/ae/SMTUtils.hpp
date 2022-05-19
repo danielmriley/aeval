@@ -379,6 +379,39 @@ namespace ufo
       return ex;
     }
 
+    Expr removeITE(Expr ex)
+    {
+      ExprVector ites;
+      getITEs(ex, ites);
+      int sz = ites.size();
+      for (auto it = ites.begin(); it != ites.end();)
+      {
+        Expr tmp;
+        if (implies(ex, (*it)->left()))
+          tmp = (*it)->right();
+        else if (implies(ex, mk<NEG>((*it)->left())))
+          tmp = (*it)->last();
+        else {++it; continue; }
+
+        ex = replaceAll(ex, *it, tmp);
+        it = ites.erase(it);
+      }
+      if (sz == ites.size()) return ex;
+      else return simplifyBool(simplifyArithm(removeITE(ex)));
+    }
+
+    Expr simplifiedAnd(Expr a, Expr b)
+    {
+      ExprVector disjs, vars;
+      flatten(a, disjs, false, vars, [](Expr a, ExprVector& b){return a;});
+      for (auto it = disjs.begin(); it != disjs.end(); )
+      {
+        if (!isSat(*it, b)) it = disjs.erase(it);
+        else ++it;
+      }
+      return mk<AND>(disjoin(disjs, efac), b);
+    }
+
     /**
      * Remove some redundant conjuncts from the set of formulas
      */

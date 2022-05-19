@@ -100,20 +100,25 @@ namespace ufo
         return res;
       }
 
-      boost::tribool connectPhase(Expr srcRel = NULL, Expr block = NULL,
-        Expr invs = NULL, Expr preCond = NULL, Expr a = NULL, Expr b = NULL)
+      boost::tribool connectPhase(Expr src, Expr dst,
+                    Expr srcRel = NULL, Expr block = NULL, Expr invs = NULL,
+                    Expr preCond = NULL)
       {
         // Get data matrix.
         boost::tribool res = bnd.unrollAndExecuteTermPhase
-          (srcRel, invVars[srcRel], models[srcRel], block, invs, preCond, a, b);
+          (src, dst, srcRel, invVars[srcRel], models[srcRel], block);
 
         if(res) {
           createCandsFromData(srcRel);
         }
+        else
+        {
+          outs () << "BMC formula unsat\n";
+        }
         return res;
       }
 
-      ExprSet getDataCands(Expr rel) { return dc[rel]; }
+      void getDataCands(ExprSet& cands, Expr rel) { cands = dc[rel]; }
   };
 
 }

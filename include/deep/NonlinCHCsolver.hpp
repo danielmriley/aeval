@@ -64,6 +64,8 @@ namespace ufo
     HornRuleExt* fc;
     HornRuleExt* qr;
 
+    HornRuleExt tr_orig;    // for phases
+
     Expr invDecl;
     ExprVector invVars;
     ExprVector invVarsPr;
@@ -108,8 +110,8 @@ namespace ufo
       for (auto & a : ruleManager.chcs)
         if (a.isInductive) tr = &a;
         else if (a.isQuery) qr = &a;
-        else if (!a.isInductive && !a.isQuery) fc = &a;
-
+        else fc = &a;
+      tr_orig = *tr;
       for(auto& dcl: ruleManager.decls) decls.push_back(dcl->left());
       invDecl = ruleManager.invRel;
       if(debug >= 2) outs() << "invDecl constructor: " << invDecl << "\n";
@@ -240,6 +242,7 @@ namespace ufo
       for (auto & a : ruleManager.chcs)       // r.chcs changed by r.addRule, so pointers to its elements are broken
         if (a.isInductive) tr = &a;
         else if (!a.isInductive && !a.isQuery) fc = &a;
+      tr_orig = *tr;
     }
 
     void setUpTr() // NEED TO RESET INV DECL
@@ -271,9 +274,10 @@ namespace ufo
       fcBodyInvVars = replaceAll(fcBodyInvVars, fc->srcVars[0], invVars);
       if(debug >= 4) outs() << "fcBodyInvVars: " << fcBodyInvVars << "\n";
 
-    for (auto & a : ruleManager.chcs)       // r.chcs changed by r.addRule, so pointers to its elements are broken
-      if (a.isInductive) tr = &a;
-      else if (!a.isInductive && !a.isQuery) fc = &a;
+      for (auto & a : ruleManager.chcs)       // r.chcs changed by r.addRule, so pointers to its elements are broken
+        if (a.isInductive) tr = &a;
+        else if (!a.isInductive && !a.isQuery) fc = &a;
+      tr_orig = *tr;
     }
 
     void setUpQr()
@@ -291,9 +295,11 @@ namespace ufo
       ruleManager.addFailDecl(qr->dstRelation);
       ruleManager.addRule(qr);
 
-    for (auto & a : ruleManager.chcs)       // r.chcs changed by r.addRule, so pointers to its elements are broken
-      if (a.isInductive) tr = &a;
-      else if (!a.isInductive && !a.isQuery) fc = &a;
+      for (auto & a : ruleManager.chcs)       // r.chcs changed by r.addRule, so pointers to its elements are broken
+        if (a.isInductive) tr = &a;
+        else if (a.isQuery) qr = &a;
+        else fc = &a;
+      tr_orig = *tr;
     }
 
     bool setUpQueryAndSpec()
@@ -304,6 +310,7 @@ namespace ufo
         if (a.isInductive) tr = &a;
         else if (a.isFact) fc = &a;
         else if (a.isQuery) qr = &a;
+      tr_orig = *tr;
 
       invDecl = tr->srcRelations[0];
       invVars = tr->srcVars[0];
@@ -430,28 +437,26 @@ namespace ufo
       for(auto& d: dst) outs() << "d: " << d << "\n";
     }
 
-    boost::tribool dataForBoundPhase(map<Expr, ExprSet>& candMap, Expr block) {
+    boost::tribool dataForBoundPhase(Expr src, Expr dst,
+                                     map<Expr, ExprSet>& candMap, Expr block) {
       DataLearner2 dl2(ruleManager, z3, debug);
       Expr invs = mk<TRUE>(m_efac);
-      outs() << "data from Phases\n";
-      Expr a, b;
-      if(phaseNum < phases.size()) {
-        if(phaseNum == 0) {
-          ExprSet src, dst;
-          mutateHeuristic(fcBodyInvVars,dst);
-          miniHoudini(dst);
-          a = conjoin(dst,m_efac);
-          b = phases[phaseNum];
-        }
-        else {
-          a = phases[phaseNum-1];
-          b = phases[phaseNum];
-        }
+      boost::tribool res = true;
+      Expr pc = ghostVars[0];
+      assert (grds2gh[dst] != NULL);
 
-        phaseNum++;
-      }
-      boost::tribool res = dl2.connectPhase(invDecl, block, invs, loopGuard, a, b);
-      candMap[invDecl] = dl2.getDataCands(invDecl);
+      qr->body = mk<AND>(mk<NEG>(src),
+                         mk<NEG>(mk<AND>(dst, stren[dst],
+                                 mk<EQ>(pc, grds2gh[dst])))); // hack for now
+      tr->body = u.removeITE(mk<AND>(src, tr_orig.body));
+
+      dst = mk<AND>(mk<NEG>(src), mk<AND>(dst, stren[dst]), mk<EQ>(pc, grds2gh[dst]));
+
+      src = mk<AND>(block, src);
+      if(isOpX<TRUE>(block))
+        src = replaceAll(src, invVars, fc->srcVars[0]);
+      res = dl2.connectPhase(src, dst, invDecl, block, invs, loopGuard);
+      dl2.getDataCands(candMap[invDecl], invDecl);  // GF
       return res;
     }
 
@@ -459,7 +464,7 @@ namespace ufo
       DataLearner2 dl2(ruleManager, z3, debug);
       Expr invs = mk<TRUE>(m_efac);
       boost::tribool res = dl2.connect(invDecl, block, invs, loopGuard);
-      candMap[invDecl] = dl2.getDataCands(invDecl);
+      dl2.getDataCands(candMap[invDecl], invDecl);
       return res;
     }
 
@@ -520,16 +525,19 @@ namespace ufo
       }
     }
 
-    boost::tribool exploreBounds(map<Expr, ExprSet>& ghCandMap, Expr block)
+    boost::tribool exploreBounds(Expr src, Expr dst,
+                                 map<Expr, ExprSet>& ghCandMap, Expr block)
     {
       boost::tribool res;
 
       //block = mkNeg(block);
-      if(block == mk<FALSE>(m_efac)) return false;
+      if(isOpX<FALSE>(block)) return false;
 
-      if(doPhases) res = dataForBoundPhase(ghCandMap, block);
-      else if(!data2) res = dataForBound(ghCandMap, block);
-      else res = dataForBound2(ghCandMap, block);
+      // if(doPhases)
+      res = dataForBoundPhase(src, dst, ghCandMap, block);
+      if (res != true) return false;
+      // else if(!data2) res = dataForBound(ghCandMap, block);
+      // else res = dataForBound2(ghCandMap, block);
       filterNonGhExp(ghCandMap[invDecl]);
       if(ghCandMap[invDecl].empty()) return false;
 
@@ -551,7 +559,8 @@ namespace ufo
       return res;
     }
 
-    bool checkAllOver (bool checkQuery = false, bool weak = true)
+    bool checkAllOver (bool checkQuery = false, bool weak = true,
+        Expr src = NULL, Expr dst = NULL)
      {
        for (auto & hr : ruleManager.chcs)
        {
@@ -578,9 +587,15 @@ namespace ufo
                 continue;
               }
 
+              if (u.implies(src, cand))
+              {
+                ++it;
+                continue;
+              }
+
               if (debug >= 5) outs () << "can remove: " << cand << " for " << a.first << "?\n";
               it = a.second.erase(it);
-              auto res = checkAllOver(checkQuery, false);
+              auto res = checkAllOver(checkQuery, false, src, dst);
               if (debug >= 5)   outs () << "checkAllOver (nest):  " << res << "\n";
               if (!res)
               {
@@ -628,7 +643,9 @@ namespace ufo
         checkList.insert(neg);
       }
       if(debug >= 6) { outs() << "checkList:\n"; pprint(checkList, 2); }
-      return bool(!u.isSat(checkList));
+      auto res = bool(!u.isSat(checkList));
+      if (!res && hr.isQuery) outs () << "   model:  " << u.getModel() << "\n";
+      return res;
     }
 
     void shrinkCnjs(ExprSet & cnjs)
@@ -919,8 +936,6 @@ namespace ufo
             }
           }
 
-          // numTrueCands = 0;       // GF: hack to disable fairness
-
           ExprSet allGuessesInit;
           if (numTrueCands > 0)      // at least one curCnd should be true
             for (int i = 0; i < rels.size(); i++)
@@ -1190,7 +1205,7 @@ namespace ufo
       mergeDiseqs(nextSplit);
 
       if (prevSplit.size() != 1 || nextSplit.size() != 1)
-        return; // GF: to extend
+        return;
 
       getDisj(*prevSplit.begin(), prevSplitDisj);
       getDisj(*nextSplit.begin(), nextSplitDisj);
@@ -1799,6 +1814,150 @@ namespace ufo
       return true;
     }
 
+
+    void genCands(ExprSet & tmp, Expr pc)
+    {
+      Expr v = mkConst(mkTerm<string>("tmp_", m_efac), mk<INT_TY>(m_efac));
+      ExprSet newCands;
+      for (auto it = tmp.begin(); it != tmp.end(); ++it)
+      {
+        auto a = *it;
+        if (contains(a, pc)) continue;
+        if (!isOp<ComparissonOp>(a)) continue;
+        a = normalize(a);
+
+        for (auto it2 = std::next(it); it2 != tmp.end(); ++it2)
+        {
+          auto b = *it2;
+          if (a == b) continue;
+          if (!isOp<ComparissonOp>(b)) continue;
+          b = normalize(b);
+
+          Expr n = mk<AND>(reBuildCmp(a, mk<MINUS>(a->left(), a->right()), v),
+                           reBuildCmp(b, mk<MINUS>(b->left(), b->right()), v));
+          outs () << "   -> " << n << "\n";
+          outs () << "      => " << eliminateQuantifier(n, v) << "\n";
+          newCands.insert(eliminateQuantifier(n, v));
+        }
+      }
+      // tmp.insert(newCands.begin(), newCands.end());
+      tmp = newCands;
+    }
+
+    void genCandsImpl(ExprSet & tmp, Expr src, Expr dst)
+    {
+      ExprSet s,d;
+      getConj(src, s);
+      getConj(dst, d);
+      ExprSet t;
+
+      for (auto it = s.begin(); it != s.end(); )
+      {
+        if (find (d.begin(), d.end(), *it) == d.end())
+        {
+          ++it;
+        }
+        else
+        {
+          t.insert(*it);
+          it = s.erase(it);
+        }
+      }
+      if (!t.empty())
+        tmp.insert(mk<IMPL>(conjoin(s, m_efac), conjoin(t, m_efac)));
+    }
+
+    Result_t elba(ExprSet& third, Expr src, Expr dst)
+    {
+      if(debug >= 3) outs() << "\n  ===================\n  ||    E L B A    ||  \n  ===================\n\n";
+
+      filterUnsat();
+      Expr pc = ghostVars[0];
+      vector<HornRuleExt*> worklist;
+      for (auto & hr : ruleManager.chcs)
+      {
+        if (containsOp<ARRAY_TY>(hr.body)) hasArrays = true;
+        worklist.push_back(&hr);
+      }
+
+      outs () << "round 1 candidates:\n";
+      printCandsEx(false);
+
+      auto candidatesTmp = candidates;
+      multiHoudini(worklist);
+      if (checkAllOver(true, true, src, dst)) return Result_t::UNSAT;
+
+      candidates = candidatesTmp;
+      for (auto & a : candidatesTmp[invDecl])
+      {
+        if (!isOp<ComparissonOp>(a)) continue;  // GF
+        if (isOpX<EQ>(a)) continue;
+        if (contains(a, pc)) continue;
+        ExprVector vars, varsPr;
+        for (int i = 0; i < tr->dstVars.size(); i++)
+        {
+          if (!contains(a, tr->srcVars[0][i])) continue;
+          vars.push_back(tr->srcVars[0][i]);
+          varsPr.push_back(tr->dstVars[i]);
+        }
+        if (vars.size() > 2) continue;
+        // outs () << "prop " << a << ":\n";
+
+        auto b = replaceAll(
+                  keepQuantifiers(mk<AND>(a, tr->body), varsPr),
+                  varsPr, vars);
+        // outs () << "   => prop " << b << "\n";
+        getConj(mk<AND>(a, b), candidates[invDecl]);
+        // candidates[invDecl].insert({a, b});
+      }
+      outs () << "round 2 candidates:\n";
+      printCandsEx();
+      candidatesTmp = candidates;
+      multiHoudini(worklist);
+      if (checkAllOver(true, true, src, dst)) return Result_t::UNSAT;
+
+
+      candidates = candidatesTmp;
+      for (auto & c : third)
+      {
+        candidates[specDecl].insert(replaceAll(c, tr->srcVars[0], fc->srcVars[0]));
+        candidates[invDecl].insert(c);
+      }
+      outs () << "round 3 candidates:\n";
+      printCandsEx();
+      multiHoudini(worklist);
+      if (checkAllOver(true, true, src, dst)) return Result_t::UNSAT;
+
+
+      ExprSet cnjs, cnjsUpd;
+      getConj(stren[dst], cnjs);
+      for (auto s : cnjs)
+      {
+        // outs () << "stren:  " << s << "\n";
+        s = simplifyArithm(u.removeITE(u.simplifiedAnd(
+          mkNeg(keepQuantifiers(mkNeg(mk<IMPL>(tr->body,
+                    replaceAll(s, tr->srcVars[0], tr->dstVars))),
+                      tr->srcVars[0])),
+          replaceAll(conjoin(candidates[specDecl], m_efac),
+                      fc->srcVars[0], tr->srcVars[0]))));
+        // outs () << "   -> abd:  " << s << "\n";
+
+        getConj(s, cnjsUpd);
+      }
+      for (auto & c : cnjsUpd)
+      {
+        candidates[specDecl].insert(replaceAll(c, tr->srcVars[0], fc->srcVars[0]));
+        candidates[invDecl].insert(c);
+      }
+
+      outs () << "round 4 candidates:\n";
+      printCandsEx();
+      multiHoudini(worklist);
+      if (checkAllOver(true, true, src, dst)) return Result_t::UNSAT;
+
+      return Result_t::UNKNOWN;
+    }
+
     Result_t guessAndSolve()
     {
       if(debug >= 3) outs() << "\n    GUESS AND SOLVE\n=======================\n";
@@ -1817,7 +1976,7 @@ namespace ufo
           if (debug>=7)
           {
             outs () << "iter " << globalIter << "." << fwd << "\nCurrent candidates:\n";
-            printCands(false);
+            printCandsEx(false);
           }
           declsVisited.clear();
           declsVisited.insert(ruleManager.failDecl);
@@ -2707,31 +2866,30 @@ namespace ufo
       }
       return diff;
     }
-    map<Expr,Expr> grds2gh,fgrds2gh; // associate a guard (phi(vars)) with a precond of gh (f(vars))
 
-    vector<pair<Expr,Expr > > pairPhases() {
-      vector<pair<Expr,Expr > > pp;
+
+    ExprMap stren, grds2gh, fgrds2gh; // associate a guard (phi(vars)) with a precond of gh (f(vars))
+
+    void pairPhases() {
       Expr init = fcBodyInvVars;
       for(auto& p : phases) {
-        Expr check = mk<AND>(init, p);
-        if(u.isSat(check)) {
-          pp.push_back(std::make_pair(init,p));
-        }
-        check = mk<AND>(mkNeg(replaceAll(loopGuard,invVars,invVarsPr)), tr->body, p);
-        if(u.isSat(check)) {
-          pp.push_back(std::make_pair(p,mkNeg(loopGuard)));
+        if(init != p && u.isSat(init, p)) {
+          phasePairs.push_back(std::make_pair(init,p));
         }
       }
       for(int i = 0; i < phases.size(); i++) {
         for(int j = 0; j < phases.size(); j++) {
           if(i == j) continue;
-          Expr check = mk<AND>(tr->body,phases[i],replaceAll(phases[j],invVars,invVarsPr));
-          if(u.isSat(check)) {
-            pp.push_back(std::make_pair(phases[i],phases[j]));
+          if(u.isSat(tr->body,phases[i],replaceAll(phases[j],invVars,invVarsPr))) {
+            phasePairs.push_back(std::make_pair(phases[i],phases[j]));
           }
         }
       }
-      return pp;
+      for(auto& p : phases) {
+        if(!u.isSat(p, tr->body)) {
+          phasePairs.push_back(std::make_pair(p,mk<FALSE>(m_efac)));
+        }
+      }
     }
 
     void printPath(ExprVector& path) {
@@ -2743,71 +2901,106 @@ namespace ufo
       outs() << "\n";
     }
 
-    void printPhasePairs(vector<pair<Expr,Expr>> pp) {
-      outs() << "\n";
-      for(auto& v: pp) {
-        outs() << v.first << " --> " << v.second << "\n";
+    // adapted from BndExpl:: getAllTraces
+    void getAllPaths (Expr src, Expr dst, int len, ExprVector trace, vector<ExprVector>& traces)
+    {
+      if (len == 1)
+      {
+        for (auto a : phasePairs)
+        {
+          if (a.first == src && a.second == dst)
+          {
+            for (auto & b : trace)
+            {
+              if (a.second == b)
+              {
+                outs () << "cyclic paths not supported\n";
+                exit(1);
+              }
+            }
+            ExprVector newtrace = trace;
+            newtrace.push_back(dst);
+            traces.push_back(newtrace);
+          }
+        }
       }
-      outs() << "\n";
+      else
+      {
+        for (auto a : phasePairs)
+        {
+          if (a.first == src)
+          {
+            for (auto & b : trace)
+            {
+              if (a.second == b)
+              {
+                outs () << "cyclic paths not supported\n";
+                exit(1);
+              }
+            }
+            ExprVector newtrace = trace;
+            newtrace.push_back(a.second);
+            getAllPaths(a.second, dst, len-1, newtrace, traces);
+          }
+        }
+      }
     }
 
-    ExprVector sortPhases() {
-      printPhases();
-      ExprVector path;
-      vector<pair<Expr,Expr>> temp;
-      temp = phasePairs;
-      int initCount = 0;
-      printPhasePairs(temp);
-      for(auto p = temp.begin(); p != temp.end(); ) {
-        if(p->first == fcBodyInvVars) {
-          initCount++;
-          path.push_back(p->first);
-          path.push_back(p->second);
-          p = temp.erase(p);
-        }
-        else { p++; }
-      }
-      printPhasePairs(temp);
-      if(initCount != 1) {
-        path.clear();
-        return path;
-      }
-      while(!temp.empty()) {
-        for(auto& p : temp) {
-          for(auto& e: path) {
-            if(p.second == e) {
-              path.clear(); return path;
-            }
-          }
-          if(path.back() == p.first) {
-            path.push_back(p.second);
-            temp.erase(std::find(temp.begin(),temp.end(),p));
-          }
+    vector<ExprVector> paths;
+    bool sortPhases() {
+      ExprSet init;
+      for(auto & p : paths) {
+        if(p.first == fcBodyInvVars) {
+          init.insert(p.first);
         }
       }
-/*      for(int i = 0; i < phases.size(); i++) {
-        for(int j = i; j < phases.size(); j++) {
-          if(i == 0) {
-            Expr check = mk<AND>(fcBodyInvVars, phases[j]);
-            if(u.isSat(check)) {
-              Expr e = phases[0];
-              phases[0] = phases[j];
-              phases[j] = e;
-            }
-          }
-          else {
-            Expr check = mk<AND>(tr->body,phases[i-1],replaceAll(phases[j],invVars,invVarsPr));
-            if(!u.isSat(check)) {
-              Expr e = phases[i-1];
-              phases[i-1] = phases[j];
-              phases[j] = e;
-            }
-          }
-        }
+
+      // sanity check:
+      if (u.implies(fcBodyInvVars, disjoin(init, m_efac)))
+      {
+        if (debug) outs () << "Init cases gereral enough\n";
       }
-*/
-      printPath(path);
-      return path;
+      else
+        assert(0 && "something is wrong in the phase construction");
+
+      for (auto & in : init)
+      {
+        int len = paths.size();
+        for (int i = 1; i <= phasePairs.size() ; i++)
+          getAllPaths (in, mk<FALSE>(m_efac), i, {in}, paths);
+        assert (paths.size() > len && "No paths found\n");
+      }
+
+      for (auto & p : paths)
+      {
+        outs () << "Found path: ";
+        for (auto & pp : p)
+          outs () << pp << " -> ";
+        outs () << "\n";
+      }
+      return true;
+    }
+
+    void getCombs(ExprVector& elems, int pos, vector<ExprVector>& res)
+    {
+      if (pos == 0)
+      {
+        res = {{elems[0]}, {mkNeg(elems[0])}};
+      }
+      else
+      {
+        vector<ExprVector> res2;
+        for (auto comb : res)
+        {
+          comb.push_back(elems[pos]);
+          res2.push_back(comb);
+          comb.back() = mkNeg(elems[pos]);
+          res2.push_back(comb);
+        }
+        res = res2;
+      }
+      if (pos + 1 < elems.size())
+        getCombs(elems, pos+1, res);
     }
 
     void collectPhaseGuards() {
@@ -2832,6 +3025,7 @@ namespace ufo
       retrieveDeltas(ssa, srcVars, dstVars, cands);
 
       ExprVector vars2keep, prjcts, prjcts1, prjcts2;
+      ExprSet prjctsTmp;
       bool hasArray = false;
       for (int i = 0; i < srcVars.size(); i++)
         if (containsOp<ARRAY_TY>(srcVars[i]))
@@ -2858,24 +3052,59 @@ namespace ufo
             p = simplifyArithm(normalize(p));
     //        getConj(p, cands);
           }
-          prjcts.push_back(p);
+          // prjcts.push_back(p);
+          getConj(p, prjctsTmp);
           if (debug >= 2) outs() << "Generated MBP: " << p << "\n";
         }
 
+        prjcts.insert(prjcts.end(), prjctsTmp.begin(), prjctsTmp.end());
         u.removeRedundantConjunctsVec(prjcts);
-
-        for(auto& p: prjcts) {
-          phases.push_back(simplifyArithm(p));
+        for (auto it = prjcts.begin(); it != prjcts.end();)
+        {
+          bool toRem = false;
+          for (auto it2 = prjcts.begin(); it2 != it; ++it2)
+          {
+            if (u.isEquiv(*it, mkNeg(*it2)))
+            {
+              toRem = true;
+              break;
+            }
+          }
+          if (toRem)
+            it = prjcts.erase(it);
+          else
+            ++it;
         }
-        phasePairs = pairPhases();
+
+        if (debug >= 2)
+        {
+          outs() << "Split MBP: \n";
+          pprint(prjcts, 3);
+        }
+
+        vector<ExprVector> res;
+        getCombs(prjcts, 0, res);
+        for (auto & r : res)
+        {
+          phases.push_back(conjoin(r, m_efac));
+          outs () << "  comb: ";
+          pprint(r);
+          outs () << "\n";
+        }
+
+        pairPhases();
         if(debug >= 3) {
           outs() << "\n";
           for(auto& v: phasePairs) {
-            outs() << v.first << " --> " << v.second << "\n";
+            outs() << "  phpair: "<< v.first << " --> " << v.second << "\n";
           }
           outs() << "\n";
         }
-        sortPhases();
+        if (!sortPhases())
+        {
+          outs() << "Unsupported\n";
+          exit(1);
+        }
     }
 
     void parseForGuards() {
@@ -2884,16 +3113,17 @@ namespace ufo
       ExprVector projections, prjcts, vars2keep;
       Expr pc = ghostVars[0];
 
-      u.flatten(conjoin(candidates[specDecl],m_efac), prjcts, false, vars2keep, [](Expr a, ExprVector& b){return a;});
+      u.flatten(conjoin(candidates[specDecl], m_efac), prjcts, false, vars2keep, [](Expr a, ExprVector& b){return a;});
+
+      outs () << "flattening:  \n";
+      pprint(candidates[specDecl], 2);
 
       for(auto& p : prjcts) {
-        projections.push_back(replaceAll(p, fc->srcVars[0],invVars));
+        projections.push_back(replaceAll(p, fc->srcVars[0], invVars));
       }
       if(debug >= 3) {
         outs() << "\n   Projections\n=================\n";
-        for(auto& g : projections) {
-          outs() << "  " << g << "\n";
-        }
+        pprint(projections, 3);
         outs() << "=================\n";
       }
       ExprSet t,p,g;
@@ -2947,7 +3177,8 @@ namespace ufo
           {
             assert(0 && "ERROR: guards already assigned\n");
           }
-          grds2gh[conjoin(p,m_efac)] = join;
+          grds2gh[conjoin(p,m_efac)] = join->right();  // GF: DS
+          outs () << "   adding grds2gh: " << conjoin(p,m_efac) << " -> " << join << "\n";
         }
       }
       if(debug >= 3) { outs() << "End parsing for guards\n"; }
@@ -3114,7 +3345,7 @@ namespace ufo
       // Bubble sort because it's easy....
       for(int i = 0; i < v.size(); i++) {
         for(int j = i + 1; j < v.size(); j++) {
-          if(v[i]->right()->arity() > v[j]->right()->arity()) {
+          if(v[i]->left()->arity() > v[j]->left()->arity()) {
             Expr e = v[i];
             v[i] = v[j];
             v[j] = e;
@@ -3142,7 +3373,7 @@ namespace ufo
       for(auto& v : holdMPZ) bounds.push_back(normalize(v, ghostVars[0]));
     }
 
-    boost::tribool boundSolveRec(Expr block) {
+    boost::tribool boundSolveRec(Expr src, Expr dst, Expr block) {
       map<Expr,ExprSet> bounds;
       dataGrds.clear();
 
@@ -3154,19 +3385,44 @@ namespace ufo
         outs() << "  EXPLOREBOUNDS:  " << block << "\n";
         outs() << "=================\n";
       }
-      boost::tribool res = exploreBounds(bounds, block); // maybe hold previously computed bounds in a global ExprSet to avoid duplication.
-      ExprSet grds;
+
+      if (isOpX<FALSE>(dst))
+      {
+        grds2gh[src] = mkMPZ(0, m_efac);
+        return true;
+        // Expr pc = ghostVars[0];
+      }
+
+      boost::tribool res = exploreBounds(src, dst, bounds, block); // maybe hold previously computed bounds in a global ExprSet to avoid duplication.
+      if (res == false)
+      {
+        grds2gh[src] = grds2gh[dst];
+        return true;
+      }
+
+      ExprSet grds, grdsDst;
+      getConj(dst, grdsDst);
+      genCands(grdsDst, ghostVars[0]);
+      getConj(src, grds);
+      // genCandsImpl(grds, src, dst);   // this may be needed 
 
       if(dg) {
         for(auto& e: dataGrds) {
-          Expr w = implyWeakening(e);
+          // Expr w = implyWeakening(e);
 
-          if(debug >= 3) outs() << "Adding guard from data: " << w << "\n";
-          if(!isOpX<EQ>(w)) grds.insert(w);
-          if(w->arity() > 0 && isOpX<EQ>(w)) {
-            grds.insert(mk<GEQ>(w->left(),w->right()));
-            grds.insert(mk<LEQ>(w->left(),w->right()));
+          ExprSet vars;
+          filter (e, bind::IsConst (), inserter (vars, vars.begin()));
+
+          if(isOpX<EQ>(e) && !hasMPZ(e) && vars.size() > 1)
+          {
+            grds.insert(e);
+            if(debug >= 3)
+              outs() << "Adding guard from data: " << e << "\n";
           }
+          // if(w->arity() > 0 && isOpX<EQ>(w)) {
+          //   grds.insert(mk<GEQ>(w->left(),w->right()));
+          //   grds.insert(mk<LEQ>(w->left(),w->right()));
+          // }
         }
       }
       if(debug >= 2) for(auto& e: grds) outs() << "  grd: " << e << "\n";
@@ -3188,7 +3444,7 @@ namespace ufo
           boundsV.push_back(e);
       sortBounds(boundsV);
 
-      if(debug >= 2) {
+      if(debug >= 2) {  //GF
         outs() << "\nBounds found this iteration\n";
         for(auto& e: boundsV) {
           outs() << "  " << e << "\n";
@@ -3198,7 +3454,7 @@ namespace ufo
       for(auto b = boundsV.begin(), end = boundsV.end(); b != end && res; b++) {
         candidates.clear();
 
-        checkForMerge(*b, grds, grds2gh);
+        // checkForMerge(*b, grds, grds2gh);
 
         if(rerun) {
           if(debug >= 2) outs() << "RERUN\n=====\n";
@@ -3210,29 +3466,35 @@ namespace ufo
         }
         else {
           for(auto& e: grds) { // insert the data guards.
-          //  candidates[specDecl].insert(replaceAll(e, tr->srcVars[0], fc->srcVars[0]));
+            candidates[specDecl].insert(replaceAll(e, tr->srcVars[0], fc->srcVars[0]));
             candidates[invDecl].insert(e);
           }
         }
-      //  candidates[specDecl].insert(replaceAll(*b, tr->srcVars[0], fc->srcVars[0]));
+        candidates[specDecl].insert(replaceAll(*b, tr->srcVars[0], fc->srcVars[0]));
         candidates[invDecl].insert(*b);
 
         if(debug >= 2) outs() << "\n- - - b: " << *b << "\n\n";
 
-        if(debug >= 2) {
-          outs() << "Cands going to G&S\n";
-          outs() << "==================\n";
-          printCandsEx(true);
-          outs() << "==================\n";
-        }
+        //
+        // if(debug >= 2) {
+        //   outs() << "Cands going to G&S\n";
+        //   outs() << "==================\n";
+        //   printCandsEx(true);
+        //   outs() << "==================\n";
+        // }
 
-        Result_t res_t = guessAndSolve();
+        Result_t res_t = elba(grdsDst,
+          mk<AND>(src, replaceAll(src, tr->srcVars[0], fc->srcVars[0])), dst);
+
+        // Result_t res_t = guessAndSolve();
+
+
         //u.removeRedundantConjuncts(candidates[invDecl]);
         //u.removeRedundantConjuncts(candidates[specDecl]);
         if(debug >= 2) {
-        outs() << "==================\n";
-        printCands(false);
-        outs() << "==================\n";
+          outs() << "==================\n";
+          printCandsEx();
+          outs() << "==================\n";
         }
 
         if(res_t == Result_t::UNKNOWN) {
@@ -3248,22 +3510,24 @@ namespace ufo
           }
           if(debug >= 2) outs() << "=====> unknown\n\n";
           if(std::next(b) == end) {
-            if(phaseNum < phases.size()) boundSolveRec(mk<TRUE>(m_efac));
+            if(phaseNum < phases.size())
+              boundSolveRec(src, dst, mk<TRUE>(m_efac));
           }
           continue;
         }
 
         // If you're here then G&S returned UNSAT
+        // Yes, I'm here.
         if(debug >= 2) outs() << "=====> unsat\n\n";
         rerun = false;
 
         parseForGuards(); // Associates guards (pre(Vars)) with Expr gh = f()
                                  // They are stored in grds2gh map.
 
-        if(debug >= 3) {
+        if(debug >= 2) {
           outs() << "\n    Guards\n==============\n";
           for(auto& g: grds2gh) {
-            outs() << g.first << "\n";
+            outs() << " : " << g.first << "\n";
           }
           outs() << "==============\n";
         }
@@ -3271,12 +3535,16 @@ namespace ufo
         // end of parsing guards.
         ExprSet grds2;
         for(auto& g: grds2gh) {
-          grds2.insert(g.first);
+          if (u.implies(g.first, src))
+            grds2.insert(g.first);
         }
         Expr grd = disjoin(grds2,m_efac);
         if(debug >= 4) outs() << "grd: " << grd << "\n";
-        if(u.isSat(mkNeg(grd), fcBodyInvVars, loopGuard)) {
-          if(boundSolveRec(mkNeg(grd))) {
+        outs () << "  >>> term?  " << mkNeg(grd) << "  /\\ "  << src << "\n";
+        if(u.isSat(mkNeg(grd), src)) {
+          outs () << "sat:\n";
+          outs () << u.getModel() << "\n";
+          if(boundSolveRec(src, dst, mkNeg(grd))) {
             return true;
           }
         }
@@ -3288,27 +3556,70 @@ namespace ufo
       return false;
     }
 
-    void boundSolve()
+    void boundSolve(Expr src, Expr dst)
     {
+      outs () << "boundSolve: " << src << " -> " << dst << "\n";
       Expr block = mk<TRUE>(m_efac);
-      if(boundSolveRec(block)) {
-        u.removeRedundantConjuncts(candidates[invDecl]);
-        u.removeRedundantConjuncts(candidates[specDecl]);
-        outs() << "unsat\n";
-        printGhSoln();
-        if(printGsSoln) printCands(true,candidates);
+      if(boundSolveRec(src, dst, block)) {
+        // u.removeRedundantConjuncts(candidates[invDecl]);
+        // u.removeRedundantConjuncts(candidates[specDecl]);
+        // outs() << "unsat\n";
+        // printGhSoln();
+        // if(printGsSoln) printCands(true,candidates);
       }
       else {
         candidates.clear();
-        if(false){//guessAndSolve() == Result_t::UNSAT) {
-          outs() << "G&S: unsat\n";
-          u.removeRedundantConjuncts(candidates[invDecl]);
-          u.removeRedundantConjuncts(candidates[specDecl]);
-          printGhSoln();
-          if(printGsSoln) printCands(true,candidates);
-        }
-        else outs() << "unknown\n";
+        // if(false){//guessAndSolve() == Result_t::UNSAT) {
+        //   outs() << "G&S: unsat\n";
+        //   u.removeRedundantConjuncts(candidates[invDecl]);
+        //   u.removeRedundantConjuncts(candidates[specDecl]);
+        //   printGhSoln();
+        //   if(printGsSoln) printCands(true,candidates);
+        // }
+        // else
+        outs() << "unknown\n";
       }
+    }
+
+    void pathsSolve()
+    {
+      ExprSet finals;
+      for (auto & p : paths)
+      {
+        outs () << "   - - - - - next path - - - - -\n";
+        for (auto & pp : p)
+          outs () << pp << " -> ";
+        outs () << "\n";
+        outs () << "   - - - - - - - - - - - - - - -\n";
+
+        assert(p.size() > 1);
+        Expr res;
+        int i;
+        for (i = p.size() - 2; i >= 0; i--)
+        {
+          if (isOpX<TRUE>(p[i])) break; // hack for now
+          boundSolve(p[i], p[i+1]);
+
+          res = NULL;
+          ExprSet pre;
+          for(auto& g: grds2gh)
+          {
+            if (u.implies(g.first, p[i]))
+            {
+              pre.insert(g.first);
+              if (res == NULL) res = g.second;
+              else res = mk<ITE>(g.first, g.second, res);   // GF
+            }
+          }
+          stren[p[i]] = simplifyBool(distribDisjoin(pre, m_efac));
+          if (i != 0) grds2gh[p[i]] = res;
+        }
+        finals.insert(mk<IMPL>(stren[p[i + 1]], mk<EQ>(ghostVars[0], res)));
+        grds2gh.clear();
+        stren.clear();
+      }
+      outs () << "FINAL:\n";
+      pprint(finals, 5);
     }
 
     void maximalSolve (bool useGAS = true, bool usesygus = false, bool useUC = false, bool fixCRels = false)
@@ -3478,7 +3789,7 @@ namespace ufo
     }
 
     spec.collectPhaseGuards();
-    spec.boundSolve();
+    spec.pathsSolve();
   };
 }
 
