@@ -32,8 +32,20 @@ namespace ufo
       vector<double> e2 = *ritr;
       ExprVector ev;
 
-      // make Exprs.
       int n = invVars[srcRel].size();
+      // make Exprs.
+      /* To make x_i - x_j = gh if they are equal values in the last entry of the matrix.
+      for(int i = 0; i < n-1; i++) {
+        for(int j = i + 1; j < n-1; j++) {
+          if(e1[i]==e1[j]) {
+            Expr r2 = mk<MINUS>(invVars[srcRel][i], invVars[srcRel][j]);
+            dc[srcRel].insert(mk<EQ>(invVars[srcRel][n-1], r2));
+            r2 = mk<MINUS>(invVars[srcRel][j], invVars[srcRel][i]);
+            dc[srcRel].insert(mk<EQ>(invVars[srcRel][n-1], r2));
+          }
+        }
+      }
+      */
       for(int i = 0; i < n; i++) {
         for(int j = i + 1; j < n; j++) {
           Expr r1,r2,l1,l2,l,r;

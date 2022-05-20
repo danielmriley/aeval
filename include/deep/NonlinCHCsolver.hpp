@@ -2956,7 +2956,7 @@ namespace ufo
       // sanity check:
       if (u.implies(fcBodyInvVars, disjoin(init, m_efac)))
       {
-        if (debug) outs () << "Init cases gereral enough\n";
+        if (debug) outs () << "Init cases general enough\n";
       }
       else
         assert(0 && "something is wrong in the phase construction");
@@ -3628,6 +3628,7 @@ namespace ufo
         grds2gh.clear();
         stren.clear();
       }
+      outs() << "Number of paths found: " << paths.size() << "\n";
       outs () << "FINAL:\n";
       pprint(finals, 5);
     }
@@ -3795,7 +3796,7 @@ namespace ufo
     }
     else {
       outs() << "Unsupported format\n";
-      assert(0);
+      return;
     }
 
     spec.collectPhaseGuards();
