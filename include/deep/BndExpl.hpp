@@ -29,20 +29,20 @@ namespace ufo
     ExprVector srcVars;
     int invIndex;
 
-    bool debug;
+    int debug;
 
     public:
 
     map<Expr, ExprSet> concrInvs;
 
-    BndExpl (CHCs& r, bool dbg = false) :
+    BndExpl (CHCs& r, int dbg = 0) :
       m_efac(r.m_efac), ruleManager(r), u(m_efac), debug(dbg)
     {
       invExpr = r.invRel;
       srcVars = r.invVars[invExpr];
     }
 
-    BndExpl (CHCs& r, Expr lms, bool dbg = false) :
+    BndExpl (CHCs& r, Expr lms, int dbg = 0) :
       m_efac(r.m_efac), ruleManager(r), u(m_efac), extraLemmas(lms), debug(dbg)
     {
       invExpr = r.invRel;
@@ -559,7 +559,7 @@ namespace ufo
           int k = 10)
     {
       assert (gh_cond != NULL);
-      if(debug) {
+      if(debug >= 1) {
         outs() << "Exploring execution of " << srcRel << "\n";
       }
 
@@ -571,7 +571,7 @@ namespace ufo
       //outs() << "cycles.size(): " << ruleManager.cycles.size() << "\n";
       for (int cyc = 0; cyc < ruleManager.cycles.size(); cyc++)
       {
-        //if(debug) outs() << "cycle: " << cyc << "\n";
+        //if(debug >= 1) outs() << "cycle: " << cyc << "\n";
         vector<int> mainInds;
         vector<int> arrInds;
         auto & loop = ruleManager.cycles[cyc];
@@ -751,7 +751,7 @@ namespace ufo
           int k = 2)
     {
       assert (gh_cond != NULL);
-      if(debug) {
+      if(debug >= 1) {
         outs() << "Exploring execution of " << srcRel << "\n";
       }
 
@@ -763,7 +763,7 @@ namespace ufo
       //outs() << "cycles.size(): " << ruleManager.cycles.size() << "\n";
       for (int cyc = 0; cyc < ruleManager.cycles.size(); cyc++)
       {
-        //if(debug) outs() << "cycle: " << cyc << "\n";
+        //if(debug >= 1) outs() << "cycle: " << cyc << "\n";
         vector<int> mainInds;
         vector<int> arrInds;
         auto & loop = ruleManager.cycles[cyc];
@@ -846,7 +846,7 @@ namespace ufo
           // {
           //   if (trace.size() == traceSz)
           //   {
-          //     if(debug) outs() << "Reducing ssa size\n";
+          //     if(debug >= 1) outs() << "Reducing ssa size\n";
           //     trace.pop_back();
           //     ssa.pop_back();
           //     ssa.pop_back(); // remove the gh conds

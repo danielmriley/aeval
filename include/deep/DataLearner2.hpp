@@ -34,7 +34,7 @@ namespace ufo
 
       int n = invVars[srcRel].size();
       // make Exprs.
-      /* To make x_i - x_j = gh if they are equal values in the last entry of the matrix.
+      /*
       for(int i = 0; i < n-1; i++) {
         for(int j = i + 1; j < n-1; j++) {
           if(e1[i]==e1[j]) {
@@ -125,7 +125,7 @@ namespace ufo
         }
         else
         {
-          if(debug) outs () << "BMC formula unsat\n";
+          if(debug >= 1) outs () << "BMC formula unsat\n";
         }
         return res;
       }

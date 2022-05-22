@@ -337,7 +337,7 @@ namespace ufo
       setUpTr();
       setUpQr();
 
-      if(debug) ruleManager.print();
+      if(debug >= 1) ruleManager.print();
 
       return true;
     }
@@ -2956,7 +2956,7 @@ namespace ufo
       // sanity check:
       if (u.implies(fcBodyInvVars, disjoin(init, m_efac)))
       {
-        if (debug) outs () << "Init cases general enough\n";
+        if (debug >= 3) outs () << "Init cases general enough\n";
       }
       else
         assert(0 && "something is wrong in the phase construction");
@@ -2978,6 +2978,8 @@ namespace ufo
           outs () << "\n";
         }
       }
+      if(debug >= 3 || debug == -1)
+        outs() << "# of paths " << paths.size() << "\n";
 
       return true;
     }
@@ -3628,7 +3630,6 @@ namespace ufo
         grds2gh.clear();
         stren.clear();
       }
-      outs() << "Number of paths found: " << paths.size() << "\n";
       outs () << "FINAL:\n";
       pprint(finals, 5);
     }
