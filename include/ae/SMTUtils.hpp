@@ -627,6 +627,24 @@ namespace ufo
       return conjoin(cnjs, efac);
     }
 
+    inline static string varType (Expr var)
+    {
+      if (bind::isIntConst(var))
+        return "Int";
+      else if (bind::isRealConst(var))
+        return "Real";
+      else if (bind::isBoolConst(var))
+        return "Bool";
+      else if (bind::isConst<ARRAY_TY> (var))
+      {
+        Expr name = mkTerm<string> ("", var->getFactory());
+        Expr s1 = bind::mkConst(name, var->last()->right()->left());
+        Expr s2 = bind::mkConst(name, var->last()->right()->right());
+        return string("(Array ") + varType(s1) + string(" ") + varType(s2) + string(")");
+      }
+      else return "";
+    }
+
     void print (Expr e, std::ostream& out = outs())
     {
       if (isOpX<FORALL>(e) || isOpX<EXISTS>(e))

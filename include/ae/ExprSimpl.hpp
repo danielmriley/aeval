@@ -2301,6 +2301,16 @@ namespace ufo
     return fla;
   }
 
+  bool hasMPZ(Expr e)
+  {
+    if (!isOp<ComparissonOp>(e)) return false; // unknown
+
+    ExprVector all;
+    getAddTerm(mk<MINUS>(e->left(), e->right()), all);
+    for (auto &a : all) if (isOpX<MPZ>(a)) return true;
+    return false;
+  }
+
   /* find expressions of type expr = arrayVar in e and store it in output */
   inline static void getArrayEqualExprs(Expr e, Expr arrayVar, ExprVector & output)
   {
@@ -3495,6 +3505,34 @@ namespace ufo
     return disjoin(newDsjs, efac);
   }
 
+  cpp_int gcd(cpp_int x, cpp_int y)
+  {
+    if(x == 0) return y;
+    return gcd(y % x, x);
+  }
+
+  cpp_int gcd(vector<cpp_int> v)
+  {
+    cpp_int res = 0;
+    if(!v.empty()) {
+      res = v[0];
+      for(int i = 1; i < v.size(); i++) {
+        res = gcd(v[i],res);
+        if(res == 1) return res;
+      }
+    }
+    return res;
+  }
+
+  void simplifyVec(vector<cpp_int>& v, cpp_int g)
+  {
+    if(!v.empty()) {
+      for(int i = 0; i < v.size(); i++) {
+        v[i] = v[i] / g;
+      }
+    }
+  }
+
   inline static Expr normalizeAtom(Expr fla, ExprVector& intVars)
   {
     if (isOp<ComparissonOp>(fla) && isNumeric(fla->left()))
@@ -3621,6 +3659,121 @@ namespace ufo
     return fla;
   }
 
+  // follows similar procedure to normalizeAtom above but will set the lhs to lhsVar
+  // and the rhs to the remaining expr.
+  inline static Expr normalizeAtom(Expr fla, ExprVector& intVars, Expr lhsVar )
+    {
+      // Handles cases of lhsVar being specified and when one is not specified.
+      // Normalizes with consts on the RHS in all cases except when lhsVar coefs add to zero.
+      // then the form is 0 = ...
+      fla = simplifyArithm(fla);
+      if (isOp<ComparissonOp>(fla) && isNumeric(fla->left()))
+      {
+        Expr lhs = fla->left();
+        Expr rhs = fla->right();
+        bool nullvar = false;
+
+        if(lhsVar == 0) {
+          nullvar = true;
+          lhsVar = mkMPZ(0, fla->getFactory());
+          lhs = mk<PLUS>(lhs, lhsVar);
+      }
+
+        bool onLhs = contains(lhs,lhsVar);
+        bool onRhs = contains(rhs,lhsVar);
+        if(!onLhs && !onRhs) return normalizeAtom(fla,intVars);
+
+        ExprVector lhsVec;
+        ExprVector all;
+        getAddTerm(lhs, lhsVec);
+        getAddTerm(rhs, all);
+
+        for(auto& a: lhsVec) {
+          all.push_back(additiveInverse(a));
+        }
+
+        vector<cpp_int> coefs;
+        map<Expr,cpp_int> allMap;
+        for(auto& e: all) {
+          cpp_int c = 1;
+          if (isOpX<MPZ>(e))
+          {
+            c = c * lexical_cast<cpp_int>(e);
+            allMap[mkMPZ(0,fla->getFactory())] += c;
+          }
+          else if(isOpX<MULT>(e)) {
+            ExprVector ops;
+            getMultOps (e, ops);
+            for (auto & a : ops) {
+              if (isOpX<MPZ>(a))
+              {
+                c = c * lexical_cast<cpp_int>(a);
+                if(isOpX<MPZ>(e->right())) allMap[mkMPZ(0,fla->getFactory())] += c;
+                else allMap[e->right()] += c;
+              }
+            }
+          }
+          else if(isOpX<UN_MINUS>(e)) {
+            allMap[additiveInverse(e)] += -1;
+          }
+          else {
+            allMap[e] += 1;
+          }
+        }
+
+        coefs.clear();
+        for(auto& e : allMap) coefs.push_back(e.second);
+        cpp_int g = gcd(coefs);
+        if(g > 1) simplifyVec(coefs,g);
+        int w = 0;
+        for(auto& e: allMap) {
+          e.second = coefs[w];
+          w++;
+        }
+
+        if(allMap[lhsVar] > 0 && !nullvar) {
+          for(auto& e : allMap) {
+            e.second = e.second * -1;
+          }
+        }
+        ExprVector newRhs, newLhs;
+        for(auto& e: allMap) {
+          if(e.first == lhsVar && !nullvar) {
+            if(e.second == 0) { // LHS needs to have an Expr so set it to zero.
+              newLhs.push_back(mkMPZ(0,fla->getFactory()));
+            }
+            else {
+              (e.second == 1) ? newLhs.push_back(additiveInverse(e.first))
+                : newLhs.push_back(additiveInverse(mk<MULT>(mkMPZ(e.second,fla->getFactory()), e.first)));
+            }
+          }
+          else if(find(intVars.begin(), intVars.end(), e.first) != intVars.end()) {
+            if(e.second == 0) {continue;}
+            (e.second == 1) ? newRhs.push_back(e.first)
+              : newRhs.push_back(mk<MULT>(mkMPZ(e.second,fla->getFactory()), e.first));
+          }
+          else {
+            assert(e.first == mkMPZ(0,fla->getFactory()));
+            if(nullvar) {
+              newLhs.push_back(mkMPZ(-e.second,fla->getFactory()));
+            }
+            else {
+              newRhs.push_back(mkMPZ(e.second,fla->getFactory()));
+            }
+          }
+        }
+        if(newRhs.size() == 0) {
+          newRhs.push_back(mkMPZ(0,fla->getFactory()));
+        }
+        Expr r = (newRhs.size() == 1) ? *newRhs.begin(): mknary<PLUS>(newRhs);
+        Expr l = (newLhs.size() == 1) ? *newLhs.begin(): mknary<PLUS>(newLhs);
+
+        if(nullvar) return reBuildCmp(fla,additiveInverse(r),additiveInverse(l));
+        else return reBuildCmp(fla,l,r);
+      }
+      return fla;
+    }
+
   inline static Expr normalizeDisj(Expr exp, ExprVector& intVars)
   {
     ExprSet disjs;
@@ -3633,6 +3786,23 @@ namespace ufo
       if (!isOpX<FALSE>(norm)) newDisjs.insert(norm);
     }
     return disjoin(newDisjs, exp->getFactory());
+  }
+
+  inline static Expr normalize(Expr fla, Expr lhsVar)
+  {
+    ExprVector vars;
+    filter (fla, IsConst (), inserter(vars, vars.begin()));
+    if (isOpX<AND>(fla) || isOpX<OR>(fla))
+    {
+      ExprSet args;
+      for (int i = 0; i < fla->arity(); i++){
+        args.insert(normalizeAtom(fla->arg(i), vars, lhsVar));
+      }
+
+      return simplifyBool(isOpX<AND>(fla) ? conjoin (args, fla->getFactory()) :
+        disjoin (args, fla->getFactory()));
+    }
+    return normalizeAtom(fla, vars, lhsVar);
   }
 
   inline static Expr normalize(Expr fla)

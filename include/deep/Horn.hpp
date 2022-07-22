@@ -71,6 +71,7 @@ namespace ufo
     vector<vector<int>> prefixes, cycles;  // for cycles
     map<Expr, bool> hasArrays;
     bool hasAnyArrays, hasBV = false;
+    bool hasQuery = false;
     int debug;
     set<int> chcsToCheck1, chcsToCheck2, toEraseChcs;
     int glob_ind = 0;
@@ -323,6 +324,7 @@ namespace ufo
 
         hr.isFact = isOpX<TRUE>(hr.srcRelation);
         hr.isQuery = (hr.dstRelation == failDecl);
+        if(hr.isQuery) hasQuery = true;
         hr.isInductive = (hr.srcRelation == hr.dstRelation);
 
         origDstSymbs = hr.dstVars;
@@ -399,7 +401,7 @@ namespace ufo
         if ((*it)->isQuery) it = dwtoCHCs.erase(it);
           else ++it;
 
-      if (debug >= 0)
+      if (debug >= 1)
       {
         outs () << (doElim ? "  Simplified " : "  Parsed ") << "CHCs:\n";
         print(debug >= 3, true);

@@ -849,6 +849,130 @@ namespace ufo
 
       return res;
     }
+
+    boost::tribool unrollAndExecuteTermPhase(
+          Expr src, Expr dst,
+          Expr srcRel,
+          ExprVector& dtVars,
+  			  vector<vector<double> >& models,
+          Expr gh_cond, // Expr invs, Expr preCond,
+          int k = 2)
+    {
+      assert (gh_cond != NULL);
+      if(debug >= 1) {
+        outs() << "Exploring execution of " << srcRel << "\n";
+      }
+
+      // helper var
+      string str = to_string(numeric_limits<double>::max());
+      str = str.substr(0, str.find('.'));
+      cpp_int max_double = lexical_cast<cpp_int>(str);
+
+      for (int cyc = 0; cyc < ruleManager.cycles.size(); cyc++)
+      {
+        vector<int> mainInds;
+        vector<int> arrInds;
+        auto & loop = ruleManager.cycles[cyc];
+        if (srcRel != ruleManager.chcs[loop[0]].srcRelation) continue;
+        if (models.size() > 0) continue;
+        ExprVector& srcVars = ruleManager.chcs[loop[0]].srcVars;
+
+        ExprVector vars;
+        for (int i = 0; i < srcVars.size(); i++)
+        {
+          Expr var = srcVars[i];
+          if (bind::isIntConst(var))
+          {
+            mainInds.push_back(i);
+            vars.push_back(var);
+          }
+          else if (isConst<ARRAY_TY> (var) && ruleManager.hasAnyArrays)
+          {
+            /*
+            Expr v = findSelect(loop[0], i);
+            if (v != NULL)
+            {
+              vars.push_back(v);
+              mainInds.push_back(-i - 1);  // to be on the negative side
+  //              varsMask.push_back(srcVars[i]);
+            }*/
+          }
+        }
+        if (vars.size() < 2 && cyc == ruleManager.cycles.size() - 1)
+          continue; // does not make much sense to run with only one var when it is the last cycle
+        dtVars = vars;
+
+        auto & prefix = ruleManager.prefixes[cyc];
+        vector<int> trace;
+        int l = 0;                        // starting index (before the loop)
+        if (ruleManager.hasAnyArrays) l++; // first iter is usually useless
+
+        if(isOpX<TRUE>(gh_cond)) trace.push_back(0);
+        for (int j = 0; j < k; j++)
+          for (int m = 0; m < loop.size(); m++)
+            trace.push_back(loop[m]);
+
+        ExprVector ssa;
+        ssa.push_back(src);
+        getSSA(trace, ssa);
+        ssa.push_back(replaceAll(dst, srcVars, bindVars[bindVars.size() - 1]));
+
+        int traceSz = trace.size();
+        // compute vars for opt constraint
+        vector<ExprVector> versVars;
+        ExprSet allVars;
+        ExprVector diseqs;
+        fillVars(srcRel, srcVars, vars, l, loop.size(), mainInds, versVars, allVars);
+        bool toContinue = false;
+        bool noopt = true;
+
+        if (!u.isSat(ssa)) return false;
+
+        ExprMap allModels;
+        u.getModel(allVars, allModels);
+
+        ExprSet gh_condVars;
+        set<int> gh_condVarsIndex; // Get gh_cond vars here
+        filter(gh_cond, bind::IsConst(), inserter(gh_condVars, gh_condVars.begin()));
+        for (auto & a : gh_condVars)
+          gh_condVarsIndex.insert(getVarIndex(a, srcVars));
+
+        if (debug) outs () << "\nUnroll and execute the cycle for " <<  srcRel << " and cond " << gh_cond <<"\n";
+        for (int j = 0; j < versVars.size(); j++)
+        {
+          if(j >= trace.size()) break;
+          if (debug) outs () << "  model for " << j+1 << ":\t[";
+          bool toSkip = false;
+          vector<double> model;
+          for (int i = 0; i < vars.size(); i++) {
+            Expr bvar = versVars[j][i];
+            Expr m = allModels[bvar];
+            double value;
+            if (m != NULL && isOpX<MPZ>(m))
+            {
+              if (lexical_cast<cpp_int>(m) > max_double ||
+                  lexical_cast<cpp_int>(m) < -max_double)
+              {
+                toSkip = true;
+                break;
+              }
+              value = lexical_cast<double>(m);
+            }
+            else
+            {
+              toSkip = true;
+              break;
+            }
+            model.push_back(value);
+            if (debug) outs () << *bvar << " = " << *m << ", ";
+          }
+          if (!toSkip) models.push_back(model);
+          if (debug) outs () << "\b\b]\n";
+        }
+      }
+
+      return true;
+    }
   };
 
   inline void unrollAndCheck(string smt, int bnd1, int bnd2, int to, bool skip_elim, int debug)
