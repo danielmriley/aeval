@@ -3675,7 +3675,7 @@ namespace ufo
 
         if(lhsVar == 0) {
           nullvar = true;
-          lhsVar = mkMPZ(0, fla->getFactory());
+          lhsVar = mkMPZ(0, fla->getFactory()); // should have type associated with it INT.
           lhs = mk<PLUS>(lhs, lhsVar);
       }
 

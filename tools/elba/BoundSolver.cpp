@@ -90,7 +90,7 @@ int main (int argc, char ** argv)
   bool newenc = getBoolValue("--newenc", false, argc, argv);
   bool fixcrel = getBoolValue("--fixcrel", false, argc, argv);
   int debug = getIntValue("--debug", 0, argc, argv);
-  bool useDataGrds = getBoolValue("--data-guards", false, argc, argv);
+  bool useDataGrds = !getBoolValue("--data-guards", false, argc, argv);
   bool data2 = getBoolValue("--data2", false, argc, argv);
   bool doPhases = getBoolValue("--phase-data", false, argc, argv);
 

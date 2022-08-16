@@ -42,8 +42,8 @@ namespace ufo
     bool hasArrays = false;
 
     string specName = "pre";
-    string varName = "ST_";
-    string ghostVar_pref = "gh_";
+    string varName = "_FH_";
+    string ghostVar_pref = "_gh_";
     Expr specDecl;
     ExprVector ghostVars;
     ExprVector ghostVarsPr;
@@ -90,9 +90,7 @@ namespace ufo
         else fc = &a;
       tr_orig = *tr;
       for(auto& dcl: ruleManager.decls) decls.push_back(dcl->left());
-      for(auto& d: ruleManager.decls) outs() << "dcl: " << d << "\n";
       invDecl = tr->srcRelation;
-      if(debug >= 2) outs() << "invDecl constructor: " << invDecl << "\n";
       invVars = tr->srcVars;
       invVarsPr = tr->dstVars;
       invVarsSz = invVars.size();
@@ -268,7 +266,7 @@ namespace ufo
         else if (a.isQuery) qr = &a;
       tr_orig = *tr;
 
-      invDecl = tr->srcRelation; // Need to handle multiple loops, so this can't just be assigned in this way.
+      invDecl = tr->srcRelation; // Need to handle multiple loops, so this can't be assigned in this way.
       invVars = tr->srcVars;
       invVarsPr = tr->dstVars;
       invVarsSz = invVars.size();
@@ -435,7 +433,6 @@ namespace ufo
          a.second.insert(tmp.begin(), tmp.end());
        }
      }
-//     vacCheck(candidates); // The vacuity check is now done in the path finding.
     }
 
     // adapted from RndLearnerV3
@@ -992,7 +989,7 @@ namespace ufo
         if(debug >= 3) outs() << "PROGRAM WILL NEVER ENTER LOOP\n";
         return true;
       }
-      if(debug >= 2) {
+      if(debug >= 3) {
         outs() << "  EXPLOREBOUNDS:  " << block << "\n";
         outs() << "=================\n";
       }
@@ -1050,7 +1047,7 @@ namespace ufo
         candidates.clear();
 
         if(rerun) {
-          if(debug >= 2) outs() << "RERUN\n=====\n";
+          if(debug >= 3) outs() << "RERUN\n=====\n";
           b--;
           for(auto& e: fgrds2gh) {
             candidates[invDecl].insert(e.first);
@@ -1144,6 +1141,7 @@ namespace ufo
       if(boundSolveRec(src, dst, block)) { /* Success! */ }
       else {
         outs() << "unknown\n";
+        exit(0);
       }
     }
 
@@ -1221,11 +1219,11 @@ namespace ufo
     ruleManager.parse(smt);
     BoundSolver spec(ruleManager, stren, dg, data2, doPhases, debug);
     if(!ruleManager.hasQuery) {
-      if(debug >= 2) ruleManager.print(true);
-      if(ruleManager.chcs.size() > 2) {
+      if(debug >= 4) ruleManager.print(true);
+      if(debug >= 4 && ruleManager.decls.size() > 1) {
         outs() << "Multiple loops\n";
       }
-      else {
+      else if(debug >= 4) {
         outs() << "Single loop\n";
       }
       spec.setUpQueryAndSpec();
@@ -1237,7 +1235,7 @@ namespace ufo
     }
 
     spec.collectPhaseGuards();
-    spec.printPhases();
+    if(debug >= 2) spec.printPhases();
     spec.pathsSolve();
   }
 }
