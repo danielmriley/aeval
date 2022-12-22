@@ -534,21 +534,20 @@ namespace ufo
         ExprVector diseqs;
         fillVars(srcRel, srcVars, vars, l, loop.size(), mainInds, versVars, allVars);
         getOptimConstr(versVars, vars.size(), srcVars, constr, phaseGuard, diseqs);
-
         Expr cntvar = bind::intConst(mkTerm<string> ("_FH_cnt", m_efac));
         allVars.insert(cntvar);
         allVars.insert(bindVars.back().begin(), bindVars.back().end());
         ssa.push_back(mk<EQ>(cntvar, mkplus(diseqs, m_efac)));
 
         auto res = u.isSat(ssa);
+
         if (indeterminate(res) || !res)
         {
           if (debug) outs () << "Unable to solve the BMC formula for " <<  srcRel << " and phase guard " << phaseGuard <<"\n";
-          continue;
+          return false;
         }
         ExprMap allModels;
         u.getOptModel<GT>(allVars, allModels, cntvar);
-
         ExprSet phaseGuardVars;
         set<int> phaseGuardVarsIndex; // Get phaseGuard vars here
         filter(phaseGuard, bind::IsConst(), inserter(phaseGuardVars, phaseGuardVars.begin()));

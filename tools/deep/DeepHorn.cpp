@@ -114,13 +114,13 @@ int main (int argc, char ** argv)
         "V3 and V4 options:\n" <<
         " " << OPT_DATA_LEARNING << " <N>                      bootstrap candidates from behaviors (0: no, NUM: rounds)\n" <<
         "                                 (if \"" << OPT_DISJ <<"\" is enabled, then default is 1; otherwise, 0)\n\n" <<
-        " " << OPT_MUT << "                           level of mutation for bootstrapped candidates (0: no, 1: (default), 2: full)\n" <<
+        " " << OPT_MUT << "                           level of mutation for bootstrapped candidates (0: no, 1: yes (default), 2: full)\n" <<
         " " << OPT_SEED << "                   do not analyze syntax for seeds mining, except of the query\n" <<
         "                                 (thus, will disable quantified invariants)\n" <<
         " " << OPT_PROP << " <N>                      rounds of candidate propagation before bootstrapping\n" <<
         "                                 (if \"" << OPT_DISJ <<"\" is enabled, then default is 1; otherwise, 0)\n\n" <<
         "ImplCheck (V4) options only (\"" << OPT_DATA_LEARNING << "\" will be enabled automatically):\n" <<
-        " " << OPT_MBP << "                       break equalities while MBP generation (0: no (default), 1: yes, 2: both)\n" <<
+        " " << OPT_MBP << "                       break equalities while MBP generation (0: no, 1: yes (default), 2: both)\n" <<
         " " << OPT_REC << "                            weaken and recycle data candidates\n" <<
         " " << OPT_DISJ << "                          generate disjunctive invariants\n" <<
         " " << OPT_D1 << "                       search for phases among all MBPs\n" <<

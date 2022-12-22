@@ -974,6 +974,7 @@ namespace ufo
         for (int i = 0; i < dat; i++)
         {
           if (!dl.computeData(m, constr)) break;
+          ExprSet c;
           poly.push_back(map<Expr, ExprSet>());
           for (auto & dcl : decls)
           {

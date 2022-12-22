@@ -2,6 +2,7 @@
 #define RNDLEARNERV4__HPP__
 
 #include "RndLearnerV3.hpp"
+#include "DataLearnerToo.hpp"
 
 using namespace std;
 using namespace boost;
@@ -275,6 +276,56 @@ namespace ufo
         for (bool dir : {true, false})
           if (dFwd == dir || dFwd == 2)
             annotateDT(invNum, rel, cnd, c.first, c.second, srcVars, dstVars, dir);
+    }
+
+    void getDataCandidates(map<Expr, ExprSet>& cands, Expr srcRel,
+        Expr phaseGuard = NULL, Expr invs = NULL, bool fwd = true) {
+      DataLearnerToo dltoo(ruleManager, m_z3, printLog);
+      map<Expr, ExprVector> m;
+      getArrRanges(m);
+      map<Expr, ExprSet> constr;
+      
+      // needs to be wrapped in a loop for the # of dat flag.
+      if(phaseGuard == NULL) {
+        // DLTOO should be changed to make one call to bndexpl rather than two, which is what it does here.
+        dltoo.computeData(srcRel,m,constr);
+        //dltoo.connectPhase(srcRel, mk<TRUE>(m_efac), invs, fwd, constr[srcRel]);
+      }
+      else {
+        // DLTOO should be changed to make one call to bndexpl rather than two, which is what it does here.
+        dltoo.computeDataPhase(srcRel, phaseGuard, invs, fwd, constr[srcRel]);
+        //dltoo.connectPhase(srcRel, phaseGuard, invs, fwd, constr[srcRel]);
+      }
+
+      ExprSet dataCands = dltoo.getDataCands(srcRel);
+      simplify(dataCands);
+      for(auto& dc : dataCands) simplifyArithm(dc);
+      if(printLog >= 1) outs() << "dataCands.size(): " << dataCands.size() << "\n";
+      for(auto& dc : dataCands) {
+        int invNum = getVarIndex(srcRel, decls);
+        if (containsOp<ARRAY_TY>(dc))
+          arrCands[invNum].insert(dc);
+        else
+          addDataCand(invNum, dc, cands[srcRel]);    
+      }
+
+      if(mut == 0) return;
+
+      int invNum = getVarIndex(srcRel, decls);
+      ExprSet tmp, its;
+      if (mut == 1 && ruleManager.hasArrays[srcRel])   // heuristic to remove cands irrelevant to counters and arrays
+      {
+        for (auto q : qvits[invNum]) its.insert(q->iter);
+        for (auto it = dataCands.begin(); it != dataCands.end();)
+          if (emptyIntersect(*it, its))
+            it = dataCands.erase(it);
+          else
+            ++it;
+      }
+      mutateHeuristicEq(dataCands, tmp, srcRel, (phaseGuard == NULL));
+      for (auto & c : tmp) {
+        addDataCand(invNum, c, cands[srcRel]);
+      }
     }
 
     void annotateDT(int invNum, Expr rel, Expr cnd, int path, int depth,
@@ -1011,10 +1062,10 @@ namespace ufo
       if (mut > 0) ds.mutateHeuristicEq(cands[dcl], cands[dcl], dcl, true);
       ds.initializeAux(cands[dcl], bnd, i, pref);
     }
-    if (dat > 0) ds.getDataCandidates(cands);
 
     for (auto & dcl: ruleManager.wtoDecls)
     {
+      if (dat > 0) ds.getDataCandidates(cands,dcl);
       for (int i = 0; i < doProp; i++)
         for (auto & a : cands[dcl]) ds.propagate(dcl, a, true);
       ds.addCandidates(dcl, cands[dcl]);
