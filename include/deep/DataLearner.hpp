@@ -26,7 +26,7 @@ namespace ufo
 
   enum loglevel {NONE, ERROR, INFO, DEBUG};
 
-  unsigned int LOG_LEVEL = INFO;
+  unsigned int LOG_LEVEL = DEBUG;
 
   template <typename T>
   void printmsg(T t)
@@ -167,7 +167,7 @@ namespace ufo
 	cur_row--;
       }
 
-      //      printmsg(INFO, "after row reduced\n", input);
+            printmsg(DEBUG, "after row reduced\n", input);
 
       std::vector<unsigned int> independentVars;
 
@@ -187,7 +187,7 @@ namespace ufo
 	    continue;
 	  }
 	  //TODO: replace -2 with lcm of column
-	  //printmsg(DEBUG, input(row,indVar), row, indVar);
+	  printmsg(DEBUG, input(row,indVar), row, indVar);
 	  basis(rowToPivot(row), basis_col) = -1*input(row, indVar);
 	}
 	basis(indVar,basis_col)=1;
@@ -449,10 +449,10 @@ namespace ufo
       }
 
       // if (assume != nullptr) {
-      // 	printmsg(INFO, "\n dataMatrix \n", dataMatrix);
-      // 	printmsg(INFO, "\n data \n", data);
-      // 	printmsg(INFO, "\n monomial \n", monomialMatrix);
-      // 	printmsg(INFO, "\n basis \n", basis);
+       	//printmsg(DEBUG, "\n dataMatrix \n", dataMatrix);
+       	printmsg(DEBUG, "\n data \n", data);
+       	printmsg(DEBUG, "\n monomial \n", monomialMatrix);
+       	printmsg(DEBUG, "\n basis \n", basis);
       // }
 
       vector<Expr> polynomials;

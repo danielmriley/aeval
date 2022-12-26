@@ -296,19 +296,19 @@ namespace ufo
         dltoo.computeDataPhase(srcRel, phaseGuard, invs, fwd, constr[srcRel]);
         //dltoo.connectPhase(srcRel, phaseGuard, invs, fwd, constr[srcRel]);
       }
-
       ExprSet dataCands = dltoo.getDataCands(srcRel);
       simplify(dataCands);
-      for(auto& dc : dataCands) simplifyArithm(dc);
-      if(printLog >= 1) outs() << "dataCands.size(): " << dataCands.size() << "\n";
+      filterTrivCands(dataCands);
       for(auto& dc : dataCands) {
+        simplifyArithm(dc);
         int invNum = getVarIndex(srcRel, decls);
-        if (containsOp<ARRAY_TY>(dc))
+        if (containsOp<ARRAY_TY>(dc)) {
           arrCands[invNum].insert(dc);
-        else
-          addDataCand(invNum, dc, cands[srcRel]);    
+        }
+        else {
+          addDataCand(invNum, dc, cands[srcRel]);
+        }
       }
-
       if(mut == 0) return;
 
       int invNum = getVarIndex(srcRel, decls);
