@@ -26,7 +26,7 @@ namespace ufo
 
   enum loglevel {NONE, ERROR, INFO, DEBUG};
 
-  unsigned int LOG_LEVEL = DEBUG;
+  unsigned int LOG_LEVEL = NONE;
 
   template <typename T>
   void printmsg(T t)

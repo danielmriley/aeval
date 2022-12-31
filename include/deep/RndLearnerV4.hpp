@@ -19,6 +19,7 @@ namespace ufo
     bool dStrenMbp;
     bool dRecycleCands;
     bool dGenerous;
+    bool dl2;
     int dFwd;
     int mbpEqs;
 
@@ -31,13 +32,13 @@ namespace ufo
     public:
 
     RndLearnerV4 (ExprFactory &_e, EZ3 &_z3, CHCs& _r, unsigned _to, bool _freqs,
-                  bool _aggp, int _mu, int _da, bool _d, int _m, bool _dAllMbp,
-                  bool _dAddProp, bool _dAddDat, bool _dStrenMbp, int _dFwd,
-                  bool _dR, bool _dG, int _debug) :
+                  bool _aggp, int _mu, int _da, bool _dl2, bool _d, int _m, 
+                  bool _dAllMbp, bool _dAddProp, bool _dAddDat, bool _dStrenMbp, 
+                  int _dFwd, bool _dR, bool _dG, int _debug) :
       RndLearnerV3 (_e, _z3, _r, _to, _freqs, _aggp, _mu, _da, _debug),
                   dDisj(_d), mbpEqs(_m), dAllMbp(_dAllMbp),
                   dAddProp(_dAddProp), dAddDat(_dAddDat), dStrenMbp(_dStrenMbp),
-                  dFwd(_dFwd), dRecycleCands(_dR), dGenerous(_dG) {}
+                  dFwd(_dFwd), dRecycleCands(_dR), dGenerous(_dG), dl2(_dl2) {}
 
     bool simplLemmas() { return !dDisj; }
 
@@ -278,7 +279,7 @@ namespace ufo
             annotateDT(invNum, rel, cnd, c.first, c.second, srcVars, dstVars, dir);
     }
 
-    void getDataCandidates(map<Expr, ExprSet>& cands, Expr srcRel,
+    void getDataCandidatesToo(map<Expr, ExprSet>& cands, Expr srcRel,
         Expr phaseGuard = NULL, Expr invs = NULL, bool fwd = true) {
       DataLearnerToo dltoo(ruleManager, m_z3, printLog);
       map<Expr, ExprVector> m;
@@ -298,9 +299,9 @@ namespace ufo
       }
       ExprSet dataCands = dltoo.getDataCands(srcRel);
       simplify(dataCands);
-      filterTrivCands(dataCands);
+      //filterTrivCands(dataCands);
       for(auto& dc : dataCands) {
-        simplifyArithm(dc);
+        //simplifyArithm(dc);
         int invNum = getVarIndex(srcRel, decls);
         if (containsOp<ARRAY_TY>(dc)) {
           arrCands[invNum].insert(dc);
@@ -450,7 +451,12 @@ namespace ufo
           if (containsOp<ARRAY_TY>(srcVars[i]))
             candToDat = replaceAll(candToDat, srcVars[i], dstVars[i]);
         candsToDat.insert(candToDat);
-        getDataCandidates(cands, rel, nextMbp, conjoin(candsToDat, m_efac), fwd);
+        if(dl2) {
+          getDataCandidatesToo(cands, rel, nextMbp, conjoin(candsToDat, m_efac), fwd);
+        }
+        else {
+          getDataCandidates(cands, rel, nextMbp, conjoin(candsToDat, m_efac), fwd);
+        }
         if (printLog >= 3)
           outs () << "  Data Learning gave " << (cands[rel].size() - sz)
                   << (dAddProp? "additional " : "") << " candidates to try\n";
@@ -1012,7 +1018,7 @@ namespace ufo
 
   // same as learnInvariants3, to unify somehow, maybe
   inline void learnInvariants4(string smt, unsigned maxAttempts, unsigned to,
-       bool freqs, bool aggp, int dat, int mut, bool doElim, bool doArithm,
+       bool freqs, bool aggp, int dat, bool dl2, int mut, bool doElim, bool doArithm,
        bool doDisj, int doProp, int mbpEqs, bool dAllMbp, bool dAddProp,
        bool dAddDat, bool dStrenMbp, int dFwd, bool dRec, bool dGenerous,
        bool dSee, bool ser, int debug)
@@ -1040,7 +1046,7 @@ namespace ufo
     if (!ruleManager.hasCycles())
       return (void)bnd.exploreTraces(1, ruleManager.chcs.size(), true);
 
-    RndLearnerV4 ds(m_efac, z3, ruleManager, to, freqs, aggp, mut, dat,
+    RndLearnerV4 ds(m_efac, z3, ruleManager, to, freqs, aggp, mut, dat, dl2,
                     doDisj, mbpEqs, dAllMbp, dAddProp, dAddDat, dStrenMbp,
                     dFwd, dRec, dGenerous, debug);
 
@@ -1065,7 +1071,8 @@ namespace ufo
 
     for (auto & dcl: ruleManager.wtoDecls)
     {
-      if (dat > 0) ds.getDataCandidates(cands,dcl);
+      if (dat > 0 && dl2) ds.getDataCandidatesToo(cands,dcl);
+      if (dat > 0 && !dl2) ds.getDataCandidates(cands);
       for (int i = 0; i < doProp; i++)
         for (auto & a : cands[dcl]) ds.propagate(dcl, a, true);
       ds.addCandidates(dcl, cands[dcl]);

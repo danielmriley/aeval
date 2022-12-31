@@ -263,9 +263,9 @@ namespace ufo
     }
 
     void removeFractions(matrix& A) {
-      for(int i = 0; i < numRows; i++) {
+      for(int i = 0; i < A.size(); i++) {
         vector<cpp_int> denominators;
-        for(int j = 0; j < numVars; j++) {
+        for(int j = 0; j < A[i].size(); j++) {
           cpp_int d = denominator(A[i][j]);
           denominators.push_back(d);
         }
@@ -308,11 +308,9 @@ namespace ufo
         cout << "\n";  
       }
 
-      // Matrix is reduced, now make entries into integers.
-      removeFractions(A);
-
       // Now find basis vectors.
       matrix basis = findBasis(A);
+      removeFractions(basis);
       if(debug ==  -1) { printCands(basis); }
 
       return basis;
@@ -463,10 +461,10 @@ namespace ufo
       if(A.empty()) return;
       basisFinder bf(A, debug);
 
-      dotProd(srcRel, *A.begin());
       firstRow = *A.begin();
 
       if(firstRow.empty()) return;
+      //dotProd(srcRel, firstRow);
 
       // Now make cands from the reduced matrix.
       basis[srcRel] = bf.findKernelBasis();
