@@ -54,13 +54,13 @@ namespace ufo
           l1 = mkMPZ(cpp_int(e2[i] - e1[i]),m_efac);
           l2 = mk<MINUS>(invVars[srcRel][j], mkMPZ(cpp_int(e1[j]),m_efac));
           if(e2[j] - e1[j] == 0) {
-            r1 = mkTerm(0,m_efac);
+            r1 = mkMPZ(0,m_efac);
           }
           else {
             r1 = mk<MULT>(r1,r2);
           }
           if(e2[i] - e1[i] == 0) {
-            l1 = mkTerm(0,m_efac);
+            l1 = mkMPZ(0,m_efac);
           }
           else {
             l1 = mk<MULT>(l1,l2);
@@ -68,8 +68,9 @@ namespace ufo
           l = mk<EQ>(r1,l1);
           l = simplifyArithm(l);
           l = normalize(l);
+          if(l == mk<TRUE>(m_efac)) continue;
           ev.push_back(l);
-          if(debug >= 4) outs() << "  CONNECT: " << *ev.back() << "\n";
+          if(debug >= 2) outs() << "  CONNECT: " << *ev.back() << "\n";
 
         }
       }
@@ -82,13 +83,15 @@ namespace ufo
           Expr l = mk<MINUS>(ev[i]->left(), ev[j]->left());
           l = mk<EQ>(l,r);
           l = normalize(l);
+          if(l == mk<TRUE>(m_efac)) continue;
           dc[srcRel].insert(l);
-          if(debug >= 4) outs() << "  CONNECT: " << l << "\n";
+          if(debug >= 2) outs() << "  CONNECT: " << l << "\n";
 
           r = mk<PLUS>(ev[i]->right(), ev[j]->right());
           l = mk<PLUS>(ev[i]->left(), ev[j]->left());
           l = mk<EQ>(l,r);
           l = normalize(l);
+          if(l == mk<TRUE>(m_efac)) continue;
           dc[srcRel].insert(l);
           if(debug >= 4) outs() << "  CONNECT: " << l << "\n";
         }
