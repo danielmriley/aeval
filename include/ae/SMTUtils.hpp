@@ -50,6 +50,16 @@ namespace ufo
       return m;
     }
 
+    ZSolver<EZ3>::Model* getNextModel()
+    {
+      if(m == NULL) { return getModelPtr(); }
+      Expr modl = getModel();
+      smt.assertExpr(mkNeg(modl));
+      smt.solve();
+      m = smt.getModelPtr();
+      return m;
+    }
+
     Expr getModel(Expr v)
     {
       getModelPtr();
@@ -523,8 +533,8 @@ namespace ufo
       {
         getLiterals(ex, lits, splitEqs);
         for (auto it = lits.begin(); it != lits.end(); ){
-          if (isOpX<TRUE>(m.eval(*it))) ++it;
-          else it = lits.erase(it);
+          if (isOpX<TRUE>(m.eval(*it))) {  ++it; }
+          else { it = lits.erase(it); } 
         }
       }
       else
@@ -557,6 +567,7 @@ namespace ufo
     {
       ExprSet lits;
       getModelPtr();
+//      getNextModel();
       if (m == NULL) return NULL;
       getTrueLiterals(ex, *m, lits, splitEqs);
       return conjoin(lits, efac);
@@ -569,6 +580,8 @@ namespace ufo
       Expr tmp = fla;
       while (isSat(tmp, false))
       {
+        Expr temp = getTrueLiterals(fla, splitEqs);
+        Expr temp2 = qe(temp, vars);
         prjcts.push_back(qe(getTrueLiterals(fla, splitEqs), vars)); // if qe is identity, then it's pure DNF
         if (prjcts.back() == NULL) return false;
         tmp = mk<NEG>(prjcts.back());

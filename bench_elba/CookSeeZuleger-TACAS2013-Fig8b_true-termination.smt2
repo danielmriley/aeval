@@ -3,11 +3,10 @@
 (declare-var x1 Int)
 (declare-var M Int)
 
-(rule (=> true (inv x0 M)))
+(rule (=> (> M 0) (inv x0 M)))
 
 (rule (=> (and
         (inv x0 M)
-        (> M 0)
         (not (= x0 M))
         (= x1 (ite (> x0 M) 0 (+ x0 1))))
     (inv x1 M)))

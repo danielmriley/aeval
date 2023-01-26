@@ -773,6 +773,7 @@ namespace ufo
 
   template<typename Range> static Expr eliminateQuantifiersRepl(Expr fla, Range& vars)
   {
+    
     ExprFactory &efac = fla->getFactory();
     SMTUtils u(efac);
     ExprSet complex;
