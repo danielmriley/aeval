@@ -29,10 +29,12 @@ namespace ufo
     HornRuleExt* tr; // This should be a vector to handle multiple loops.
     HornRuleExt* fc;
     HornRuleExt* qr;
+    HornRuleExt* bridge;
 
     ExprVector decls;
 
     HornRuleExt tr_orig;    // for phases
+    HornRuleExt fc_orig;
 
     Expr invDecl;
     ExprVector invVars;
@@ -134,12 +136,12 @@ namespace ufo
       rule->body = hr->body;
     }
 
-    void replaceRule(HornRuleExt* hr) {
+    void replaceRule(HornRuleExt* hr, Expr rel) {
       for(auto& rule: ruleManager.chcs) {
-        if(!hr->isInductive && !hr->isQuery && !rule.isInductive && !rule.isQuery) {
+        if(!hr->isInductive && !hr->isQuery && !rule.isInductive && !rule.isQuery && rel == rule.dstRelation) {
           replaceRule(hr,&rule);
         }
-        else if(hr->isInductive && rule.isInductive) {
+        else if(hr->isInductive && rule.isInductive && rel == rule.srcRelation) {
           replaceRule(hr,&rule);
         }
         else if(hr->isQuery && rule.isQuery) {
@@ -148,7 +150,7 @@ namespace ufo
       }
     }
 
-    void specUpFc()
+    void specUpFc(Expr rel)
     {
       HornRuleExt* fc_new = new HornRuleExt();
       fc_new->srcRelation = specDecl;
@@ -173,13 +175,13 @@ namespace ufo
       fc_body.insert(mk<EQ>(ghostVars[1], ghostVarsPr[0]));
 
       fc_new->body = conjoin(fc_body, m_efac);
-      if(debug >= 3) outs() << "fc_new body: " << fc_new->body << "\n";
+      if(debug >= 2) outs() << "fc_new body: " << fc_new->body << "\n";
       fc_new->srcVars.push_back(ghostVars[1]);
       specVars = fc_new->srcVars;
       ruleManager.invVars[specDecl].clear();
       ruleManager.addDeclAndVars(specDecl,specVars);
 
-      replaceRule(fc_new);
+      replaceRule(fc_new, rel);
 
       fcBodyInvVars = fc_new->body;
       ExprSet temp;
@@ -199,14 +201,14 @@ namespace ufo
       fcBodyInvVars = conjoin(temp, m_efac);
 
       for (auto & a : ruleManager.chcs)   // r.chcs changed by r.addRule, so pointers to its elements are broken
-        if (a.isInductive) tr = &a;
-        else if (!a.isInductive && !a.isQuery) fc = &a;
+        if (a.isInductive && rel == a.srcRelation) tr = &a;
+        else if (!a.isInductive && !a.isQuery && specDecl == a.srcRelation) fc = &a;
       tr_orig = *tr;
-
     }
 
-    void setUpTr() // Needs to be rewritten to handle multiple loops.
+    void setUpTr(Expr rel) // Needs to be rewritten to handle multiple loops.
     {
+      assert(tr->srcRelation == rel && "srcRel does not match\n");
       HornRuleExt* tr_new = new HornRuleExt();
       tr_new->srcRelation = tr->srcRelation;
       ruleManager.invVars[invDecl].clear();
@@ -220,23 +222,22 @@ namespace ufo
       tr_new->isInductive = true;
       ruleManager.addDeclAndVars(invDecl,invVars);
 
-
       ExprSet tmp;
       getConj(tr->body, tmp);
       tmp.insert(decGhost0);
       tr_new->body = conjoin(tmp, m_efac);
-      replaceRule(tr_new);
+      replaceRule(tr_new, rel);
 
       fcBodyInvVars = replaceAll(fcBodyInvVars, fc->srcVars, invVars);
       if(debug >= 4) outs() << "fcBodyInvVars: " << fcBodyInvVars << "\n";
 
       for (auto & a : ruleManager.chcs)    // r.chcs changed by r.addRule, so pointers to its elements are broken
-        if (a.isInductive) tr = &a;
-        else if (!a.isInductive && !a.isQuery) fc = &a;
+        if(a.isInductive && rel == a.dstRelation) tr = &a;
+        else if(!a.isInductive && !a.isQuery && rel == a.dstRelation) fc = &a;
       tr_orig = *tr;
     }
 
-    void setUpQr()
+    void setUpQr(Expr rel)
     {
       qr = new HornRuleExt();
       qr->srcRelation = tr->srcRelation; // Need to pick the rel from the last loop.
@@ -250,22 +251,28 @@ namespace ufo
       ruleManager.addRule(qr);
 
       for (auto & a : ruleManager.chcs)    // r.chcs changed by r.addRule, so pointers to its elements are broken
-        if (a.isInductive) tr = &a;
-        else if (a.isQuery) qr = &a;
-        else fc = &a;
+        if(a.isInductive && rel == a.dstRelation) tr = &a;
+        else if(a.isQuery) qr = &a;
+        else if(!a.isInductive && !a.isQuery && rel == a.dstRelation) fc = &a;
       tr_orig = *tr;
     }
 
-    bool setUpQueryAndSpec()
+    bool setUpQueryAndSpec(Expr rel, bool first = false)
     {
       setUpCounters();
+      if(!first) {
+        ruleManager.chcs.pop_back();
+      }
 
       for (auto & a : ruleManager.chcs)
-        if (a.isInductive) tr = &a;
+        if (a.isInductive && rel == a.dstRelation) { tr = &a; }
         else if (a.isFact) fc = &a;
         else if (a.isQuery) qr = &a;
+        else if (!first && a.dstRelation == rel && !a.isInductive) {
+          fc = &fc_orig;
+        }
       tr_orig = *tr;
-
+      if(first) fc_orig = *fc;
       invDecl = tr->srcRelation; // Need to handle multiple loops, so this can't be assigned in this way.
       invVars = tr->srcVars;
       invVarsPr = tr->dstVars;
@@ -286,9 +293,9 @@ namespace ufo
       loopGuardPr = replaceAll(loopGuard, invVars, invVarsPr);
       ruleManager.decls.clear();
 
-      specUpFc();
-      setUpTr();
-      setUpQr();
+      specUpFc(rel);
+      setUpTr(rel);
+      setUpQr(rel);
 
       return true;
     }
@@ -299,7 +306,7 @@ namespace ufo
        for (auto & hr : ruleManager.chcs)
        {
          if (hr.isQuery && !checkQuery) continue;
-         if (!checkCHC(hr, candidates)) return false;
+         if (hr.srcVars.size() == invVars.size() && !checkCHC(hr, candidates)) return false;
        }
       if (weak)
       {
@@ -620,17 +627,18 @@ namespace ufo
     {
       BndExpl bnd(ruleManager, (debug > 0));
       ExprSet cands;
-      vector<int>& cycle = ruleManager.cycles[0];
+      int invNum = getVarIndex(invDecl, decls);
+      if(invNum > 0) invNum *= 2;
+      vector<int>& cycle = ruleManager.cycles[invNum];
       HornRuleExt* hr = &ruleManager.chcs[cycle[0]];
       Expr rel = hr->srcRelation;
-      int invNum = getVarIndex(invDecl, decls);
       ExprVector& srcVars = tr->srcVars;
       ExprVector& dstVars = tr->dstVars;
       assert(srcVars.size() == dstVars.size());
       ExprSet dstVarsSet;
       for(auto& d: dstVars) dstVarsSet.insert(d);
       cycle.pop_back();
-      cycle.push_back(1);
+      cycle.push_back(invNum + 1);
       Expr ssa = bnd.toExpr(cycle);
 
       ssa = replaceAll(ssa, bnd.bindVars.back(), dstVars);
@@ -952,7 +960,7 @@ namespace ufo
       for (auto & hr : ruleManager.chcs)
       {
         if (containsOp<ARRAY_TY>(hr.body)) hasArrays = true;
-        worklist.push_back(&hr);
+        if(invDecl == hr.srcRelation && hr.srcVars.size() == tr->srcVars.size()) worklist.push_back(&hr);
       }
 
       auto candidatesTmp = candidates;
@@ -1275,27 +1283,34 @@ namespace ufo
     ruleManager.parse(smt);
     BoundSolver spec(ruleManager, stren, dg, data2, doPhases, debug);
     if(!ruleManager.hasQuery) {
-      if(debug >= 4) ruleManager.print(true);
+      if(debug >= 2) ruleManager.print(true);
       if(debug >= 4 && ruleManager.decls.size() > 1) {
         outs() << "Multiple loops\n";
       }
       else if(debug >= 4) {
         outs() << "Single loop\n";
       }
-      spec.setUpQueryAndSpec(); // Needs to accomodate many loops.
-      if(debug >= 2) ruleManager.print(true);
     }
     else {
       outs() << "Unsupported format\n";
       return;
     }
+    for(int i = 0; i < ruleManager.cycles.size(); i++) {
+      outs() << "Cycle #" << i << ": ";
+      for(auto& j: ruleManager.cycles[i]) {
+        outs() << j << ",";
+      }
+    }
+    outs() << std::endl;
+    auto dcls = ruleManager.decls;
+    for(auto d = dcls.begin(); d != dcls.end(); d++) {
+      spec.setUpQueryAndSpec((*d)->left(), *d == *dcls.begin()); // Needs to accomodate many loops.
+      if(debug >= 2) ruleManager.print(true);
 
-    spec.collectPhaseGuards();
-    if(debug >= 2) spec.printPhases();
-    // for(auto r: ruleManager.decls) {
-    //   // run for each decl, constructing new TR for each inv each time.
-    // }
-    spec.pathsSolve();
+      spec.collectPhaseGuards();
+      if(debug >= 2) spec.printPhases();
+      spec.pathsSolve();
+    }
   }
 }
 

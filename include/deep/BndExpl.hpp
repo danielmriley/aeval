@@ -926,7 +926,14 @@ namespace ufo
         bool toContinue = false;
         bool noopt = true;
 
-        if (!u.isSat(ssa)) return false;
+        if (!u.isSat(ssa)) {
+          if(debug) {
+            outs() << "SSA unrolling is unsat\n";
+            for(auto& s: ssa) outs() << s << "\n";
+          }
+
+          return false;
+        }
 
         ExprMap allModels;
         u.getModel(allVars, allModels);
