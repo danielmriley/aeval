@@ -26,10 +26,9 @@ namespace ufo
     ExprVector ssaSteps;
     map<Expr, ExprSet> candidates;
 
-    HornRuleExt* tr; // This should be a vector to handle multiple loops.
+    HornRuleExt* tr;
     HornRuleExt* fc;
     HornRuleExt* qr;
-    HornRuleExt* bridge;
 
     ExprVector decls;
 
@@ -89,7 +88,7 @@ namespace ufo
       for (auto & a : ruleManager.chcs)
         if (a.isInductive) tr = &a;
         else if (a.isQuery) qr = &a;
-        else fc = &a;
+        else if(a.isFact) fc = &a;
       tr_orig = *tr;
       for(auto& dcl: ruleManager.decls) decls.push_back(dcl->left());
       invDecl = tr->srcRelation;
@@ -147,6 +146,9 @@ namespace ufo
         else if(hr->isQuery && rule.isQuery) {
           replaceRule(hr,&rule);
         }
+        if(rule.isFact) {
+          replaceRule(hr,&rule);
+        }
       }
     }
 
@@ -157,7 +159,10 @@ namespace ufo
       fc_new->srcVars.clear();
       fc_new->dstRelation = fc->dstRelation;
       fc_new->dstVars = fc->dstVars;
-      fc_new->dstVars.push_back(ghostVarsPr[0]);
+      outs() << "size(): " << fc_new->dstVars.size() << "\n";
+      if(fc_new->dstVars.back() != ghostVarsPr[0])
+        fc_new->dstVars.push_back(ghostVarsPr[0]);
+      outs() << "size(): " << fc_new->dstVars.size() << "\n";
       fc_new->isFact = false;
       ExprVector specVars;
       ExprVector specVarsPr;
@@ -233,7 +238,7 @@ namespace ufo
 
       for (auto & a : ruleManager.chcs)    // r.chcs changed by r.addRule, so pointers to its elements are broken
         if(a.isInductive && rel == a.dstRelation) tr = &a;
-        else if(!a.isInductive && !a.isQuery && rel == a.dstRelation) fc = &a;
+        else if(!a.isInductive && !a.isQuery && specDecl == a.srcRelation) fc = &a;
       tr_orig = *tr;
     }
 
@@ -253,26 +258,26 @@ namespace ufo
       for (auto & a : ruleManager.chcs)    // r.chcs changed by r.addRule, so pointers to its elements are broken
         if(a.isInductive && rel == a.dstRelation) tr = &a;
         else if(a.isQuery) qr = &a;
-        else if(!a.isInductive && !a.isQuery && rel == a.dstRelation) fc = &a;
+        else if(!a.isInductive && !a.isQuery && specDecl == a.srcRelation) fc = &a;
       tr_orig = *tr;
     }
 
     bool setUpQueryAndSpec(Expr rel, bool first = false)
     {
       setUpCounters();
-      if(!first) {
+      if(!first && ruleManager.hasQuery) {
         ruleManager.chcs.pop_back();
       }
 
       for (auto & a : ruleManager.chcs)
         if (a.isInductive && rel == a.dstRelation) { tr = &a; }
-        else if (a.isFact) fc = &a;
+        else if (a.isFact) { fc = &a; fc_orig = *fc; }
         else if (a.isQuery) qr = &a;
         else if (!first && a.dstRelation == rel && !a.isInductive) {
           fc = &fc_orig;
         }
       tr_orig = *tr;
-      if(first) fc_orig = *fc;
+      //if(first) fc_orig = *fc;
       invDecl = tr->srcRelation; // Need to handle multiple loops, so this can't be assigned in this way.
       invVars = tr->srcVars;
       invVarsPr = tr->dstVars;
@@ -306,7 +311,12 @@ namespace ufo
        for (auto & hr : ruleManager.chcs)
        {
          if (hr.isQuery && !checkQuery) continue;
-         if (hr.srcVars.size() == invVars.size() && !checkCHC(hr, candidates)) return false;
+         if (hr.srcVars.size() == invVars.size() && !checkCHC(hr, candidates)) {
+           outs() << "RETURNING";
+           if(!checkCHC(hr, candidates)) outs() << ": checkCHC";
+           outs() << "\n";
+           return false;
+         }
        }
       if (weak)
       {
@@ -380,9 +390,9 @@ namespace ufo
       ExprSet checkList;
       checkList.insert(hr.body);
       Expr rel;
-      if(debug >= 6) {
+      if(debug >= 2) {
         if(hr.isQuery) outs() << "Query\n";
-        else if(hr.isInductive) outs() << "Inductive\n";
+        else if(hr.isInductive) outs() << "Inductive: " << hr.srcRelation << "\n";
         else outs() << "Pre\n";
 
       }
@@ -390,7 +400,7 @@ namespace ufo
         Expr rel = hr.srcRelation;
         ExprSet lms = annotations[rel];
         Expr overBody = replaceAll(conjoin(lms, m_efac), ruleManager.invVars[rel], hr.srcVars);
-        if(debug >= 6) outs() << "overbody: " << overBody << "\n";
+        if(debug >= 2) outs() << "overbody: " << overBody << "\n";
         getConj(overBody, checkList);
       }
       if (!hr.isQuery)
@@ -400,10 +410,10 @@ namespace ufo
         ExprSet lms = annotations[rel];
         for (auto a : lms) negged.insert(mkNeg(replaceAll(a, ruleManager.invVars[rel], hr.dstVars)));
         Expr neg = disjoin(negged, m_efac);
-        if(debug >= 6) outs() << "neg: " << neg << "\n";
+        if(debug >= 2) outs() << "neg: " << neg << "\n";
         checkList.insert(neg);
       }
-      if(debug >= 6) { outs() << "checkList:\n"; pprint(checkList, 2); }
+      if(debug >= 2) { outs() << "checkList:\n"; pprint(checkList, 2); }
       auto res = bool(!u.isSat(checkList));
       return res;
     }
@@ -628,7 +638,8 @@ namespace ufo
       BndExpl bnd(ruleManager, (debug > 0));
       ExprSet cands;
       int invNum = getVarIndex(invDecl, decls);
-      if(invNum > 0) invNum *= 2;
+      invNum *= 2;
+      outs() << "invNum: " << invNum << "\n";
       vector<int>& cycle = ruleManager.cycles[invNum];
       HornRuleExt* hr = &ruleManager.chcs[cycle[0]];
       Expr rel = hr->srcRelation;
@@ -982,6 +993,9 @@ namespace ufo
           varsPr.push_back(tr->dstVars[i]);
         }
         if (vars.size() > 2) continue;
+        outs() << "a: " << a << "\n";
+        outs() << "learnedLemmasInv: " << learnedLemmasInv << "\n";
+        outs() << "tr->body: " << tr->body << "\n";
 
         auto b = replaceAll(
                   keepQuantifiers(mk<AND>(a, learnedLemmasInv, tr->body), varsPr),
@@ -1303,8 +1317,10 @@ namespace ufo
     }
     outs() << std::endl;
     auto dcls = ruleManager.decls;
-    for(auto d = dcls.begin(); d != dcls.end(); d++) {
+    for(auto d = dcls.rbegin(); d != dcls.rend(); d++) {
+      outs() << "d: " << (*d)->left() << "\n";
       spec.setUpQueryAndSpec((*d)->left(), *d == *dcls.begin()); // Needs to accomodate many loops.
+      outs() << "HERE1\n";
       if(debug >= 2) ruleManager.print(true);
 
       spec.collectPhaseGuards();
