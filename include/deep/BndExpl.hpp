@@ -157,8 +157,6 @@ namespace ufo
     {
       ExprVector bindVars2;
       bindVars.clear();
-      for(auto d: trace) outs() << d << ",";
-      outs() << std::endl;
       ExprVector bindVars1 = ruleManager.chcs[trace[0]].srcVars;
       int bindVar_index = 0;
       int locVar_index = 0;
@@ -168,7 +166,6 @@ namespace ufo
         auto &step = trace[s];
         bindVars2.clear();
         HornRuleExt& hr = ruleManager.chcs[step];
-        outs() << "srcVars: " << hr.srcVars.size() << " | bindVars: " << bindVars1.size() << "\n";
         assert(hr.srcVars.size() == bindVars1.size());
 
         Expr body = hr.body;

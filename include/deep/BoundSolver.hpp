@@ -66,6 +66,7 @@ namespace ufo
     vector<pair<Expr, Expr>> phasePairs;
     vector<ExprVector> paths;
     ExprMap stren, grds2gh, fgrds2gh; // associate a guard (phi(vars)) with a precond of gh (f(vars))
+    ExprSet finalBounds;
 
 
     string SYGUS_BIN;
@@ -159,10 +160,8 @@ namespace ufo
       fc_new->srcVars.clear();
       fc_new->dstRelation = fc->dstRelation;
       fc_new->dstVars = fc->dstVars;
-      outs() << "size(): " << fc_new->dstVars.size() << "\n";
       if(fc_new->dstVars.back() != ghostVarsPr[0])
         fc_new->dstVars.push_back(ghostVarsPr[0]);
-      outs() << "size(): " << fc_new->dstVars.size() << "\n";
       fc_new->isFact = false;
       ExprVector specVars;
       ExprVector specVarsPr;
@@ -247,7 +246,13 @@ namespace ufo
       qr = new HornRuleExt();
       qr->srcRelation = tr->srcRelation; // Need to pick the rel from the last loop.
       qr->srcVars = tr->srcVars;
-      qr->body = mk<AND>(mkNeg(loopGuard), ghostGuard);
+      if(finalBounds.empty()) {
+        qr->body = mk<AND>(mkNeg(loopGuard), ghostGuard);
+      }
+      else {
+        Expr gg = conjoin(finalBounds, m_efac);
+        qr->body = mk<AND>(mkNeg(loopGuard), gg);
+      }
       qr->dstRelation = mkTerm<string> ("err", m_efac);
       qr->isQuery = true;
       ruleManager.hasQuery = true;
@@ -265,7 +270,7 @@ namespace ufo
     bool setUpQueryAndSpec(Expr rel, bool first = false)
     {
       setUpCounters();
-      if(!first && ruleManager.hasQuery) {
+      if(ruleManager.hasQuery) {
         ruleManager.chcs.pop_back();
       }
 
@@ -312,9 +317,6 @@ namespace ufo
        {
          if (hr.isQuery && !checkQuery) continue;
          if (hr.srcVars.size() == invVars.size() && !checkCHC(hr, candidates)) {
-           outs() << "RETURNING";
-           if(!checkCHC(hr, candidates)) outs() << ": checkCHC";
-           outs() << "\n";
            return false;
          }
        }
@@ -390,7 +392,7 @@ namespace ufo
       ExprSet checkList;
       checkList.insert(hr.body);
       Expr rel;
-      if(debug >= 2) {
+      if(debug >= 4) {
         if(hr.isQuery) outs() << "Query\n";
         else if(hr.isInductive) outs() << "Inductive: " << hr.srcRelation << "\n";
         else outs() << "Pre\n";
@@ -400,7 +402,7 @@ namespace ufo
         Expr rel = hr.srcRelation;
         ExprSet lms = annotations[rel];
         Expr overBody = replaceAll(conjoin(lms, m_efac), ruleManager.invVars[rel], hr.srcVars);
-        if(debug >= 2) outs() << "overbody: " << overBody << "\n";
+        if(debug >= 4) outs() << "overbody: " << overBody << "\n";
         getConj(overBody, checkList);
       }
       if (!hr.isQuery)
@@ -410,10 +412,10 @@ namespace ufo
         ExprSet lms = annotations[rel];
         for (auto a : lms) negged.insert(mkNeg(replaceAll(a, ruleManager.invVars[rel], hr.dstVars)));
         Expr neg = disjoin(negged, m_efac);
-        if(debug >= 2) outs() << "neg: " << neg << "\n";
+        if(debug >= 4) outs() << "neg: " << neg << "\n";
         checkList.insert(neg);
       }
-      if(debug >= 2) { outs() << "checkList:\n"; pprint(checkList, 2); }
+      if(debug >= 4) { outs() << "checkList:\n"; pprint(checkList, 2); }
       auto res = bool(!u.isSat(checkList));
       return res;
     }
@@ -639,7 +641,7 @@ namespace ufo
       ExprSet cands;
       int invNum = getVarIndex(invDecl, decls);
       invNum *= 2;
-      outs() << "invNum: " << invNum << "\n";
+      //outs() << "invNum: " << invNum << "\n";
       vector<int>& cycle = ruleManager.cycles[invNum];
       HornRuleExt* hr = &ruleManager.chcs[cycle[0]];
       Expr rel = hr->srcRelation;
@@ -993,9 +995,11 @@ namespace ufo
           varsPr.push_back(tr->dstVars[i]);
         }
         if (vars.size() > 2) continue;
-        outs() << "a: " << a << "\n";
-        outs() << "learnedLemmasInv: " << learnedLemmasInv << "\n";
-        outs() << "tr->body: " << tr->body << "\n";
+        if(debug >= 4) {
+          outs() << "a: " << a << "\n";
+          outs() << "learnedLemmasInv: " << learnedLemmasInv << "\n";
+          outs() << "tr->body: " << tr->body << "\n";
+        }
 
         auto b = replaceAll(
                   keepQuantifiers(mk<AND>(a, learnedLemmasInv, tr->body), varsPr),
@@ -1110,6 +1114,7 @@ namespace ufo
       bool rerun = false;
       for(auto b = boundsV.begin(), end = boundsV.end(); b != end && res; b++) {
         candidates.clear();
+
 
         // if(!isOpX<PLUS>((*b)->right())) b++;
         // if(b == boundsV.end()) b--;
@@ -1264,6 +1269,7 @@ namespace ufo
       //   outs() << "\n";
       // }
       pprint(finals, 5);
+      finalBounds.insert(conjoin(finals, m_efac));
     }
 
     void printCandsEx(bool ppr = true) {
@@ -1309,18 +1315,19 @@ namespace ufo
       outs() << "Unsupported format\n";
       return;
     }
-    for(int i = 0; i < ruleManager.cycles.size(); i++) {
+    if(debug >= 3){
+     for(int i = 0; i < ruleManager.cycles.size(); i++) {
       outs() << "Cycle #" << i << ": ";
       for(auto& j: ruleManager.cycles[i]) {
         outs() << j << ",";
       }
     }
+  }
     outs() << std::endl;
     auto dcls = ruleManager.decls;
     for(auto d = dcls.rbegin(); d != dcls.rend(); d++) {
-      outs() << "d: " << (*d)->left() << "\n";
+//      outs() << "d: " << (*d)->left() << "\n";
       spec.setUpQueryAndSpec((*d)->left(), *d == *dcls.begin()); // Needs to accomodate many loops.
-      outs() << "HERE1\n";
       if(debug >= 2) ruleManager.print(true);
 
       spec.collectPhaseGuards();
