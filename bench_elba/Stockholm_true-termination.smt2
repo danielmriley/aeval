@@ -16,5 +16,3 @@
     (inv x1 a b)
   )
 )
-
-; Seg fault.... why....?

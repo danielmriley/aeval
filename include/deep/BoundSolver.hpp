@@ -205,7 +205,7 @@ namespace ufo
 
     }
 
-    void setUpTr()
+    void setUpTr() // Needs to be rewritten to handle multiple loops.
     {
       HornRuleExt* tr_new = new HornRuleExt();
       tr_new->srcRelation = tr->srcRelation;
@@ -482,7 +482,7 @@ namespace ufo
     }
 
     // adapted from BndExpl:: getAllTraces
-    void getAllPaths (Expr src, Expr dst, int len, ExprVector trace, vector<ExprVector>& traces)
+    bool getAllPaths (Expr src, Expr dst, int len, ExprVector trace, vector<ExprVector>& traces)
     {
       if (len == 1)
       {
@@ -494,8 +494,9 @@ namespace ufo
             {
               if (a.second == b)
               {
-                outs () << "cyclic paths not supported\n";
-                exit(1);
+                if(debug >= 1)
+                  outs () << "cyclic paths not supported\n";
+                return false;
               }
             }
             ExprVector newtrace = trace;
@@ -514,16 +515,20 @@ namespace ufo
             {
               if (a.second == b)
               {
-                outs () << "cyclic paths not supported\n";
-                exit(1);
+                if(debug >= 1)
+                  outs () << "cyclic paths not supported\n";
+                return false;
               }
             }
             ExprVector newtrace = trace;
             newtrace.push_back(a.second);
-            getAllPaths(a.second, dst, len-1, newtrace, traces);
+            bool  res = getAllPaths(a.second, dst, len-1, newtrace, traces);
+            if(!res) return false;
           }
         }
       }
+
+      return true;
     }
 
     void getCombs(ExprVector& elems, int pos, vector<ExprVector>& res)
@@ -589,8 +594,10 @@ namespace ufo
       for (auto & in : init)
       {
         int len = paths.size();
-        for (int i = 1; i <= phasePairs.size() ; i++)
-          getAllPaths (in, mk<FALSE>(m_efac), i, {in}, paths);
+        for (int i = 1; i <= phasePairs.size() ; i++) {
+          bool res = getAllPaths (in, mk<FALSE>(m_efac), i, {in}, paths);
+          if(!res) return false;
+        }
         assert (paths.size() > len && "No paths found\n");
       }
 
@@ -609,7 +616,7 @@ namespace ufo
       return true;
     }
 
-    void collectPhaseGuards()
+    void collectPhaseGuards(bool weakenPhases = false)
     {
       BndExpl bnd(ruleManager, (debug > 0));
       ExprSet cands;
@@ -633,83 +640,115 @@ namespace ufo
       ExprVector vars2keep, prjcts, prjcts1, prjcts2;
       ExprSet prjctsTmp;
       bool hasArray = false;
-      for (int i = 0; i < srcVars.size(); i++)
+      for (int i = 0; i < srcVars.size(); i++) {
         if (containsOp<ARRAY_TY>(srcVars[i]))
         {
           hasArray = true;
           vars2keep.push_back(dstVars[i]);
         }
         else
+        {
           vars2keep.push_back(srcVars[i]);
-
-        u.flatten(ssa, prjcts1, false, vars2keep, keepQuantifiersRepl);
-
-        for (auto p : prjcts1)
-        {
-          if (hasArray)
-          {
-            p = ufo::eliminateQuantifiers(p, dstVarsSet);
-            p = weakenForVars(p, dstVars);
-          }
-          else
-          {
-            p = weakenForVars(p, dstVars);
-            p = simplifyArithm(normalize(p));
-          }
-          getConj(p, prjctsTmp);
-          if (debug >= 2) outs() << "Generated MBP: " << p << "\n";
         }
+      }
 
-        prjcts.insert(prjcts.end(), prjctsTmp.begin(), prjctsTmp.end());
-        u.removeRedundantConjunctsVec(prjcts);
-        for (auto it = prjcts.begin(); it != prjcts.end();)
+      u.flatten(ssa, prjcts1, false, vars2keep, keepQuantifiersRepl);
+
+      if(weakenPhases)
+      {
+        for (auto p1 = prjcts1.begin(); p1 != prjcts1.end(); )
         {
-          bool toRem = false;
-          for (auto it2 = prjcts.begin(); it2 != it; ++it2)
+          bool changed = false;
+          for (auto p2 = prjcts1.begin(); p2 != prjcts1.end(); p2++)
           {
-            if (u.isEquiv(*it, mkNeg(*it2)))
+            if (*p1 == *p2) { continue; }
+            if (u.implies (*p1, *p2))
             {
-              toRem = true;
-              break;
+              if(debug >= 4) outs () << "  to remove " << *p1 << "\n";
+              changed = true;
             }
           }
-          if (toRem)
-            it = prjcts.erase(it);
-          else
-            ++it;
+          if(changed) { p1 = prjcts1.erase(p1); }
+          else { p1++; }
         }
+      }
 
-        if (debug >= 2)
+      for (auto p : prjcts1)
+      {
+        if (hasArray)
         {
-          outs() << "Split MBP: \n";
-          pprint(prjcts, 3);
+          p = ufo::eliminateQuantifiers(p, dstVarsSet);
+          p = weakenForVars(p, dstVars);
         }
-
-        vector<ExprVector> res;
-        getCombs(prjcts, 0, res);
-        for (auto & r : res)
+        else
         {
-          phases.push_back(conjoin(r, m_efac));
-          if(debug >= 3) {
-            outs () << "  comb: ";
-            pprint(r);
-            outs () << "\n";
+          p = weakenForVars(p, dstVars);
+          p = simplifyArithm(normalize(p));
+        }
+        getConj(p, prjctsTmp);
+        if (debug >= 2) outs() << "Generated MBP: " << p << "\n";
+      }
+
+      prjcts.insert(prjcts.end(), prjctsTmp.begin(), prjctsTmp.end());
+      u.removeRedundantConjunctsVec(prjcts);
+
+      for (auto it = prjcts.begin(); it != prjcts.end();)
+      {
+        bool toRem = false;
+        for (auto it2 = prjcts.begin(); it2 != it; ++it2)
+        {
+          if (u.isEquiv(*it, mkNeg(*it2)))
+          {
+            toRem = true;
+            break;
           }
         }
+        if (toRem)
+          it = prjcts.erase(it);
+        else
+          ++it;
+      }
 
-        pairPhases();
+      if (debug >= 2)
+      {
+        outs() << "Split MBP: \n";
+        pprint(prjcts, 3);
+      }
+
+      vector<ExprVector> res;
+      getCombs(prjcts, 0, res);
+      for (auto & r : res)
+      {
+        phases.push_back(conjoin(r, m_efac));
         if(debug >= 3) {
-          outs() << "\n";
-          for(auto& v: phasePairs) {
-            outs() << "  phpair: "<< v.first << " --> " << v.second << "\n";
-          }
-          outs() << "\n";
+          outs () << "  comb: ";
+          pprint(r);
+          outs () << "\n";
         }
-        if (!sortPhases())
-        {
-          outs() << "Unsupported\n";
+      }
+
+      pairPhases();
+      if(debug >= 3) {
+        outs() << "\n";
+        for(auto& v: phasePairs) {
+          outs() << "  : "<< v.first << " --> " << v.second << "\n";
+        }
+        outs() << "\n";
+      }
+      if (!sortPhases())
+      {
+        if(!weakenPhases) {
+          if(debug >=3) outs() << "Path finding failed. Trying again.\n";
+          phasePairs.clear();
+          paths.clear();
+          phases.clear();
+          collectPhaseGuards(true);
+        }
+        else {
+          outs() << "Path finding failed.\n";
           exit(1);
         }
+      }
     }
 
     void parseForGuards() {
@@ -898,6 +937,7 @@ namespace ufo
         if(!ghCandMap[invDecl].empty()) outs() << ghCandMap[invDecl].size() << "\n";
         else outs() << "  none.\n";
       }
+      // break odd/even
 
       return res;
     }
@@ -981,6 +1021,8 @@ namespace ufo
       return Result_t::UNKNOWN;
     }
 
+    ExprSet exploredBounds;
+
     boost::tribool boundSolveRec(Expr src, Expr dst, Expr block) {
       map<Expr,ExprSet> bounds;
       dataGrds.clear();
@@ -1042,9 +1084,13 @@ namespace ufo
           outs() << "  " << e << "\n";
         }
       }
+
       bool rerun = false;
       for(auto b = boundsV.begin(), end = boundsV.end(); b != end && res; b++) {
         candidates.clear();
+
+        // if(!isOpX<PLUS>((*b)->right())) b++;
+        // if(b == boundsV.end()) b--;
 
         if(rerun) {
           if(debug >= 3) outs() << "RERUN\n=====\n";
@@ -1054,6 +1100,11 @@ namespace ufo
           }
         }
         else {
+          // auto fres = exploredBounds.find(*b);
+          // if(fres != exploredBounds.end()) {
+          //   continue;
+          // }
+          // exploredBounds.insert(*b);
           for(auto& e: grds) {
             candidates[specDecl].insert(replaceAll(e, tr->srcVars, fc->srcVars));
             candidates[invDecl].insert(e);
@@ -1148,6 +1199,7 @@ namespace ufo
     void pathsSolve()
     {
       ExprSet finals;
+      if(debug >= 2) outs() << "\n===== PATH SOLVE =====\n";
       for (auto & p : paths)
       {
         if(debug >=2) {
@@ -1185,6 +1237,10 @@ namespace ufo
         stren.clear();
       }
       outs () << "FINAL:\n";
+      // for(auto& e: finals) {
+      //   u.print(e,outs());
+      //   outs() << "\n";
+      // }
       pprint(finals, 5);
     }
 
@@ -1226,7 +1282,7 @@ namespace ufo
       else if(debug >= 4) {
         outs() << "Single loop\n";
       }
-      spec.setUpQueryAndSpec();
+      spec.setUpQueryAndSpec(); // Needs to accomodate many loops.
       if(debug >= 2) ruleManager.print(true);
     }
     else {
@@ -1236,6 +1292,9 @@ namespace ufo
 
     spec.collectPhaseGuards();
     if(debug >= 2) spec.printPhases();
+    // for(auto r: ruleManager.decls) {
+    //   // run for each decl, constructing new TR for each inv each time.
+    // }
     spec.pathsSolve();
   }
 }
