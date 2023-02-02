@@ -68,7 +68,6 @@ namespace ufo
     ExprMap stren, grds2gh, fgrds2gh; // associate a guard (phi(vars)) with a precond of gh (f(vars))
     ExprSet finalBounds;
 
-
     string SYGUS_BIN;
 //    int globalIter = 0;
     int strenBound;
@@ -179,6 +178,7 @@ namespace ufo
       fc_body.insert(mk<EQ>(ghostVars[1], ghostVarsPr[0]));
 
       fc_new->body = conjoin(fc_body, m_efac);
+      fc_new->body = simplifyArithm(fc_new->body);
       if(debug >= 2) outs() << "fc_new body: " << fc_new->body << "\n";
       fc_new->srcVars.push_back(ghostVars[1]);
       specVars = fc_new->srcVars;
@@ -925,7 +925,6 @@ namespace ufo
       tr->body = u.removeITE(mk<AND>(src, tr_orig.body));
 
       dst = mk<AND>(mk<NEG>(src), mk<AND>(dst, stren[dst]), mk<EQ>(pc, grds2gh[dst]));
-
       src = mk<AND>(block, src);
       if(isOpX<TRUE>(block))
         src = replaceAll(src, invVars, fc->srcVars);
@@ -1064,7 +1063,34 @@ namespace ufo
 
       if (isOpX<FALSE>(dst))
       {
-        grds2gh[src] = mkMPZ(0, m_efac);
+        // This needs to be changed to be the last bound result if one has been found.
+        if(finalBounds.empty()) {
+          grds2gh[src] = mkMPZ(0, m_efac);
+        }
+        else {
+          ExprSet terms;
+          for(auto& e: finalBounds) {
+            Expr r = mkMPZ(0,m_efac);
+            terms.insert(r);
+            outs() << "loopGuard: " << loopGuard << "        src: " << src << "        e: " << e->right() << "\n";
+
+            ExprSet conjs;
+            getConj(src, conjs);
+            bool go = false;
+            for(auto& c : conjs) {
+              if(u.isSat(c, loopGuard) && c->left() == e->right()->right()) go = true;
+            }
+
+            if(go) {
+              outs() << "sat: " << src << " & " << e->left() << " : " << e->right() << "\n";
+              terms.insert(e->right()->right());
+              //r = mk<PLUS>(e->right()->right(), r);
+            }
+          }
+          grds2gh[src] = normalize(simplifyArithm(mkplus(terms, m_efac)));
+          outs() << "\n\n";
+        }
+
         return true;
       }
 
@@ -1186,7 +1212,7 @@ namespace ufo
         if(debug >= 2) {
           outs() << "\n    Guards\n==============\n";
           for(auto& g: grds2gh) {
-            outs() << " : " << g.first << "\n";
+            outs() << " : " << g.first << " -> " << g.second << "\n";
           }
           outs() << "==============\n";
         }
@@ -1253,7 +1279,7 @@ namespace ufo
             {
               pre.insert(g.first);
               if (res == NULL) res = g.second;
-              else res = mk<ITE>(g.first, g.second, res);   // GF
+              //else res = mk<ITE>(g.first, g.second, res);   // GF
             }
           }
           stren[p[i]] = simplifyBool(distribDisjoin(pre, m_efac));
@@ -1269,7 +1295,7 @@ namespace ufo
       //   outs() << "\n";
       // }
       pprint(finals, 5);
-      finalBounds.insert(conjoin(finals, m_efac));
+      finalBounds.insert(finals.begin(),finals.end());
     }
 
     void printCandsEx(bool ppr = true) {
