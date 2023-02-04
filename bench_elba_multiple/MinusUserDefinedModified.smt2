@@ -23,7 +23,7 @@
   )
 )
 
-(rule (=> (itp1 x1 y1) (itp2 x1 y1)))
+(rule (=> (and (not (and (> x1 0) (> y1 0))) (itp1 x1 y1)) (itp2 x1 y1)))
 
 (rule (=>
     (and
@@ -35,7 +35,7 @@
   )
 )
 
-(rule (=> (itp2 x1 y1) (itp3 x1 y1)))
+(rule (=> (and (<= y1 0) (itp2 x1 y1)) (itp3 x1 y1)))
 
 (rule (=>
     (and

@@ -96,6 +96,17 @@ namespace ufo
       invVarsPr = tr->dstVars;
       invVarsSz = invVars.size();
       mpzZero = mkMPZ(0, m_efac);
+
+      HornRuleExt* hr = &ruleManager.chcs[0];
+
+      fc_orig.srcRelation = hr->srcRelation;
+      fc_orig.srcVars = hr->srcVars;
+      fc_orig.dstRelation = hr->dstRelation;
+      fc_orig.dstVars = hr->dstVars;
+      fc_orig.isFact = hr->isFact;
+      fc_orig.isInductive = hr->isInductive;
+      fc_orig.isQuery = hr->isQuery;
+      fc_orig.body = hr->body;
     }
 
     bool setUpCounters()
@@ -146,12 +157,10 @@ namespace ufo
         else if(hr->isQuery && rule.isQuery) {
           replaceRule(hr,&rule);
         }
-        if(rule.isFact) {
-          replaceRule(hr,&rule);
-        }
       }
     }
 
+    bool firstGlob = false;
     void specUpFc(Expr rel)
     {
       HornRuleExt* fc_new = new HornRuleExt();
@@ -159,6 +168,7 @@ namespace ufo
       fc_new->srcVars.clear();
       fc_new->dstRelation = fc->dstRelation;
       fc_new->dstVars = fc->dstVars;
+
       if(fc_new->dstVars.back() != ghostVarsPr[0])
         fc_new->dstVars.push_back(ghostVarsPr[0]);
       fc_new->isFact = false;
@@ -169,17 +179,23 @@ namespace ufo
         specVarsPr.push_back(bind::intConst(mkTerm<string>(varName + to_string(i + invVars.size()) + "'", m_efac)));
       }
       fc_new->srcVars = specVars;
-      ExprSet fc_body;
-      for(int i = 0; i < specVars.size(); i++) {
-        fc_body.insert(mk<EQ>(specVars[i], invVarsPr[i]));
+
+      if(firstGlob) {
+        ExprSet fc_body;
+        for(int i = 0; i < specVars.size(); i++) {
+          fc_body.insert(mk<EQ>(specVars[i], invVarsPr[i]));
+        }
+        fc_body.insert(replaceAll(fc->body, invVarsPr, specVars));
+        fc_body.insert(mk<EQ>(ghostVars[1], ghostVarsPr[0]));
+
+        fc_new->body = conjoin(fc_body, m_efac);
+        fc_new->body = simplifyArithm(fc_new->body);
+      }
+      else {
+        fc_new->body = replaceAll(fc->body, invVars, specVars);
+        fc_new->body = mk<AND>(fc_new->body, mk<EQ>(ghostVars[1], ghostVarsPr[0]));
       }
 
-      fc_body.insert(replaceAll(fc->body, invVarsPr, specVars));
-      fc_body.insert(mk<EQ>(ghostVars[1], ghostVarsPr[0]));
-
-      fc_new->body = conjoin(fc_body, m_efac);
-      fc_new->body = simplifyArithm(fc_new->body);
-      if(debug >= 2) outs() << "fc_new body: " << fc_new->body << "\n";
       fc_new->srcVars.push_back(ghostVars[1]);
       specVars = fc_new->srcVars;
       ruleManager.invVars[specDecl].clear();
@@ -206,7 +222,7 @@ namespace ufo
 
       for (auto & a : ruleManager.chcs)   // r.chcs changed by r.addRule, so pointers to its elements are broken
         if (a.isInductive && rel == a.srcRelation) tr = &a;
-        else if (!a.isInductive && !a.isQuery && specDecl == a.srcRelation) fc = &a;
+        else if (!a.isInductive && !a.isQuery && specDecl == a.srcRelation && rel == a.dstRelation) fc = &a;
       tr_orig = *tr;
     }
 
@@ -232,12 +248,12 @@ namespace ufo
       tr_new->body = conjoin(tmp, m_efac);
       replaceRule(tr_new, rel);
 
+
       fcBodyInvVars = replaceAll(fcBodyInvVars, fc->srcVars, invVars);
-      if(debug >= 4) outs() << "fcBodyInvVars: " << fcBodyInvVars << "\n";
 
       for (auto & a : ruleManager.chcs)    // r.chcs changed by r.addRule, so pointers to its elements are broken
         if(a.isInductive && rel == a.dstRelation) tr = &a;
-        else if(!a.isInductive && !a.isQuery && specDecl == a.srcRelation) fc = &a;
+        else if(!a.isInductive && !a.isQuery && specDecl == a.srcRelation && rel == a.dstRelation) fc = &a;
       tr_orig = *tr;
     }
 
@@ -263,11 +279,11 @@ namespace ufo
       for (auto & a : ruleManager.chcs)    // r.chcs changed by r.addRule, so pointers to its elements are broken
         if(a.isInductive && rel == a.dstRelation) tr = &a;
         else if(a.isQuery) qr = &a;
-        else if(!a.isInductive && !a.isQuery && specDecl == a.srcRelation) fc = &a;
+        else if(!a.isInductive && !a.isQuery && specDecl == a.srcRelation && rel == a.dstRelation) fc = &a;
       tr_orig = *tr;
     }
 
-    bool setUpQueryAndSpec(Expr rel, bool first = false)
+    bool setUpQueryAndSpec(Expr rel, bool first)
     {
       setUpCounters();
       if(ruleManager.hasQuery) {
@@ -276,10 +292,15 @@ namespace ufo
 
       for (auto & a : ruleManager.chcs)
         if (a.isInductive && rel == a.dstRelation) { tr = &a; }
-        else if (a.isFact) { fc = &a; fc_orig = *fc; }
-        else if (a.isQuery) qr = &a;
-        else if (!first && a.dstRelation == rel && !a.isInductive) {
+        else if (first && rel == fc_orig.dstRelation && !a.isInductive) {
           fc = &fc_orig;
+          firstGlob = true;
+          ruleManager.chcs[0].dstRelation = rel;
+        }
+        else if (a.isQuery) qr = &a;
+        else if (a.dstRelation == rel && !a.isInductive && !first) {
+          //fc = &fc_orig;
+          fc = &a;
         }
       tr_orig = *tr;
       //if(first) fc_orig = *fc;
@@ -306,6 +327,7 @@ namespace ufo
       specUpFc(rel);
       setUpTr(rel);
       setUpQr(rel);
+      replaceRule(fc, &ruleManager.chcs[0]);
 
       return true;
     }
@@ -1064,32 +1086,31 @@ namespace ufo
       if (isOpX<FALSE>(dst))
       {
         // This needs to be changed to be the last bound result if one has been found.
-        if(finalBounds.empty()) {
+        //if(finalBounds.empty()) {
           grds2gh[src] = mkMPZ(0, m_efac);
-        }
-        else {
-          ExprSet terms;
-          for(auto& e: finalBounds) {
-            Expr r = mkMPZ(0,m_efac);
-            terms.insert(r);
-            outs() << "loopGuard: " << loopGuard << "        src: " << src << "        e: " << e->right() << "\n";
-
-            ExprSet conjs;
-            getConj(src, conjs);
-            bool go = false;
-            for(auto& c : conjs) {
-              if(u.isSat(c, loopGuard) && c->left() == e->right()->right()) go = true;
-            }
-
-            if(go) {
-              outs() << "sat: " << src << " & " << e->left() << " : " << e->right() << "\n";
-              terms.insert(e->right()->right());
-              //r = mk<PLUS>(e->right()->right(), r);
-            }
-          }
-          grds2gh[src] = normalize(simplifyArithm(mkplus(terms, m_efac)));
-          outs() << "\n\n";
-        }
+        //}
+        // else {
+        //   ExprSet terms;
+        //   for(auto& e: finalBounds) {
+        //     Expr r = mkMPZ(0,m_efac);
+        //     terms.insert(r);
+        //     outs() << "loopGuard: " << loopGuard << "        src: " << src << "        e: " << e->right() << "\n";
+        //
+        //     ExprSet conjs;
+        //     getConj(src, conjs);
+        //     bool go = false;
+        //     for(auto& c : conjs) {
+        //       if(u.isSat(c, loopGuard) && c->left() == e->right()->right()) go = true;
+        //     }
+        //     if(go) {
+        //       outs() << "sat: " << src << " & " << e->left() << " : " << e->right() << "\n";
+        //       terms.insert(e->right()->right());
+        //       //r = mk<PLUS>(e->right()->right(), r);
+        //     }
+        //   }
+        //   grds2gh[src] = normalize(simplifyArithm(mkplus(terms, m_efac)));
+        //   outs() << "\n\n";
+        // }
 
         return true;
       }
@@ -1268,7 +1289,9 @@ namespace ufo
         int i;
         for (i = p.size() - 2; i >= 0; i--)
         {
-          if (p[i] == fcBodyInvVars) break; // hack for now
+          if (p[i] == fcBodyInvVars) {
+            break; // hack for now
+          }
           boundSolve(p[i], p[i+1]);
 
           res = NULL;
@@ -1289,7 +1312,7 @@ namespace ufo
         grds2gh.clear();
         stren.clear();
       }
-      outs () << "FINAL:\n";
+      outs () << "********\n*FINAL:*\n********\n";
       // for(auto& e: finals) {
       //   u.print(e,outs());
       //   outs() << "\n";
