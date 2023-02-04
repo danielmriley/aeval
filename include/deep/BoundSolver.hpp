@@ -1074,8 +1074,25 @@ namespace ufo
 
       ExprVector boundsV;
       for(auto& e: bounds[invDecl])
+      {
         if(!isOpX<MULT>(e->left()))
+        {
           boundsV.push_back(e);
+        }
+        else
+        {
+          ExprSet vars;
+          filter (e, bind::IsConst (), inserter (vars, vars.begin()));
+          if (vars.size() < 3) continue; // hack, to avoid short cands
+
+          if (isOpX<MPZ>(e->left()->left()) && e->left()->right() == ghostVars[0])
+          {
+            boundsV.push_back(mk<EQ>(ghostVars[0], mk<IDIV>(e->right(), e->left()->left())));
+            grds.insert(mk<EQ>(mk<MOD>(e->right(), e->left()->left()), mkMPZ(0, m_efac)));
+            break;      // hack: just take the first one and leave
+          }
+        }
+      }
       sortBounds(boundsV);
 
       if(debug >= 2) {  //GF
