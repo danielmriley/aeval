@@ -1086,31 +1086,71 @@ namespace ufo
       if (isOpX<FALSE>(dst))
       {
         // This needs to be changed to be the last bound result if one has been found.
-        //if(finalBounds.empty()) {
+        if(finalBounds.empty()) {
           grds2gh[src] = mkMPZ(0, m_efac);
-        //}
-        // else {
-        //   ExprSet terms;
-        //   for(auto& e: finalBounds) {
-        //     Expr r = mkMPZ(0,m_efac);
-        //     terms.insert(r);
-        //     outs() << "loopGuard: " << loopGuard << "        src: " << src << "        e: " << e->right() << "\n";
-        //
-        //     ExprSet conjs;
-        //     getConj(src, conjs);
-        //     bool go = false;
-        //     for(auto& c : conjs) {
-        //       if(u.isSat(c, loopGuard) && c->left() == e->right()->right()) go = true;
-        //     }
-        //     if(go) {
-        //       outs() << "sat: " << src << " & " << e->left() << " : " << e->right() << "\n";
-        //       terms.insert(e->right()->right());
-        //       //r = mk<PLUS>(e->right()->right(), r);
-        //     }
-        //   }
-        //   grds2gh[src] = normalize(simplifyArithm(mkplus(terms, m_efac)));
-        //   outs() << "\n\n";
-        // }
+        }
+        else {
+          ExprSet terms;
+          ExprSet srcConjs;
+          getConj(src, srcConjs);
+          for(auto& s: srcConjs) {
+            Expr r = mkMPZ(0,m_efac);
+            terms.insert(r);
+
+            for(auto& bound: finalBounds) {
+              outs() << "loopGuard: " << loopGuard << "        src: " << s << "    dst: " << dst << "        e: " << bound << "\n";
+              ExprSet bndConjs;
+              getConj(bound->left(), bndConjs);
+              bool go = false;
+              for(auto& c: bndConjs) {
+                if(u.isSat(s,loopGuard) /*&& emptyIntersect(s,c)*/) {
+                  outs() << "sat: " << s << " & " << c << " : " << bound->right() << "\n";
+                  go = true;
+                }
+              }
+              if(go) {
+                terms.insert(bound->right()->right());
+              }
+            }
+          }
+          ExprSet termsPr;
+          for(auto i = terms.begin(); i != terms.end(); i++) {
+            termsPr.insert(*i);
+          }
+          grds2gh[src] = normalize(simplifyArithm(mkplus(termsPr, m_efac)));
+          outs() << "ADDED: " << grds2gh[src] << "\n";
+          outs() << "\n\n";
+
+
+
+          //
+          // for(auto& e: finalBounds) {
+          //   Expr r = mkMPZ(0,m_efac);
+          //   terms.insert(r);
+          //   outs() << "loopGuard: " << loopGuard << "        src: " << src << "        e: " << e->right() << "\n";
+          //
+          //   ExprSet srcConjs;
+          //   getConj(src, srcConjs);
+          //   bool go = false;
+          //   for(auto& c : srcConjs) {
+          //     ExprSet dstConjs;
+          //     getConj(e->right(), dstConjs);
+          //     if(u.isSat(c, loopGuard) && c->left() == e->right()->right()) go = true;
+          //   }
+          //   if(go) {
+          //     outs() << "sat: " << src << " & " << e->left() << " : " << e->right() << "\n";
+          //     terms.insert(e->right()->right());
+          //     //r = mk<PLUS>(e->right()->right(), r);
+          //   }
+          // }
+          // ExprSet termsPr;
+          // for(auto i = terms.begin(); i != terms.end(); i++) {
+          //   termsPr.insert(*i);//replaceAll(*i, invVars, invVarsPr));
+          // }
+          // grds2gh[src] = normalize(simplifyArithm(mkplus(termsPr, m_efac)));
+          // outs() << "ADDED: " << grds2gh[src] << "\n";
+          // outs() << "\n\n";
+        }
 
         return true;
       }
@@ -1302,7 +1342,7 @@ namespace ufo
             {
               pre.insert(g.first);
               if (res == NULL) res = g.second;
-              //else res = mk<ITE>(g.first, g.second, res);   // GF
+              else res = mk<ITE>(g.first, g.second, res);   // GF
             }
           }
           stren[p[i]] = simplifyBool(distribDisjoin(pre, m_efac));
