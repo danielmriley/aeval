@@ -99,13 +99,7 @@ namespace ufo
         if (isOpX<FAPP>(cnj) && isOpX<FDECL>(cnj->left()))
         {
           Expr rel = cnj->left();
-          if (find(decls.begin(), decls.end(), rel) == decls.end())
-          {
-            // uninterpreted pred with no def rules is found
-            // treat it FALSE
-            return false;
-          }
-          else
+
           {
             if (hr.srcRelation != NULL)
             {
@@ -116,7 +110,10 @@ namespace ufo
             }
             hr.srcRelation = rel->left();
             for (auto it = cnj->args_begin()+1; it != cnj->args_end(); ++it)
+            {
+              if (!containsOp<ARRAY_TY>(*it))
               srcVars.push_back(*it);
+            }
             c = lin.erase(c);
           }
         }
@@ -129,11 +126,13 @@ namespace ufo
     {
       if (invVars[a->left()].size() == 0)
       {
-        decls.insert(a);
+        ExprVector newArgs;
         int j = 0;
         for (int i = 1; i < a->arity()-1; i++)
         {
           Expr arg = a->arg(i);
+          if (isOpX<ARRAY_TY>(arg)) continue;
+          newArgs.push_back(arg);
           if (!isOpX<INT_TY>(arg) && !isOpX<REAL_TY>(arg) &&
               !isOpX<BOOL_TY>(arg) && !isOpX<ARRAY_TY>(arg) &&
               !isOpX<BVSORT> (arg))
@@ -157,6 +156,8 @@ namespace ufo
             break;
           }
         }
+        newArgs.push_back(a->last());
+        decls.insert(fdecl(a->arg(0), newArgs));
       }
     }
 
@@ -291,7 +292,12 @@ namespace ufo
           hr.dstRelation = head->left()->left();
 
           for (auto it = head->args_begin()+1; it != head->args_end(); ++it)
-            hr.dstVars.push_back(*it); // to be rewritten later
+          {
+            if (!containsOp<ARRAY_TY>(*it))
+            {
+              hr.dstVars.push_back(*it); // to be rewritten later
+            }
+          }
         }
         else
         {
@@ -318,13 +324,19 @@ namespace ufo
           it = chcs.erase(it);
           continue;
         }
-        else ++it;
 
         if (hr.srcRelation == NULL) hr.srcRelation = mk<TRUE>(m_efac);
 
         hr.isFact = isOpX<TRUE>(hr.srcRelation);
         hr.isQuery = (hr.dstRelation == failDecl);
-        if(hr.isQuery) hasQuery = true;
+        if(hr.isQuery)
+        {
+          // skip queries:
+          it = chcs.erase(it);
+          continue;
+          hasQuery = true;
+        }
+        else ++it;
         hr.isInductive = (hr.srcRelation == hr.dstRelation);
 
         origDstSymbs = hr.dstVars;
@@ -344,7 +356,6 @@ namespace ufo
         else
           hr.body = conjoin(lin, m_efac);
       }
-
       if (doElim)
       {
         int sz = chcs.size();
@@ -488,7 +499,7 @@ namespace ufo
 
       // first, remove relations which are trivially false
       // and find any trivially unsatisfiable queries
-      if (!eliminateTrivTrueOrFalse()) return false;
+      // if (!eliminateTrivTrueOrFalse()) return false;
 
       Expr declToRemove = NULL;
       vector<int> srcMax, dstMax;
@@ -1032,8 +1043,8 @@ namespace ufo
       {
         if (failDecl != decl)
         {
-          errs () << "Multiple queries are unsupported\n";
-          exit (1);
+          // errs () << "Multiple queries are unsupported\n";
+          // exit (1);
         }
       }
     }

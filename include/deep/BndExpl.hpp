@@ -559,12 +559,13 @@ namespace ufo
           phaseGuardVarsIndex.insert(i);
         }
 
-        if (debug) outs () << "\nUnroll and execute the cycle for " <<  srcRel << " and phase guard " << phaseGuard <<"\n";
+        if (debug) outs () << "\nUnroll and execute the cycle for " <<  srcRel
+                  << " and phase guard " << phaseGuard <<"\n\n=============\n";
 
         for (int j = 0; j < versVars.size(); j++)
         {
           vector<double> model;
-          if (debug) outs () << "  model for " << j << ": [";
+          if (debug) outs () << "     MODEL for " << j << ": [";
           bool toSkip = false;
           SMTUtils u2(m_efac);
           ExprSet equalities;
@@ -859,9 +860,6 @@ namespace ufo
           int k = 2)
     {
       assert (gh_cond != NULL);
-      if(debug >= 1) {
-        outs() << "Exploring execution of " << srcRel << "\n";
-      }
 
       // helper var
       string str = to_string(numeric_limits<double>::max());
@@ -926,7 +924,11 @@ namespace ufo
         bool toContinue = false;
         bool noopt = true;
 
-        if (!u.isSat(ssa)) return false;
+        if (!u.isSat(ssa))
+        {
+          if (debug) outs () << "  BMC formula unsat\n";
+          return false;
+        }
 
         ExprMap allModels;
         u.getModel(allVars, allModels);
@@ -937,11 +939,12 @@ namespace ufo
         for (auto & a : gh_condVars)
           gh_condVarsIndex.insert(getVarIndex(a, srcVars));
 
-        if (debug) outs () << "\nUnroll and execute the cycle for " <<  srcRel << " and cond " << gh_cond <<"\n";
+        if (debug) outs () << "\n  Unroll and execute the cycle for " <<  srcRel
+            << " and TERM " << gh_cond << "\n  - - - - - \n";
         for (int j = 0; j < versVars.size(); j++)
         {
           if(j >= trace.size()) break;
-          if (debug) outs () << "  model for " << j+1 << ":\t[";
+          if (debug) outs () << "     MODEL for " << j+1 << ":\t[";
           bool toSkip = false;
           vector<double> model;
           for (int i = 0; i < vars.size(); i++) {
@@ -960,15 +963,17 @@ namespace ufo
             }
             else
             {
-              toSkip = true;
-              break;
+              value = 132; // hack just to produce "some" matrix (could have any constant here)
+              // toSkip = true;
+              // break;
             }
             model.push_back(value);
-            if (debug) outs () << *bvar << " = " << *m << ", ";
+            if (debug) outs () << *bvar << " = " << (int)value << ", ";
           }
           if (!toSkip) models.push_back(model);
           if (debug) outs () << "\b\b]\n";
         }
+        if (debug) outs () <<"  - - - - - \n\n";
       }
 
       return true;

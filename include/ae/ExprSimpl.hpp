@@ -3790,6 +3790,8 @@ namespace ufo
 
   inline static Expr normalize(Expr fla, Expr lhsVar)
   {
+    if (containsOp<IDIV>(fla)) return fla;
+
     ExprVector vars;
     filter (fla, IsConst (), inserter(vars, vars.begin()));
     if (isOpX<AND>(fla) || isOpX<OR>(fla))

@@ -462,8 +462,9 @@ namespace ufo
     // to extend
     Expr simplifiedAnd(Expr a, Expr b)
     {
-      ExprVector disjs, vars;
-      flatten(a, disjs, false, vars, [](Expr a, ExprVector& b){return a;});
+      ExprSet disjs, vars;
+      // flatten(a, disjs, false, vars, [](Expr a, ExprVector& b){return a;});
+      getDisj(a, disjs);
       for (auto it = disjs.begin(); it != disjs.end(); )
       {
         if (!isSat(*it, b)) it = disjs.erase(it);
@@ -534,7 +535,7 @@ namespace ufo
         getLiterals(ex, lits, splitEqs);
         for (auto it = lits.begin(); it != lits.end(); ){
           if (isOpX<TRUE>(m.eval(*it))) {  ++it; }
-          else { it = lits.erase(it); } 
+          else { it = lits.erase(it); }
         }
       }
       else
