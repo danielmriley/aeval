@@ -1276,8 +1276,8 @@ namespace ufo
     BoundSolver spec(ruleManager, stren, dg, data2, doPhases, debug);
     if(!ruleManager.hasQuery) {
       if(debug >= 4) ruleManager.print(true);
-      if(debug >= 4 && ruleManager.decls.size() > 1) {
-        outs() << "Multiple loops\n";
+      if(ruleManager.decls.size() > 1) {
+        if(debug >= 4) outs() << "Multiple loops\n";
       }
       else if(debug >= 4) {
         outs() << "Single loop\n";
