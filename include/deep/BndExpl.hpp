@@ -926,8 +926,8 @@ namespace ufo
         bool toContinue = false;
         bool noopt = true;
 
-        outs() << "SSA:\n";
-        for(auto& s: ssa) outs() << s << "\n";
+//        outs() << "SSA:\n";
+//        for(auto& s: ssa) outs() << s << "\n";
 
         if (!u.isSat(ssa)) {
           if(debug) {

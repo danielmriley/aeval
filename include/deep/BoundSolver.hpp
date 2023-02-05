@@ -1103,7 +1103,7 @@ namespace ufo
               getConj(bound->left(), bndConjs);
               bool go = false;
               for(auto& c: bndConjs) {
-                if(u.isSat(s,loopGuard) /*&& emptyIntersect(s,c)*/) {
+                if(u.isSat(s,loopGuard) && !emptyIntersect(s,c)) {
                   outs() << "sat: " << s << " & " << c << " : " << bound->right() << "\n";
                   go = true;
                 }
@@ -1158,7 +1158,7 @@ namespace ufo
       boost::tribool res = exploreBounds(src, dst, bounds, block);
       if (res == false)
       {
-        grds2gh[src] = grds2gh[dst];
+        //grds2gh[src] = grds2gh[dst];
         return true;
       }
 
