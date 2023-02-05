@@ -1098,13 +1098,13 @@ namespace ufo
             terms.insert(r);
 
             for(auto& bound: finalBounds) {
-              outs() << "loopGuard: " << loopGuard << "        src: " << s << "    dst: " << dst << "        e: " << bound << "\n";
+//              outs() << "loopGuard: " << loopGuard << "        src: " << s << "    dst: " << dst << "        e: " << bound << "\n";
               ExprSet bndConjs;
               getConj(bound->left(), bndConjs);
               bool go = false;
               for(auto& c: bndConjs) {
                 if(u.isSat(s,loopGuard) && !emptyIntersect(s,c)) {
-                  outs() << "sat: " << s << " & " << c << " : " << bound->right() << "\n";
+//                  outs() << "sat: " << s << " & " << c << " : " << bound->right() << "\n";
                   go = true;
                 }
               }
@@ -1118,38 +1118,9 @@ namespace ufo
             termsPr.insert(*i);
           }
           grds2gh[src] = normalize(simplifyArithm(mkplus(termsPr, m_efac)));
-          outs() << "ADDED: " << grds2gh[src] << "\n";
-          outs() << "\n\n";
-
-
-
-          //
-          // for(auto& e: finalBounds) {
-          //   Expr r = mkMPZ(0,m_efac);
-          //   terms.insert(r);
-          //   outs() << "loopGuard: " << loopGuard << "        src: " << src << "        e: " << e->right() << "\n";
-          //
-          //   ExprSet srcConjs;
-          //   getConj(src, srcConjs);
-          //   bool go = false;
-          //   for(auto& c : srcConjs) {
-          //     ExprSet dstConjs;
-          //     getConj(e->right(), dstConjs);
-          //     if(u.isSat(c, loopGuard) && c->left() == e->right()->right()) go = true;
-          //   }
-          //   if(go) {
-          //     outs() << "sat: " << src << " & " << e->left() << " : " << e->right() << "\n";
-          //     terms.insert(e->right()->right());
-          //     //r = mk<PLUS>(e->right()->right(), r);
-          //   }
-          // }
-          // ExprSet termsPr;
-          // for(auto i = terms.begin(); i != terms.end(); i++) {
-          //   termsPr.insert(*i);//replaceAll(*i, invVars, invVarsPr));
-          // }
-          // grds2gh[src] = normalize(simplifyArithm(mkplus(termsPr, m_efac)));
           // outs() << "ADDED: " << grds2gh[src] << "\n";
           // outs() << "\n\n";
+
         }
 
         return true;
