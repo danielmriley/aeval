@@ -35,9 +35,9 @@ namespace ufo
       int n = invVars[srcRel].size();
       // make Exprs.
       /*
-      for(int i = 0; i < n-1; i++) {
-        for(int j = i + 1; j < n-1; j++) {
-          if(e1[i]==e1[j]) {
+      for (int i = 0; i < n-1; i++) {
+        for (int j = i + 1; j < n-1; j++) {
+          if (e1[i]==e1[j]) {
             Expr r2 = mk<MINUS>(invVars[srcRel][i], invVars[srcRel][j]);
             dc[srcRel].insert(mk<EQ>(invVars[srcRel][n-1], r2));
             r2 = mk<MINUS>(invVars[srcRel][j], invVars[srcRel][i]);
@@ -46,20 +46,20 @@ namespace ufo
         }
       }
       */
-      for(int i = 0; i < n; i++) {
-        for(int j = i + 1; j < n; j++) {
+      for (int i = 0; i < n; i++) {
+        for (int j = i + 1; j < n; j++) {
           Expr r1,r2,l1,l2,l,r;
           r1 = mkMPZ(cpp_int(e2[j] - e1[j]),m_efac);
           r2 = mk<MINUS>(invVars[srcRel][i], mkMPZ(cpp_int(e1[i]),m_efac));
           l1 = mkMPZ(cpp_int(e2[i] - e1[i]),m_efac);
           l2 = mk<MINUS>(invVars[srcRel][j], mkMPZ(cpp_int(e1[j]),m_efac));
-          if(e2[j] - e1[j] == 0) {
+          if (e2[j] - e1[j] == 0) {
             r1 = mkMPZ(0,m_efac);
           }
           else {
             r1 = mk<MULT>(r1,r2);
           }
-          if(e2[i] - e1[i] == 0) {
+          if (e2[i] - e1[i] == 0) {
             l1 = mkMPZ(0,m_efac);
           }
           else {
@@ -68,32 +68,32 @@ namespace ufo
           l = mk<EQ>(r1,l1);
           l = simplifyArithm(l);
           l = normalize(l);
-          if(l == mk<TRUE>(m_efac)) continue;
+          if (l == mk<TRUE>(m_efac)) continue;
           ev.push_back(l);
-          if(debug >= 2) outs() << "  CONNECT: " << *ev.back() << "\n";
+          if (debug >= 4) outs() << "  CONNECT: " << *ev.back() << "\n";
 
         }
       }
-      if(debug >= 4) outs() << "\n";
+      if (debug >= 4) outs() << "\n";
       // ADD or SUBTRACT each equation from another to generate data candidates.
-      for(int i = 0; i < ev.size(); i++) {
+      for (int i = 0; i < ev.size(); i++) {
         dc[srcRel].insert(normalize(ev[i]));
-        for(int j = i + 1; j < ev.size(); j++) {
+        for (int j = i + 1; j < ev.size(); j++) {
           Expr r = mk<MINUS>(ev[i]->right(), ev[j]->right());
           Expr l = mk<MINUS>(ev[i]->left(), ev[j]->left());
           l = mk<EQ>(l,r);
           l = normalize(l);
-          if(l == mk<TRUE>(m_efac)) continue;
+          if (l == mk<TRUE>(m_efac)) continue;
           dc[srcRel].insert(l);
-          if(debug >= 2) outs() << "  CONNECT: " << l << "\n";
+          if (debug >= 4) outs() << "  CONNECT: " << l << "\n";
 
           r = mk<PLUS>(ev[i]->right(), ev[j]->right());
           l = mk<PLUS>(ev[i]->left(), ev[j]->left());
           l = mk<EQ>(l,r);
           l = normalize(l);
-          if(l == mk<TRUE>(m_efac)) continue;
+          if (l == mk<TRUE>(m_efac)) continue;
           dc[srcRel].insert(l);
-          if(debug >= 4) outs() << "  CONNECT: " << l << "\n";
+          if (debug >= 4) outs() << "  CONNECT: " << l << "\n";
         }
       }
     }
@@ -110,12 +110,8 @@ namespace ufo
         boost::tribool res = bnd.unrollAndExecuteTermPhase
           (src, dst, srcRel, invVars[srcRel], models[srcRel], block);
 
-        if(res) {
+        if (res) {
           createCandsFromData(srcRel);
-        }
-        else
-        {
-          if(debug >= 1) outs () << "BMC formula unsat\n";
         }
         return res;
       }

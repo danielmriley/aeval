@@ -324,13 +324,19 @@ namespace ufo
           it = chcs.erase(it);
           continue;
         }
-        else ++it;
 
         if (hr.srcRelation == NULL) hr.srcRelation = mk<TRUE>(m_efac);
 
         hr.isFact = isOpX<TRUE>(hr.srcRelation);
         hr.isQuery = (hr.dstRelation == failDecl);
-        if(hr.isQuery) hasQuery = true;
+        if(hr.isQuery)
+        {
+          // skip queries:
+          it = chcs.erase(it);
+          continue;
+          hasQuery = true;
+        }
+        else ++it;
         hr.isInductive = (hr.srcRelation == hr.dstRelation);
 
         origDstSymbs = hr.dstVars;
@@ -493,7 +499,7 @@ namespace ufo
 
       // first, remove relations which are trivially false
       // and find any trivially unsatisfiable queries
-      if (!eliminateTrivTrueOrFalse()) return false;
+      // if (!eliminateTrivTrueOrFalse()) return false;
 
       Expr declToRemove = NULL;
       vector<int> srcMax, dstMax;
@@ -1037,8 +1043,8 @@ namespace ufo
       {
         if (failDecl != decl)
         {
-          errs () << "Multiple queries are unsupported\n";
-          exit (1);
+          // errs () << "Multiple queries are unsupported\n";
+          // exit (1);
         }
       }
     }

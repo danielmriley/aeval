@@ -89,7 +89,7 @@ namespace ufo
         else if (a.isQuery) qr = &a;
         else fc = &a;
       tr_orig = *tr;
-      for(auto& dcl: ruleManager.decls) decls.push_back(dcl->left());
+      for (auto& dcl: ruleManager.decls) decls.push_back(dcl->left());
       invDecl = tr->srcRelation;
       invVars = tr->srcVars;
       invVarsPr = tr->dstVars;
@@ -99,7 +99,7 @@ namespace ufo
 
     bool setUpCounters()
     {
-      if(debug >= 3) outs() << "setUpCounters\n";
+      if (debug >= 3) outs() << "setUpCounters\n";
       for (int i = 0; i < 2; i++)
       {
         Expr new_name = mkTerm<string> (ghostVar_pref + to_string(i), m_efac);
@@ -135,14 +135,14 @@ namespace ufo
     }
 
     void replaceRule(HornRuleExt* hr) {
-      for(auto& rule: ruleManager.chcs) {
-        if(!hr->isInductive && !hr->isQuery && !rule.isInductive && !rule.isQuery) {
+      for (auto& rule: ruleManager.chcs) {
+        if (!hr->isInductive && !hr->isQuery && !rule.isInductive && !rule.isQuery) {
           replaceRule(hr,&rule);
         }
-        else if(hr->isInductive && rule.isInductive) {
+        else if (hr->isInductive && rule.isInductive) {
           replaceRule(hr,&rule);
         }
-        else if(hr->isQuery && rule.isQuery) {
+        else if (hr->isQuery && rule.isQuery) {
           replaceRule(hr,&rule);
         }
       }
@@ -159,13 +159,13 @@ namespace ufo
       fc_new->isFact = false;
       ExprVector specVars;
       ExprVector specVarsPr;
-      for(int i = 0; i < invVars.size(); i++) {
+      for (int i = 0; i < invVars.size(); i++) {
         specVars.push_back(bind::intConst(mkTerm<string>(varName + to_string(i + invVars.size()), m_efac)));
         specVarsPr.push_back(bind::intConst(mkTerm<string>(varName + to_string(i + invVars.size()) + "'", m_efac)));
       }
       fc_new->srcVars = specVars;
       ExprSet fc_body;
-      for(int i = 0; i < specVars.size(); i++) {
+      for (int i = 0; i < specVars.size(); i++) {
         fc_body.insert(mk<EQ>(specVars[i], invVarsPr[i]));
       }
 
@@ -173,7 +173,7 @@ namespace ufo
       fc_body.insert(mk<EQ>(ghostVars[1], ghostVarsPr[0]));
 
       fc_new->body = conjoin(fc_body, m_efac);
-      if(debug >= 3) outs() << "fc_new body: " << fc_new->body << "\n";
+      if (debug >= 3) outs() << "fc_new body: " << fc_new->body << "\n";
       fc_new->srcVars.push_back(ghostVars[1]);
       specVars = fc_new->srcVars;
       ruleManager.invVars[specDecl].clear();
@@ -185,16 +185,16 @@ namespace ufo
       ExprSet temp;
       getConj(fcBodyInvVars,temp);
       bool replaced;
-      for(auto e = temp.begin(); e != temp.end(); ) {
+      for (auto e = temp.begin(); e != temp.end(); ) {
         replaced = false;
-        for(auto& i: fc_new->dstVars) {
-          if(contains(*e, i)) {
+        for (auto& i: fc_new->dstVars) {
+          if (contains(*e, i)) {
             e = temp.erase(e);
             replaced = true;
           }
 
         }
-        if(!replaced) e++;
+        if (!replaced) e++;
       }
       fcBodyInvVars = conjoin(temp, m_efac);
 
@@ -228,7 +228,7 @@ namespace ufo
       replaceRule(tr_new);
 
       fcBodyInvVars = replaceAll(fcBodyInvVars, fc->srcVars, invVars);
-      if(debug >= 4) outs() << "fcBodyInvVars: " << fcBodyInvVars << "\n";
+      if (debug >= 4) outs() << "fcBodyInvVars: " << fcBodyInvVars << "\n";
 
       for (auto & a : ruleManager.chcs)    // r.chcs changed by r.addRule, so pointers to its elements are broken
         if (a.isInductive) tr = &a;
@@ -303,7 +303,54 @@ namespace ufo
        }
       if (weak)
       {
-        if (debug >= 1) outs () << "try weakening\n";
+        if (debug >= 2) outs () << "try weakening\n";
+
+        // ExprSet cannot, cannotSpec;
+        // while (true)
+        // {
+        //   auto it = candidates [specDecl].begin();
+        //   for (; it != candidates [specDecl].end();)
+        //   {
+        //     Expr cand = *it;
+        //     if (find(cannotSpec.begin(), cannotSpec.end(), cand) != cannotSpec.end() ||
+        //         lexical_cast<string>(cand).find("gh") != std::string::npos)  // hack for now
+        //     {
+        //       ++it;
+        //       continue;
+        //     }
+        //
+        //     if (u.implies(src, cand))
+        //     {
+        //       ++it;
+        //       continue;
+        //     }
+        //
+        //     if (debug >= 2) outs () << "can remove: " << cand << "?\n";
+        //                 outs () << candidates [specDecl].size() << ". " << candidates [invDecl].size() << "\n";
+        //     it = candidates [specDecl].erase(it);
+        //     auto r = replaceAll(*it, fc->srcVars, tr->srcVars);
+        //     candidates [invDecl].erase(r);
+        //
+        //     outs () << candidates [specDecl].size() << ". " << candidates [invDecl].size() << "\n";
+        //     auto res = checkAllOver(checkQuery, false, src, dst);
+        //     if (debug >= 5)   outs () << "checkAllOver (nest):  " << res << "\n";
+        //     if (!res)
+        //     {
+        //       outs () << "inseer back\n";
+        //       cannot.insert(r);
+        //       cannotSpec.insert(cand);
+        //       break;
+        //     }
+        //
+        //   }
+        //
+        //   auto res = (it == candidates [specDecl].end());
+        //   candidates [specDecl].insert(cannotSpec.begin(), cannotSpec.end());
+        //   candidates [invDecl].insert(cannot.begin(), cannot.end());
+        //   if (res) break;
+        //
+        // }
+
 
         for (auto & a : candidates)
         {
@@ -327,7 +374,7 @@ namespace ufo
                 continue;
               }
 
-              if (debug >= 5) outs () << "can remove: " << cand << " for " << a.first << "?\n";
+              if (debug >= 3) outs () << "can remove: " << cand << " for " << a.first << "?\n";
               it = a.second.erase(it);
               auto res = checkAllOver(checkQuery, false, src, dst);
               if (debug >= 5)   outs () << "checkAllOver (nest):  " << res << "\n";
@@ -373,9 +420,9 @@ namespace ufo
       ExprSet checkList;
       checkList.insert(hr.body);
       Expr rel;
-      if(debug >= 6) {
-        if(hr.isQuery) outs() << "Query\n";
-        else if(hr.isInductive) outs() << "Inductive\n";
+      if (debug >= 6) {
+        if (hr.isQuery) outs() << "Query\n";
+        else if (hr.isInductive) outs() << "Inductive\n";
         else outs() << "Pre\n";
 
       }
@@ -383,7 +430,7 @@ namespace ufo
         Expr rel = hr.srcRelation;
         ExprSet lms = annotations[rel];
         Expr overBody = replaceAll(conjoin(lms, m_efac), ruleManager.invVars[rel], hr.srcVars);
-        if(debug >= 6) outs() << "overbody: " << overBody << "\n";
+        if (debug >= 6) outs() << "overbody: " << overBody << "\n";
         getConj(overBody, checkList);
       }
       if (!hr.isQuery)
@@ -393,10 +440,10 @@ namespace ufo
         ExprSet lms = annotations[rel];
         for (auto a : lms) negged.insert(mkNeg(replaceAll(a, ruleManager.invVars[rel], hr.dstVars)));
         Expr neg = disjoin(negged, m_efac);
-        if(debug >= 6) outs() << "neg: " << neg << "\n";
+        if (debug >= 6) outs() << "neg: " << neg << "\n";
         checkList.insert(neg);
       }
-      if(debug >= 6) { outs() << "checkList:\n"; pprint(checkList, 2); }
+      if (debug >= 6) { outs() << "checkList:\n"; pprint(checkList, 2); }
       auto res = bool(!u.isSat(checkList));
       return res;
     }
@@ -435,11 +482,36 @@ namespace ufo
      }
     }
 
+    bool multiHoudiniExtr(vector<HornRuleExt*>& worklist, bool recur = true)
+    {
+      //GF: to check -- if this weaken is needed
+      // ExprSet e1, e2;
+      // for (auto & c : candidates[specDecl])
+      // {
+      //   if (isOpX<LT>(c)) e1.insert(mk<LEQ>(c->left(), c->right()));
+      //   if (isOpX<GT>(c)) e1.insert(mk<GEQ>(c->left(), c->right()));
+      // }
+      //
+      // candidates[specDecl].insert(e1.begin(), e1.end());
+      //
+      // for (auto & c : candidates[invDecl])
+      // {
+      //   if (isOpX<LT>(c)) e2.insert(mk<LEQ>(c->left(), c->right()));
+      //   if (isOpX<GT>(c)) e2.insert(mk<GEQ>(c->left(), c->right()));
+      // }
+      //
+      // candidates[invDecl].insert(e2.begin(), e2.end());
+
+      // printCandsEx();
+
+      return multiHoudini(worklist, recur);
+    }
+
     // adapted from RndLearnerV3
     bool multiHoudini(vector<HornRuleExt*>& worklist, bool recur = true)
     {
       if (!anyProgress(worklist)) {
-        if(debug >= 5) outs() << "No progress\n";
+        if (debug >= 5) outs() << "No progress\n";
         return false;
       }
       auto candidatesTmp = candidates;
@@ -494,7 +566,7 @@ namespace ufo
             {
               if (a.second == b)
               {
-                if(debug >= 1)
+                if (debug >= 1)
                   outs () << "cyclic paths not supported\n";
                 return false;
               }
@@ -515,7 +587,7 @@ namespace ufo
             {
               if (a.second == b)
               {
-                if(debug >= 1)
+                if (debug >= 1)
                   outs () << "cyclic paths not supported\n";
                 return false;
               }
@@ -523,7 +595,7 @@ namespace ufo
             ExprVector newtrace = trace;
             newtrace.push_back(a.second);
             bool  res = getAllPaths(a.second, dst, len-1, newtrace, traces);
-            if(!res) return false;
+            if (!res) return false;
           }
         }
       }
@@ -555,21 +627,21 @@ namespace ufo
 
     void pairPhases() {
       Expr init = fcBodyInvVars;
-      for(auto& p : phases) {
-        if(init != p && u.isSat(init, p)) {
+      for (auto& p : phases) {
+        if (init != p && u.isSat(init, p)) {
           phasePairs.push_back(std::make_pair(init,p));
         }
       }
-      for(int i = 0; i < phases.size(); i++) {
-        for(int j = 0; j < phases.size(); j++) {
-          if(i == j) continue;
-          if(u.isSat(tr->body,phases[i],replaceAll(phases[j],invVars,invVarsPr))) {
+      for (int i = 0; i < phases.size(); i++) {
+        for (int j = 0; j < phases.size(); j++) {
+          if (i == j) continue;
+          if (u.isSat(tr->body,phases[i],replaceAll(phases[j],invVars,invVarsPr))) {
             phasePairs.push_back(std::make_pair(phases[i],phases[j]));
           }
         }
       }
-      for(auto& p : phases) {
-        if(!u.isSat(p, tr->body)) {
+      for (auto& p : phases) {
+        if (!u.isSat(p, tr->body)) {
           phasePairs.push_back(std::make_pair(p,mk<FALSE>(m_efac)));
         }
       }
@@ -577,8 +649,8 @@ namespace ufo
 
     bool sortPhases() {
       ExprSet init;
-      for(auto & p : phasePairs) {
-        if(p.first == fcBodyInvVars) {
+      for (auto & p : phasePairs) {
+        if (p.first == fcBodyInvVars) {
           init.insert(p.first);
         }
       }
@@ -596,12 +668,12 @@ namespace ufo
         int len = paths.size();
         for (int i = 1; i <= phasePairs.size() ; i++) {
           bool res = getAllPaths (in, mk<FALSE>(m_efac), i, {in}, paths);
-          if(!res) return false;
+          if (!res) return false;
         }
         assert (paths.size() > len && "No paths found\n");
       }
 
-      if(debug >=4) {
+      if (debug >=4) {
         for (auto & p : paths)
         {
           outs () << "Found path: ";
@@ -610,10 +682,75 @@ namespace ufo
           outs () << "\n";
         }
       }
-      if(debug >= 3 || debug == -1)
+      if (debug >= 3 || debug == -1)
         outs() << "# of paths " << paths.size() << "\n";
 
       return true;
+    }
+
+    void shrinkPrjcts(ExprVector & prjcts)
+    {
+      int sz = prjcts.size();
+      if (debug) outs () << "shrinkPrjcts sz = " << sz << "\n";
+      if (sz == 1) return;
+      for (auto it = prjcts.begin(); it != prjcts.end();)
+      {
+        Expr cand = *it;
+        if (u.implies(cand, loopGuard))
+        {
+          ++it;
+          continue;
+        }
+        // outs () << "see if can remove " << cand << "\nvars: ";
+        ExprSet vars;
+        // for (auto it2 = prjcts.begin(); it2 != prjcts.end(); ++it2)
+        //   if (it != it2)
+        //     filter (*it2, bind::IsConst (), inserter (vars, vars.begin()));
+
+        filter (loopGuard, bind::IsConst (), inserter (vars, vars.begin()));
+
+        ExprVector copyNames, copyNamesPr, eq1, eq2;
+        for (int i = 0; i < tr->srcVars.size(); i++)
+        {
+          Expr new_name = mkTerm<string> ("__eq_var_" + to_string(i), m_efac);
+          Expr var = cloneVar(tr->srcVars[i], new_name);
+          copyNames.push_back(var);
+
+          new_name = mkTerm<string> ("__eq_var_" + to_string(i) + "_", m_efac);
+          Expr var1 = cloneVar(tr->srcVars[i], new_name);
+          copyNamesPr.push_back(var1);
+
+          if (find(vars.begin(), vars.end(), tr->srcVars[i]) != vars.end())
+          {
+            eq1.push_back(mk<EQ>(tr->srcVars[i], var));
+            eq2.push_back(mk<EQ>(tr->dstVars[i], var1));
+          }
+        }
+
+        bool eq = true;
+        for (auto c : {cand, mk<NEG>(cand)})
+        {
+          Expr newBody = replaceAll(replaceAll(mk<AND>(tr->body, c), tr->srcVars, copyNames),
+                                              tr->dstVars, copyNamesPr);
+          eq &= (true == (bool)u.isSat(newBody));
+          ExprVector eqcheck = {
+            tr->body,
+            newBody,
+            conjoin(eq1, m_efac),
+            mk<NEG>(conjoin(eq2, m_efac))
+          };
+          eq &= (false == (bool)u.isSat(eqcheck));
+        }
+
+        if (eq)
+        {
+          outs () << "   >> erasing prj: " << *it << "\n";
+          it = prjcts.erase(it);
+          break;
+        }
+        else ++it;
+      }
+      if (prjcts.size() < sz) shrinkPrjcts(prjcts);
     }
 
     void collectPhaseGuards(bool weakenPhases = false)
@@ -628,14 +765,14 @@ namespace ufo
       ExprVector& dstVars = tr->dstVars;
       assert(srcVars.size() == dstVars.size());
       ExprSet dstVarsSet;
-      for(auto& d: dstVars) dstVarsSet.insert(d);
-      cycle.pop_back();
-      cycle.push_back(1);
-      Expr ssa = bnd.toExpr(cycle);
-
-      ssa = replaceAll(ssa, bnd.bindVars.back(), dstVars);
-      ssa = rewriteSelectStore(ssa);
-      retrieveDeltas(ssa, srcVars, dstVars, cands);
+      for (auto& d: dstVars) dstVarsSet.insert(d);
+      // cycle.pop_back();
+      // cycle.push_back(1);
+      // Expr ssa = bnd.toExpr(cycle);
+      //
+      // ssa = replaceAll(ssa, bnd.bindVars.back(), dstVars);
+      // ssa = rewriteSelectStore(ssa);
+      // retrieveDeltas(ssa, srcVars, dstVars, cands);
 
       ExprVector vars2keep, prjcts, prjcts1, prjcts2;
       ExprSet prjctsTmp;
@@ -652,9 +789,9 @@ namespace ufo
         }
       }
 
-      u.flatten(ssa, prjcts1, false, vars2keep, keepQuantifiersRepl);
+      u.flatten(tr->body, prjcts1, false, vars2keep, keepQuantifiersRepl);
 
-      if(weakenPhases)
+      if (weakenPhases)
       {
         for (auto p1 = prjcts1.begin(); p1 != prjcts1.end(); )
         {
@@ -664,11 +801,11 @@ namespace ufo
             if (*p1 == *p2) { continue; }
             if (u.implies (*p1, *p2))
             {
-              if(debug >= 4) outs () << "  to remove " << *p1 << "\n";
+              if (debug >= 4) outs () << "  to remove " << *p1 << "\n";
               changed = true;
             }
           }
-          if(changed) { p1 = prjcts1.erase(p1); }
+          if (changed) { p1 = prjcts1.erase(p1); }
           else { p1++; }
         }
       }
@@ -686,7 +823,7 @@ namespace ufo
           p = simplifyArithm(normalize(p));
         }
         getConj(p, prjctsTmp);
-        if (debug >= 2) outs() << "Generated MBP: " << p << "\n";
+        if (debug >= 3) outs() << "Generated MBP: " << p << "\n";
       }
 
       prjcts.insert(prjcts.end(), prjctsTmp.begin(), prjctsTmp.end());
@@ -709,18 +846,20 @@ namespace ufo
           ++it;
       }
 
-      if (debug >= 2)
+      if (debug >= 3)
       {
         outs() << "Split MBP: \n";
         pprint(prjcts, 3);
       }
+
+      shrinkPrjcts(prjcts);
 
       vector<ExprVector> res;
       getCombs(prjcts, 0, res);
       for (auto & r : res)
       {
         phases.push_back(conjoin(r, m_efac));
-        if(debug >= 3) {
+        if (debug >= 3) {
           outs () << "  comb: ";
           pprint(r);
           outs () << "\n";
@@ -728,17 +867,17 @@ namespace ufo
       }
 
       pairPhases();
-      if(debug >= 3) {
+      if (debug >= 3) {
         outs() << "\n";
-        for(auto& v: phasePairs) {
+        for (auto& v: phasePairs) {
           outs() << "  : "<< v.first << " --> " << v.second << "\n";
         }
         outs() << "\n";
       }
       if (!sortPhases())
       {
-        if(!weakenPhases) {
-          if(debug >=3) outs() << "Path finding failed. Trying again.\n";
+        if (!weakenPhases) {
+          if (debug >=3) outs() << "Path finding failed. Trying again.\n";
           phasePairs.clear();
           paths.clear();
           phases.clear();
@@ -752,41 +891,41 @@ namespace ufo
     }
 
     void parseForGuards() {
-      if(debug >= 3) outs() << "Begin parsing for guards\n";
+      if (debug >= 3) outs() << "Begin parsing for guards\n";
       // get a DNF form if there are disj in the result from G&S.
       ExprVector projections, prjcts, vars2keep;
       Expr pc = ghostVars[0];
 
       u.flatten(conjoin(candidates[specDecl], m_efac), prjcts, false, vars2keep, [](Expr a, ExprVector& b){return a;});
 
-      for(auto& p : prjcts) {
+      for (auto& p : prjcts) {
         projections.push_back(replaceAll(p, fc->srcVars, invVars));
       }
-      if(debug >= 3) {
+      if (debug >= 3) {
         outs() << "\n   Projections\n=================\n";
         pprint(projections, 3);
         outs() << "=================\n";
       }
       ExprSet t,p,g;
-      for(auto e = projections.begin(); e != projections.end() ; e++) {
+      for (auto e = projections.begin(); e != projections.end() ; e++) {
         t.clear(); p.clear(); g.clear();
         getConj(*e, t);
 
         ExprSet temp;
-        for(auto& a: t) {
+        for (auto& a: t) {
           temp.insert(normalize(a));
         }
         t.clear();
         t.swap(temp);
         int c = 0;
         ExprSet toBeRenamed;
-        for(auto& ee: t) {
-          if(contains(ee,ghostVars[0]) || contains(ee,ghostVars[1])) {
+        for (auto& ee: t) {
+          if (contains(ee, ghostVars[0]) || contains(ee, ghostVars[1])) {
             c++;
-            Expr r = replaceAll(ee, fc->srcVars,invVars);
+            Expr r = replaceAll(ee, fc->srcVars, invVars);
 
             r = normalize(r, pc);
-            if(containsOp<EQ>(r) && r->left() == pc) g.insert(r);
+            if (containsOp<EQ>(r) && r->left() == pc) g.insert(r);
             else toBeRenamed.insert(r);
           }
           else {
@@ -800,25 +939,31 @@ namespace ufo
         i++;
         for (auto & a : toBeRenamed)
           p.insert(replaceAll(a, pc, join->right()));
-        for(;i!=end;i++) {
-          join = mk<EQ>(join->right(),(*i)->right());
+        for (; i!=end; i++) {
+          join = mk<EQ>(join->right(), (*i)->right());
           join = normalize(join);
           p.insert(join);
         }
-        for(auto& d: g) {
-          if(isOpX<MPZ>(d->right())) {
+        for (auto& d: g) {
+          if (isOpX<MPZ>(d->right())) {
             join = d;
             break;
           }
         }
 
-        if (grds2gh[conjoin(p,m_efac)] != NULL)
+        auto grd = conjoin(p, m_efac);
+        if (grds2gh[grd] != NULL && join->right() != grds2gh[grd])
         {
+          outs () << "grds2gh for " << grd << ":\n   " << grds2gh[grd] << "\n";
+          outs () << "   want to assign: " << join->right() << "\n";
           assert(0 && "ERROR: guards already assigned\n");
         }
-        grds2gh[conjoin(p,m_efac)] = join->right();  // GF: DS
+        {
+          outs () << "  ASSIGNING grds2gh for " << grd << ":\n   " << join->right() << "\n";
+          grds2gh[grd] = join->right();  // GF: DS
+        }
       }
-      if(debug >= 3) { outs() << "End parsing for guards\n"; }
+      if (debug >= 3) { outs() << "End parsing for guards\n"; }
     }
 
     void genCands(ExprSet & tmp, Expr pc)
@@ -849,9 +994,9 @@ namespace ufo
 
     void bubbleSort(ExprVector& v) {
       // Bubble sort because it's easy....
-      for(int i = 0; i < v.size(); i++) {
-        for(int j = i + 1; j < v.size(); j++) {
-          if(v[i]->left()->arity() > v[j]->left()->arity()) {
+      for (int i = 0; i < v.size(); i++) {
+        for (int j = i + 1; j < v.size(); j++) {
+          if (v[i]->left()->arity() > v[j]->left()->arity()) {
             Expr e = v[i];
             v[i] = v[j];
             v[j] = e;
@@ -863,9 +1008,9 @@ namespace ufo
     void sortBounds(ExprVector& bounds) {
       ExprVector holdMPZ, holdOther;
 
-      for(int i = 0; i < bounds.size(); i++) {
+      for (int i = 0; i < bounds.size(); i++) {
         Expr e = normalize(bounds[i]);
-        if(isOpX<MPZ>(e->right()) && e->right() != mpzZero) {
+        if (isOpX<MPZ>(e->right()) && e->right() != mpzZero) {
           holdMPZ.push_back(e);
         }
         else {
@@ -875,15 +1020,15 @@ namespace ufo
       bubbleSort(holdOther);
       bubbleSort(holdMPZ);
       bounds.clear();
-      for(auto& v : holdOther) bounds.push_back(normalize(v, ghostVars[0]));
-      for(auto& v : holdMPZ) bounds.push_back(normalize(v, ghostVars[0]));
+      for (auto& v : holdOther) bounds.push_back(normalize(v, ghostVars[0]));
+      for (auto& v : holdMPZ) bounds.push_back(normalize(v, ghostVars[0]));
     }
 
     void filterNonGhExp(ExprSet& candSet)
     {
-      for(auto i = candSet.begin(); i != candSet.end(); ) {
-        if(!contains(*i, ghostVars[0])) {
-          if(dg) dataGrds.insert(*i);
+      for (auto i = candSet.begin(); i != candSet.end(); ) {
+        if (!contains(*i, ghostVars[0])) {
+          if (dg) dataGrds.insert(*i);
           i = candSet.erase(i);
         }
         else i++;
@@ -903,13 +1048,54 @@ namespace ufo
                                  mk<EQ>(pc, grds2gh[dst])))); // hack for now
       tr->body = u.removeITE(mk<AND>(src, tr_orig.body));
 
-      dst = mk<AND>(mk<NEG>(src), mk<AND>(dst, stren[dst]), mk<EQ>(pc, grds2gh[dst]));
+      if (debug > 2)
+        outs () << "  using " << grds2gh[dst] << "\n    as bound for " << dst << "\n";
+      auto dst1 = mk<AND>(mk<NEG>(src), mk<AND>(dst, stren[dst]), mk<EQ>(pc, grds2gh[dst]));
 
-      src = mk<AND>(block, src);
-      if(isOpX<TRUE>(block))
-        src = replaceAll(src, invVars, fc->srcVars);
-      res = dl2.connectPhase(src, dst, invDecl, block, invs, loopGuard);
-      dl2.getDataCands(candMap[invDecl], invDecl);  // GF
+      auto src1 = u.simplifiedAnd(block, src);
+      if (isOpX<TRUE>(block))
+        src1 = replaceAll(src1, invVars, fc->srcVars);
+      res = dl2.connectPhase(src1, dst1, invDecl, block, invs, loopGuard);
+      if (res == true)
+        dl2.getDataCands(candMap[invDecl], invDecl);  // GF
+      else
+      {
+        outs () << "check sanity:\n";
+        outs () << src1 << "   =>  \n";
+        outs () << dst << "\n";
+        ExprSet cnjs, cnjsUpd;
+        getConj(src1, cnjs);
+        // some small mutations
+        for (auto s : cnjs)
+        {
+          s = simplifyArithm(replaceAll(
+              keepQuantifiers(mk<AND>(s, tr->body), tr->dstVars),
+              tr->dstVars, tr->srcVars));
+
+          getConj(s, cnjsUpd);
+        }
+        cnjs.insert(cnjsUpd.begin(), cnjsUpd.end());
+
+        for (auto it = cnjs.begin(); it !=cnjs.end();)
+          if (u.implies(mk<AND>(*it, tr->body),
+                   replaceAll(*it, tr->srcVars, tr->dstVars)))
+            ++it; else it = cnjs.erase(it);
+
+        // outs () << "    INV:    " << conjoin(cnjs, m_efac) << "\n";
+        if (u.implies(mk<AND>(mk<NEG>(src),
+                conjoin(cnjs, m_efac)), mk<NEG>(mk<AND>(dst, stren[dst]))))
+          {} //outs () << "  SANE \n";
+        else
+        {
+          outs () << "  INSANE \n";
+          // if you see this, then we may have a soundness issue.
+          // need to manually check the reported solution.
+          // (and also need to fix something in the code)
+          outs() << u.getModel() << "\n";
+        }
+      // check actual reachability:
+      // if (u.implies());
+      }
       return res;
     }
 
@@ -918,23 +1104,25 @@ namespace ufo
     {
       boost::tribool res;
 
-      if(isOpX<FALSE>(block)) return false;
+      if (isOpX<FALSE>(block)) return false;
       res = dataForBoundPhase(src, dst, ghCandMap, block);
-      if (res != true) return false;
+      if (res == indeterminate) return indeterminate;
+      else if (res == false) return false;
       filterNonGhExp(ghCandMap[invDecl]);
-      if(ghCandMap[invDecl].empty()) return false;
+      if (ghCandMap[invDecl].empty()) return indeterminate;
 
       ExprSet temp;
-      for(auto i = ghCandMap[invDecl].begin(),
+      for (auto i = ghCandMap[invDecl].begin(),
           end = ghCandMap[invDecl].end(); i != end; i++) {
         Expr e = *i;
         e = normalize(e,ghostVars[0]);
         temp.insert(e);
       }
       ghCandMap[invDecl].swap(temp);
-      if(debug >= 2) {
-        outs() << "filtered cands found: ";
-        if(!ghCandMap[invDecl].empty()) outs() << ghCandMap[invDecl].size() << "\n";
+      if (debug >= 2) {
+        outs() << "  Filtered cands found: ";
+        if (!ghCandMap[invDecl].empty())
+          outs() << ghCandMap[invDecl].size() << "\n";
         else outs() << "  none.\n";
       }
       // break odd/even
@@ -944,7 +1132,10 @@ namespace ufo
 
     Result_t elba(ExprSet& third, Expr src, Expr dst)
     {
-      if(debug >= 3) outs() << "\n  ===================\n  ||    E L B A    ||  \n  ===================\n\n";
+      if (debug >= 3)
+        outs() << "\n  ===================\n" <<
+                    "  ||    E L B A    || \n" <<
+                    "  ===================\n\n";
 
       filterUnsat();
       Expr pc = ghostVars[0];
@@ -954,16 +1145,21 @@ namespace ufo
         if (containsOp<ARRAY_TY>(hr.body)) hasArrays = true;
         worklist.push_back(&hr);
       }
-
+      if (debug > 1) outs () << "stage 0\n";
       auto candidatesTmp = candidates;
-      multiHoudini(worklist);
+      multiHoudiniExtr(worklist);
+
+
+      // stage 0:
       if (checkAllOver(true, true, src, dst)) return Result_t::UNSAT;
+
+      if (strenBound == 0) return Result_t::UNKNOWN;
 
       Expr learnedLemmasInv = conjoin(candidates[invDecl], m_efac);
       candidates = candidatesTmp;
       for (auto & a : candidatesTmp[invDecl])
       {
-        if (!isOp<ComparissonOp>(a)) continue;  // GF
+        if (!isOp<ComparissonOp>(a)) continue;
         if (isOpX<EQ>(a)) continue;
         if (contains(a, pc)) continue;
         ExprVector vars, varsPr;
@@ -973,7 +1169,8 @@ namespace ufo
           vars.push_back(tr->srcVars[i]);
           varsPr.push_back(tr->dstVars[i]);
         }
-        if (vars.size() > 2) continue;
+
+        // if (vars.size() > 2) continue;  GF: to check if cuncommenting this line helps anywhere
 
         auto b = replaceAll(
                   keepQuantifiers(mk<AND>(a, learnedLemmasInv, tr->body), varsPr),
@@ -981,9 +1178,14 @@ namespace ufo
         getConj(mk<AND>(a, b), candidates[invDecl]);
       }
 
+      if (debug > 1) outs () << "stage 1\n";
       candidatesTmp = candidates;
-      multiHoudini(worklist);
+      multiHoudiniExtr(worklist);
+
+      // stage 1:
       if (checkAllOver(true, true, src, dst)) return Result_t::UNSAT;
+
+      if (strenBound == 1) return Result_t::UNKNOWN;
 
 
       candidates = candidatesTmp;
@@ -993,8 +1195,13 @@ namespace ufo
         candidates[invDecl].insert(c);
       }
 
-      multiHoudini(worklist);
+      if (debug > 1) outs () << "stage 2\n";
+      multiHoudiniExtr(worklist);
+
+      // stage 2:
       if (checkAllOver(true, true, src, dst)) return Result_t::UNSAT;
+
+      if (strenBound == 2) return Result_t::UNKNOWN;
 
 
       ExprSet cnjs, cnjsUpd;
@@ -1015,38 +1222,46 @@ namespace ufo
         candidates[specDecl].insert(replaceAll(c, tr->srcVars, fc->srcVars));
         candidates[invDecl].insert(c);
       }
-      multiHoudini(worklist);
+
+      if (debug > 1) outs () << "stage 3\n";
+      multiHoudiniExtr(worklist);
+
+      // stage 3:
       if (checkAllOver(true, true, src, dst)) return Result_t::UNSAT;
 
       return Result_t::UNKNOWN;
     }
 
     ExprSet exploredBounds;
-
-    boost::tribool boundSolveRec(Expr src, Expr dst, Expr block) {
+    ExprSet zs;
+    boost::tribool boundSolveRec(Expr src, Expr dst, Expr block, int lvl = 0) {
       map<Expr,ExprSet> bounds;
       dataGrds.clear();
 
-      if(!u.isSat(fcBodyInvVars,loopGuard)) {
-        if(debug >= 3) outs() << "PROGRAM WILL NEVER ENTER LOOP\n";
+      if (!u.isSat(fcBodyInvVars,loopGuard)) {
+        if (debug >= 2) outs() << "PROGRAM WILL NEVER ENTER LOOP\n";
         return true;
       }
-      if(debug >= 3) {
-        outs() << "  EXPLOREBOUNDS:  " << block << "\n";
-        outs() << "=================\n";
+      if (debug >= 2) {
+        outs() << "  boundSolveRec [" << lvl << "]:\n    " << block << "\n";
       }
 
       if (isOpX<FALSE>(dst))
       {
         grds2gh[src] = mkMPZ(0, m_efac);
+        if (debug >= 2) outs () << "  assign 0 grds2gh (0) for " << src << "\n";
         return true;
       }
 
       boost::tribool res = exploreBounds(src, dst, bounds, block);
       if (res == false)
       {
-        grds2gh[src] = grds2gh[dst];
         return true;
+      }
+      else if (res == indeterminate) {
+        outs () << "unknown\n";     // TODO: actually some backtracking
+        exit(0);
+        // return indeterminate;
       }
 
       ExprSet grds, grdsDst;
@@ -1054,32 +1269,41 @@ namespace ufo
       genCands(grdsDst, ghostVars[0]);
       getConj(src, grds);
 
-      if(dg) {
-        for(auto& e: dataGrds) {
+      zs.clear();
+      if (dg) {
+        for (auto& e: dataGrds) {
 
           ExprSet vars;
           filter (e, bind::IsConst (), inserter (vars, vars.begin()));
 
-          if(isOpX<EQ>(e) && !hasMPZ(e) && vars.size() > 1)
-          {
-            grds.insert(e);
-            if(debug >= 3)
-              outs() << "Adding guard from data: " << e << "\n";
+          if (isOpX<EQ>(e)){
+
+           if (!hasMPZ(e) && vars.size() > 1)
+            {
+              grds.insert(e);
+              if (debug >= 3)
+                outs() << "Adding guard from data: " << e << "\n";
+            }
+            else {
+              if (lexical_cast<string>(e->right()) == "0" && vars.size() == 1)
+                zs.insert(*vars.begin());
+            }
           }
         }
       }
-      if(debug >= 2) for(auto& e: grds) outs() << "  grd: " << e << "\n";
+      if (debug >= 2)
+        for (auto& e: grds) outs() << "    grd: " << e << "\n";
 
-      if(bounds[invDecl].size() == 0) res = false;
+      if (bounds[invDecl].size() == 0) res = false;
 
-      ExprVector boundsV;
-      for(auto& e: bounds[invDecl])
+      ExprVector boundsV, tmpBounds, tmpGuards;
+      for (auto& e: bounds[invDecl])
       {
-        if(!isOpX<MULT>(e->left()))
+        if (!isOpX<MULT>(e->left()))
         {
           boundsV.push_back(e);
         }
-        else
+        else if (tmpBounds.empty())
         {
           ExprSet vars;
           filter (e, bind::IsConst (), inserter (vars, vars.begin()));
@@ -1087,42 +1311,56 @@ namespace ufo
 
           if (isOpX<MPZ>(e->left()->left()) && e->left()->right() == ghostVars[0])
           {
-            boundsV.push_back(mk<EQ>(ghostVars[0], mk<IDIV>(e->right(), e->left()->left())));
-            grds.insert(mk<EQ>(mk<MOD>(e->right(), e->left()->left()), mkMPZ(0, m_efac)));
-            break;      // hack: just take the first one and leave
+            tmpBounds.push_back(mk<EQ>(ghostVars[0], mk<IDIV>(e->right(), e->left()->left())));
+            tmpGuards.push_back(mk<EQ>(mk<MOD>(e->right(), e->left()->left()), mkMPZ(0, m_efac)));
+            if (debug > 2) outs () << "IDIVs:\n  " << tmpBounds.back() << "\n  " << tmpGuards.back() << "\n";
           }
         }
       }
-      sortBounds(boundsV);
 
-      if(debug >= 2) {  //GF
-        outs() << "\nBounds found this iteration\n";
-        for(auto& e: boundsV) {
-          outs() << "  " << e << "\n";
-        }
+      if (strenBound == 10 && boundsV.empty() && !tmpBounds.empty())
+      {
+        boundsV.push_back(tmpBounds[0]);
+        grds.insert(tmpGuards.begin(), tmpGuards.end());
       }
 
+      ExprSet nb;
+      for (auto & a : boundsV)
+        for (auto & z : zs)
+          nb.insert(mk<EQ>(a->left(), mk<PLUS>(a->right(), z)));
+
+      boundsV.insert(boundsV.end(), nb.begin(), nb.end());
+      sortBounds(boundsV);
+
+      if (debug >= 2) {  //GF
+        outs() << "\n  Bounds found this iteration\n";
+        for (auto& e: boundsV) {
+          outs() << "    " << e << "\n";
+        }
+      }
+      // exit(1);
+
       bool rerun = false;
-      for(auto b = boundsV.begin(), end = boundsV.end(); b != end && res; b++) {
+      for (auto b = boundsV.begin(), end = boundsV.end(); b != end && res; b++) {
         candidates.clear();
 
-        // if(!isOpX<PLUS>((*b)->right())) b++;
-        // if(b == boundsV.end()) b--;
+        // if (!isOpX<PLUS>((*b)->right())) b++;
+        // if (b == boundsV.end()) b--;
 
-        if(rerun) {
-          if(debug >= 3) outs() << "RERUN\n=====\n";
+        if (rerun) {
+          if (debug >= 3) outs() << "RERUN\n=====\n";
           b--;
-          for(auto& e: fgrds2gh) {
+          for (auto& e: fgrds2gh) {
             candidates[invDecl].insert(e.first);
           }
         }
         else {
           // auto fres = exploredBounds.find(*b);
-          // if(fres != exploredBounds.end()) {
+          // if (fres != exploredBounds.end()) {
           //   continue;
           // }
           // exploredBounds.insert(*b);
-          for(auto& e: grds) {
+          for (auto& e: grds) {
             candidates[specDecl].insert(replaceAll(e, tr->srcVars, fc->srcVars));
             candidates[invDecl].insert(e);
           }
@@ -1138,59 +1376,59 @@ namespace ufo
           candidates[invDecl].insert(replaceAll(c, fc->srcVars, tr->srcVars));
         }
 
-        if(debug >= 2) outs() << "\n- - - b: " << *b << "\n\n";
+        if (debug >= 2) outs() << "\n  >> Considering bound " << *b << "\n\n";
 
         Result_t res_t = elba(grdsDst,
           mk<AND>(src, replaceAll(src, tr->srcVars, fc->srcVars)), dst);
 
-        if(debug >= 2) {
+        if (debug >= 3) {
           outs() << "==================\n";
           printCandsEx();
           outs() << "==================\n";
         }
 
-        if(res_t == Result_t::UNKNOWN) {
+        if (res_t == Result_t::UNKNOWN) {
           candidates.clear();
-          if(!rerun) {
+          if (!rerun) {
             rerun = true;
           }
           else {
             rerun = false;
           }
-          if(debug >= 2) outs() << "=====> unknown\n\n";
-          if(std::next(b) == end) {
-            if(phaseNum < phases.size())
-              boundSolveRec(src, dst, mk<TRUE>(m_efac));
+          if (debug >= 2) outs() << "  unknown\n\n";
+          if (std::next(b) == end) {
+            if (phaseNum < phases.size())
+              boundSolveRec(src, dst, mk<TRUE>(m_efac), lvl);
           }
           continue;
         }
 
         // If you're here then G&S returned UNSAT
         // Yes, I'm here.
-        if(debug >= 2) outs() << "=====> unsat\n\n";
+        if (debug >= 2) outs() << "  >> unsat (bound is good)\n";
         rerun = false;
 
         parseForGuards(); // Associates guards (pre(Vars)) with Expr gh = f()
                                  // They are stored in grds2gh map.
 
-        if(debug >= 2) {
-          outs() << "\n    Guards\n==============\n";
-          for(auto& g: grds2gh) {
-            outs() << " : " << g.first << "\n";
+        if (debug >= 2) {
+          outs() << "  Guards/bounds:\n";
+          for (auto& g: grds2gh) {
+            outs() << "    (*)  " << g.first << "\n";
+            outs() << "         ->  " << g.second << "\n";
           }
-          outs() << "==============\n";
         }
 
         // end of parsing guards.
         ExprSet grds2;
-        for(auto& g: grds2gh) {
+        for (auto& g: grds2gh) {
           if (u.implies(g.first, src))
             grds2.insert(g.first);
         }
         Expr grd = disjoin(grds2,m_efac);
-        if(debug >= 4) outs() << "grd: " << grd << "\n";
-        if(u.isSat(mkNeg(grd), src)) {
-          if(boundSolveRec(src, dst, mkNeg(grd))) {
+        if (debug >= 4) outs() << "grd: " << grd << "\n";
+        if (u.isSat(mkNeg(grd), src)) {
+          if (boundSolveRec(src, dst, mkNeg(grd), lvl + 1)) {
             return true;
           }
         }
@@ -1204,9 +1442,9 @@ namespace ufo
 
     void boundSolve(Expr src, Expr dst)
     {
-      if(debug >= 2) outs () << "boundSolve: " << src << " -> " << dst << "\n";
+      if (debug >= 2) outs () << "  BOUNDS SOLVE: " << src << " -> " << dst << "\n";
       Expr block = mk<TRUE>(m_efac);
-      if(boundSolveRec(src, dst, block)) { /* Success! */ }
+      if (boundSolveRec(src, dst, block)) { /* Success! */ }
       else {
         outs() << "unknown\n";
         exit(0);
@@ -1216,15 +1454,13 @@ namespace ufo
     void pathsSolve()
     {
       ExprSet finals;
-      if(debug >= 2) outs() << "\n===== PATH SOLVE =====\n";
       for (auto & p : paths)
       {
-        if(debug >=2) {
-          outs () << "   - - - - - next path - - - - -\n";
+        if (debug >= 2) {
+          outs () << "\n===== NEXT PATH =====\n    ";
           for (auto & pp : p)
             outs () << pp << " -> ";
           outs () << "\n";
-          outs () << "   - - - - - - - - - - - - - - -\n";
         }
 
         assert(p.size() > 1);
@@ -1232,12 +1468,17 @@ namespace ufo
         int i;
         for (i = p.size() - 2; i >= 0; i--)
         {
-          if (p[i] == fcBodyInvVars) break; // hack for now
+          if (debug) outs () << "STEP " << i << "\n";
+          if (p[i] == fcBodyInvVars)
+          {
+            assert(i == 0);
+            break;
+          }
           boundSolve(p[i], p[i+1]);
 
           res = NULL;
           ExprSet pre;
-          for(auto& g: grds2gh)
+          for (auto& g: grds2gh)
           {
             if (u.implies(g.first, p[i]))
             {
@@ -1249,12 +1490,12 @@ namespace ufo
           stren[p[i]] = simplifyBool(distribDisjoin(pre, m_efac));
           if (i != 0) grds2gh[p[i]] = res;
         }
-        finals.insert(mk<IMPL>(stren[p[i + 1]], mk<EQ>(ghostVars[0], res)));
+        finals.insert(mk<IMPL>(stren[p[1]], mk<EQ>(ghostVars[0], res)));
         grds2gh.clear();
         stren.clear();
       }
       outs () << "FINAL:\n";
-      // for(auto& e: finals) {
+      // for (auto& e: finals) {
       //   u.print(e,outs());
       //   outs() << "\n";
       // }
@@ -1262,7 +1503,7 @@ namespace ufo
     }
 
     void printCandsEx(bool ppr = true) {
-      for(auto& a: candidates) {
+      for (auto& a: candidates) {
         outs() << "(define-fun " << *a.first << " (";
         for (auto & b : ruleManager.invVars[a.first])
         {
@@ -1270,7 +1511,7 @@ namespace ufo
         }
         outs() << ") Bool\n";
 
-        if(ppr) pprint(a.second, 3);
+        if (ppr) pprint(a.second, 3);
         else u.print(conjoin(a.second,m_efac));
         outs() << "\n\n";
       }
@@ -1278,29 +1519,28 @@ namespace ufo
 
     void printPhases() {
       outs() << "Phases\n======\n";
-      for(auto& p: phases) outs() << p << "\n";
+      for (auto& p: phases) outs() << p << "\n";
     }
   };
 
-  inline void findBounds(string smt, int inv, int stren, bool maximal, const vector<string> & relsOrder, bool useGAS,
-                          bool usesygus, bool useUC, bool newenc, bool fixCRels, string syguspath, bool dg,
+  inline void findBounds(string smt, int inv, int stren, bool dg,
                           bool data2, bool doPhases, int debug = 0)
   {
     ExprFactory m_efac;
     EZ3 z3(m_efac);
-    CHCs ruleManager(m_efac, z3);
+    CHCs ruleManager(m_efac, z3, debug);
     ruleManager.parse(smt);
     BoundSolver spec(ruleManager, stren, dg, data2, doPhases, debug);
-    if(!ruleManager.hasQuery) {
-      if(debug >= 4) ruleManager.print(true);
-      if(debug >= 4 && ruleManager.decls.size() > 1) {
+    if (!ruleManager.hasQuery) {
+      if (debug >= 4) ruleManager.print(true);
+      if (debug >= 4 && ruleManager.decls.size() > 1) {
         outs() << "Multiple loops\n";
       }
-      else if(debug >= 4) {
+      else if (debug >= 4) {
         outs() << "Single loop\n";
       }
       spec.setUpQueryAndSpec(); // Needs to accomodate many loops.
-      if(debug >= 2) ruleManager.print(true);
+      if (debug >= 3) ruleManager.print(true);
     }
     else {
       outs() << "Unsupported format\n";
@@ -1308,8 +1548,8 @@ namespace ufo
     }
 
     spec.collectPhaseGuards();
-    if(debug >= 2) spec.printPhases();
-    // for(auto r: ruleManager.decls) {
+    if (debug >= 2) spec.printPhases();
+    // for (auto r: ruleManager.decls) {
     //   // run for each decl, constructing new TR for each inv each time.
     // }
     spec.pathsSolve();
