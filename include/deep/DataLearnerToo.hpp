@@ -80,7 +80,7 @@ namespace ufo
 
     cpp_int lcm(vector<cpp_int> v) {
       cpp_int res = 1;
-      
+
       if(!v.empty()) {
         res = v[0];
         for(int i = 1; i < v.size(); i++) {
@@ -103,7 +103,7 @@ namespace ufo
       for(int i = p; i < numRows; i++) {
         if(A[i][p] != 0) {
           pivotRow = i;
-          break;  
+          break;
         }
       }
 
@@ -152,14 +152,14 @@ namespace ufo
         int cur_col = pivotIndex(A,cur_row);
         if(cur_col < 0) continue;
 
-        
+
 
         for(int i = cur_row-1; i >= 0; i--) {
           RATIONAL divisor = A[i][cur_col];
           if(divisor == 0) continue;
           for(int j = numVars-1; j >= cur_col; j--) {
             A[i][j] = A[i][j] - A[cur_row][j] * divisor;
-          } 
+          }
         }
       }
     }
@@ -237,7 +237,7 @@ namespace ufo
       determineFreeVars(A);
       if(debug ==  -1) {
         printFreeVars();
-        cout << "\n";  
+        cout << "\n";
       }
       matrix basis = kernelBasis(A);
       return basis;
@@ -249,7 +249,7 @@ namespace ufo
       if(n == 0) {
         m = 0;
       }
-      else { 
+      else {
         m = B[0].size();
       }
 
@@ -276,7 +276,7 @@ namespace ufo
       }
       if(debug ==  -1) {
         printMatrix(A);
-        cout << "\n";  
+        cout << "\n";
       }
     }
 
@@ -286,7 +286,7 @@ namespace ufo
         numVars = 0;
         numRows = 0;
         return;
-      } 
+      }
 
       numVars = A[0].size();
       numRows = A.size();
@@ -295,28 +295,28 @@ namespace ufo
     matrix findKernelBasis() {
       numVars = A[0].size();
       numRows = A.size();
-      
+
       if(debug ==  -1) {
         printMatrix(A);
-        cout << "\n";  
+        cout << "\n";
       }
 
       reducedRowEchelonForm(A);
-      
+
       if(debug ==  -1) {
         printMatrix(A);
-        cout << "\n";  
+        cout << "\n";
       }
 
       // Now find basis vectors.
       matrix basis = findBasis(A);
-      removeFractions(basis);
+      if(!basis.empty()) removeFractions(basis);
       if(debug ==  -1) { printCands(basis); }
 
       return basis;
     }
   }; // End class basisFinder
-  
+
   class DataLearnerToo {
   private:
     CHCs& ruleManager;
@@ -334,8 +334,8 @@ namespace ufo
       //dataCands.clear();
       if(models[srcRel].size() < 2) {
         return;
-      } 
-      
+      }
+
       auto ritr = models[srcRel].rbegin();
       vector<double> e1 = *ritr;
       ritr++;
@@ -527,7 +527,7 @@ namespace ufo
           if(debug ==  -1) outs () << "BMC formula unsat\n";
           return res;
         }
-        
+
         computeData(srcRel);
 
         return res;

@@ -32,8 +32,8 @@ namespace ufo
     public:
 
     RndLearnerV4 (ExprFactory &_e, EZ3 &_z3, CHCs& _r, unsigned _to, bool _freqs,
-                  bool _aggp, int _mu, int _da, bool _dl2, bool _d, int _m, 
-                  bool _dAllMbp, bool _dAddProp, bool _dAddDat, bool _dStrenMbp, 
+                  bool _aggp, int _mu, int _da, bool _dl2, bool _d, int _m,
+                  bool _dAllMbp, bool _dAddProp, bool _dAddDat, bool _dStrenMbp,
                   int _dFwd, bool _dR, bool _dG, int _debug) :
       RndLearnerV3 (_e, _z3, _r, _to, _freqs, _aggp, _mu, _da, _debug),
                   dDisj(_d), mbpEqs(_m), dAllMbp(_dAllMbp),
@@ -285,23 +285,18 @@ namespace ufo
       map<Expr, ExprVector> m;
       getArrRanges(m);
       map<Expr, ExprSet> constr;
-      
+
       // needs to be wrapped in a loop for the # of dat flag.
       if(phaseGuard == NULL) {
-        // DLTOO should be changed to make one call to bndexpl rather than two, which is what it does here.
         dltoo.computeData(srcRel,m,constr);
-        //dltoo.connectPhase(srcRel, mk<TRUE>(m_efac), invs, fwd, constr[srcRel]);
       }
       else {
-        // DLTOO should be changed to make one call to bndexpl rather than two, which is what it does here.
         dltoo.computeDataPhase(srcRel, phaseGuard, invs, fwd, constr[srcRel]);
-        //dltoo.connectPhase(srcRel, phaseGuard, invs, fwd, constr[srcRel]);
       }
       ExprSet dataCands = dltoo.getDataCands(srcRel);
       simplify(dataCands);
       //filterTrivCands(dataCands);
       for(auto& dc : dataCands) {
-        //simplifyArithm(dc);
         int invNum = getVarIndex(srcRel, decls);
         if (containsOp<ARRAY_TY>(dc)) {
           arrCands[invNum].insert(dc);
@@ -1071,7 +1066,7 @@ namespace ufo
 
     for (auto & dcl: ruleManager.wtoDecls)
     {
-      if (dat > 0 && dl2) ds.getDataCandidatesToo(cands,dcl);
+      if (dl2) ds.getDataCandidatesToo(cands,dcl);
       if (dat > 0 && !dl2) ds.getDataCandidates(cands);
       for (int i = 0; i < doProp; i++)
         for (auto & a : cands[dcl]) ds.propagate(dcl, a, true);
