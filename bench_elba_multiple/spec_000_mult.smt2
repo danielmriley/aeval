@@ -23,7 +23,7 @@
   )
 )
 
-(rule (=> (itp1 x1 y1) (itp2 x1 y1)))
+(rule (=> (and (>= x1 10) (itp1 x1 y1)) (itp2 x1 y1)))
 
 (rule (=>
     (and

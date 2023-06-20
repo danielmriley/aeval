@@ -1,4 +1,4 @@
-#include "deep/BoundSolver.hpp"
+#include "deep/BS.hpp"
 
 using namespace ufo;
 using namespace std;

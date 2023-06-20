@@ -1288,6 +1288,83 @@ namespace ufo
       }
       enc_chc << "(check-sat)\n";
     }
+
+    void serialize2 ()
+    {
+      std::ofstream enc_chc;
+      enc_chc.open("chc.smt2");
+    //      enc_chc << "(set-logic HORN)\n";
+      for (auto & d : decls)
+      {
+        enc_chc << "(declare-rel " << d->left() << " (";
+        for (int i = 1; i < d->arity()-1; i++)
+        {
+          u.print(d->arg(i), enc_chc);
+          if (i < d->arity()-2) enc_chc << " ";
+        }
+            enc_chc << "))\n";
+      }
+      for(auto& vars: invVars) {
+        for(auto& v: vars.second) {
+          enc_chc << "(declare-var ";
+          u.print(v,enc_chc);
+          enc_chc << " ";
+          u.print(bind::typeOf(v),enc_chc);
+          enc_chc << ")\n";
+        }
+        break;
+      }
+      for(auto& vars: invVarsPrime) {
+        for(auto& v: vars.second) {
+          enc_chc << "(declare-var ";
+          u.print(v,enc_chc);
+          enc_chc << " ";
+          u.print(bind::typeOf(v),enc_chc);
+          enc_chc << ")\n";
+        }
+        break;
+      }
+      enc_chc << "\n";
+      for (auto & c : chcs)
+      {
+        Expr src, dst;
+        if (c.isFact)
+        {
+          src = mk<TRUE>(m_efac);
+        }
+        else
+        {
+          for (auto & d : decls)
+          {
+            if (d->left() == c.srcRelation)
+            {
+              src = fapp(d, c.srcVars);
+              break;
+            }
+          }
+        }
+        if (c.isQuery)
+        {
+          dst = mk<FALSE>(m_efac);
+        }
+        else
+        {
+          for (auto & d : decls)
+          {
+            if (d->left() == c.dstRelation)
+            {
+              dst = fapp(d, c.dstVars);
+              break;
+            }
+          }
+        }
+
+        enc_chc << "(rule ";
+        u.print(mk<IMPL>(mk<AND>(src, c.body), dst), enc_chc);
+        enc_chc << ")\n\n";
+      }
+    //      enc_chc << "(check-sat)\n";
+    }
   };
 }
 
