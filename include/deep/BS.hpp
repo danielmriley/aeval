@@ -45,6 +45,8 @@ namespace ufo
     string varName = "_FH_";
     string ghostVar_pref = "_gh_";
     Expr specDecl;
+    ExprVector specVars;
+    ExprVector specVarsPr;
     ExprVector ghostVars;
     ExprVector ghostVarsPr;
     Expr decGhost0;
@@ -60,9 +62,9 @@ namespace ufo
     ExprSet bounds;
     ExprSet concrtBounds;
     ExprSet dataGrds;
-    map<int, ExprVector> phases;
+    ExprVector phases;
     vector<pair<Expr, Expr>> phasePairs;
-    map<int, vector<ExprVector> > paths;
+    vector<ExprVector> paths;
     Expr mpzZero;
     Expr mpzOne;
     Expr eTrue;
@@ -123,21 +125,6 @@ namespace ufo
       ghostGuardPr = mk<NEQ>(ghostVarsPr[0], mpzZero);
     }
 
-    // Map uninterpreted predicates to their loop guards/ITE guards.
-    void createHyperMap() {
-      if(debug >= 2) outs() << "\n=== Hyper Map ===\n\n";
-      for(auto& hr: ruleManager.chcs) {
-        if(hr.isInductive) {
-          outs() << hr.srcRelation << " : " << ruleManager.getPrecondition(&hr) << "\n";
-          hyperMap[hr.srcRelation] = ruleManager.getPrecondition(&hr);
-        }
-        if(!hr.isInductive && !hr.isFact && !hr.isQuery && hyperMap.find(hr.srcRelation) == hyperMap.end()) {
-          outs() << hr.srcRelation << " : " << ruleManager.getPrecondition(&hr) << "\n";
-          hyperMap[hr.srcRelation] = ruleManager.getPrecondition(&hr);
-        }
-      }
-    }
-
     void replaceRule(HornRuleExt* src, HornRuleExt* dst)
     {
       dst->srcRelation = src->srcRelation;
@@ -162,8 +149,8 @@ namespace ufo
       fc_new->dstVars.push_back(ghostVarsPr[0]);
       fc_new->isFact = false;
 
-      ExprVector specVars;
-      ExprVector specVarsPr;
+      specVars.clear();
+      specVarsPr.clear();
       for (int i = 0; i < invVars.size(); i++) {
         specVars.push_back(bind::intConst(mkTerm<string>(varName + to_string(i + invVars.size()), m_efac)));
         specVarsPr.push_back(bind::intConst(mkTerm<string>(varName + to_string(i + invVars.size()) + "'", m_efac)));
@@ -203,15 +190,20 @@ namespace ufo
         if (!replaced) e++;
       }
       fcBodyInvVars = conjoin(temp, m_efac);
+      outs() << "fcBodyInvVars : " << fcBodyInvVars << "\n";
     }
 
     void setUpTr(HornRuleExt* tr) {
       HornRuleExt* tr_new = new HornRuleExt();
-      loopGuard = ruleManager.getPrecondition(tr);
-      loopGuardPr = replaceAll(loopGuard, invVars, invVarsPr);
+      if(tr->isInductive) {
+        loopGuard = ruleManager.getPrecondition(tr);
+        loopGuardPr = replaceAll(loopGuard, invVars, invVarsPr);
 
-      outs() << "LOOPGUARD: " << loopGuard << "\n";
-      outs() << "LOOPGUARDPR: " << loopGuardPr << "\n";
+        if(debug >= 3) {
+          outs() << "LOOPGUARD: " << loopGuard << "\n";
+          outs() << "LOOPGUARDPR: " << loopGuardPr << "\n";
+        }
+      }
 
       invDecl = tr->srcRelation;
       tr_new->srcRelation = tr->srcRelation;
@@ -229,7 +221,7 @@ namespace ufo
       tr_new->dstRelation = tr->dstRelation;
       tr_new->dstVars = tr->dstVars;
       tr_new->dstVars.push_back(ghostVarsPr[0]);
-      tr_new->isInductive = true;
+      if(tr->isInductive) tr_new->isInductive = true;
 
       ruleManager.addDeclAndVars(invDecl,invVars);
 
@@ -238,7 +230,9 @@ namespace ufo
       tmp.insert(decGhost0);
       tr_new->body = conjoin(tmp, m_efac);
       replaceRule(tr_new, tr);
-      tr_orig = *tr;
+      if(tr->isInductive) tr_orig = *tr;
+      fcBodyInvVars = replaceAll(fcBodyInvVars, specVars, invVars);
+      outs() << "fcBodyInvVars : " << fcBodyInvVars << "\n";
     }
 
     void setUpBr(HornRuleExt* tr) {
@@ -290,7 +284,7 @@ namespace ufo
         else if(hr.isQuery) outs() << "QUERY\n";
         else {
           outs() << "BRIDGE\n";
-          setUpBr(&hr);
+          setUpTr(&hr);
         }
       }
       outs() << "===================\n";
@@ -739,7 +733,7 @@ namespace ufo
     }
 
     // adapted from BndExpl:: getAllTraces
-    bool getAllPaths (Expr src, Expr dst, int len, ExprVector trace, vector<ExprVector>& traces)
+    bool getAllPaths (Expr src, Expr dst, int len, ExprVector trace, vector<ExprVector>& traces, std::vector<pair<Expr, Expr>> phasePairs)
     {
       if (len == 1)
       {
@@ -779,7 +773,7 @@ namespace ufo
             }
             ExprVector newtrace = trace;
             newtrace.push_back(a.second);
-            bool  res = getAllPaths(a.second, dst, len-1, newtrace, traces);
+            bool  res = getAllPaths(a.second, dst, len-1, newtrace, traces, phasePairs);
             if (!res) return false;
           }
         }
@@ -788,7 +782,7 @@ namespace ufo
       return true;
     }
 
-    void getCombs(int cycle, ExprVector& elems, int pos, vector<ExprVector>& res)
+    void getCombs(ExprVector& elems, int pos, vector<ExprVector>& res)
     {
       if (pos == 0)
       {
@@ -807,69 +801,118 @@ namespace ufo
         res = res2;
       }
       if (pos + 1 < elems.size())
-        getCombs(cycle, elems, pos+1, res);
+        getCombs(elems, pos+1, res);
     }
 
-    void pairPhases(int cycle) {
-      Expr init = fcBodyInvVars;
+    map<Expr,vector<pair<Expr, Expr>>> linkPairs;
 
-      for (auto& p : phases[cycle]) {
-        if (init != p && u.isSat(init, p)) {
-          phasePairs.push_back(std::make_pair(init,p));
+    void pairLinks(std::set<int> cycles) {
+      Expr init;
+
+      for(auto& cycle: cycles) {
+        if(cycle == 1) {
+          // What if the first loop depends on ITE branch?
+          // Then init needs to be assigned differentlt.
+          // Basically, this is a bad way to do it.
+          // Will change when I have a better idea..... DR
+
+          init = fcBodyInvVars;
         }
+        else {
+          init = mk<TRUE>(m_efac);
+        }
+
+        HornRuleExt* hr = &ruleManager.chcs[cycle];
+        vector<pair<Expr, Expr>> phasePairs;
+
+        setPointers(cycle);
+
+        for (auto& p : phases) {
+          if (init != p && u.isSat(init, p)) {
+            phasePairs.push_back(std::make_pair(init,p));
+          }
+        }
+        for (int i = 0; i < phases.size(); i++) {
+          for (int j = 0; j < phases.size(); j++) {
+            if (i == j) continue;
+            if (u.isSat(tr->body,phases[i],replaceAll(phases[j],invVars,invVarsPr))) {
+              phasePairs.push_back(std::make_pair(phases[i],phases[j]));
+            }
+          }
+        }
+        for (auto& p : phases) {
+          if (!u.isSat(p, tr->body)) {
+            phasePairs.push_back(std::make_pair(p,mk<FALSE>(m_efac)));
+          }
+        }
+
+        linkPairs[hr->srcRelation].insert(linkPairs[hr->srcRelation].end(), phasePairs.begin(), phasePairs.end());
       }
-      for (int i = 0; i < phases[cycle].size(); i++) {
-        for (int j = 0; j < phases[cycle].size(); j++) {
-          if (i == j) continue;
-          if (u.isSat(tr->body,phases[cycle][i],replaceAll(phases[cycle][j],invVars,invVarsPr))) {
-            phasePairs.push_back(std::make_pair(phases[cycle][i],phases[cycle][j]));
+
+      if(debug >= 2) {
+        for(auto& lp: linkPairs) {
+          outs() << "linkPairs for " << lp.first << "\n";
+          for(auto& pp : lp.second) {
+            outs() << "  " << pp.first << " -> " << pp.second << "\n";
           }
         }
       }
-      for (auto& p : phases[cycle]) {
-        if (!u.isSat(p, tr->body)) {
-          phasePairs.push_back(std::make_pair(p,mk<FALSE>(m_efac)));
+    }
+
+    map<Expr, vector<ExprVector>> pathsMap;
+
+    void printPathsMap() {
+      for(auto& pm : pathsMap) {
+        outs() << pm.first << "\n";
+        for(auto& p: pm.second) {
+          outs() << "  ";
+          for(auto& v: p) {
+            outs() << v << " -> ";
+          }
+          outs() << "\n";
         }
+        outs() << "\n";
       }
     }
 
-    bool sortPhases(int cycle) {
-      ExprSet init;
-      for (auto & p : phasePairs) {
-        if (p.first == fcBodyInvVars) {
-          init.insert(p.first);
+    bool sortLinkPairs() {
+      int cycle = 1;
+      for(auto& lp: linkPairs) {
+        ExprSet init;
+        if(debug >= 4) outs() << "\n" << lp.first << "\n";
+        for (auto & p : lp.second) {
+          if (p.first == fcBodyInvVars || p.first == mk<TRUE>(m_efac)) {
+            init.insert(p.first);
+          }
         }
-      }
+        if(debug >= 4) for(auto& i: init) outs()<< "  " << i << "\n";
 
-      // sanity check:
-      if (u.implies(fcBodyInvVars, disjoin(init, m_efac)))
-      {
-        if (debug >= 3) outs () << "Init cases general enough\n";
-      }
-      else
-        assert(0 && "something is wrong in the phase construction");
-
-      for (auto & in : init)
-      {
-        int len = paths[cycle].size();
-        for (int i = 1; i <= phasePairs.size() ; i++) {
-          bool res = getAllPaths (in, mk<FALSE>(m_efac), i, {in}, paths[cycle]);
-          if (!res) return false;
-        }
-        assert (paths[cycle].size() > len && "No paths found\n");
-      }
-
-      if (debug >=4) {
-        for (auto & p : paths[cycle])
+        // sanity check:
+        if (cycle == 1 && u.implies(fcBodyInvVars, disjoin(init, m_efac)))
         {
-          outs () << "Found path: ";
-          for (auto & pp : p)
-            outs () << pp << " -> ";
-          outs () << "\n";
+          if (debug >= 3) outs () << "Init cases general enough\n";
         }
+        else if (cycle > 1 && u.implies(mk<TRUE>(m_efac), disjoin(init, m_efac)))
+        {
+          if (debug >= 3) outs () << "Init cases general enough\n";
+        }
+        else {
+          assert(0 && "something is wrong in the phase construction");
+        }
+
+        for (auto & in : init)
+        {
+          int len = pathsMap[lp.first].size();
+          for (int i = 1; i <= lp.second.size() ; i++) {
+            bool res = getAllPaths (in, mk<FALSE>(m_efac), i, {in}, pathsMap[lp.first], lp.second);
+            if (!res) return false;
+          }
+          assert (pathsMap[lp.first].size() > len && "No paths found\n");
+        }
+        cycle += 2;
       }
-      if (debug >= 3 || debug == -1)
-        outs() << "# of paths " << paths[cycle].size() << "\n";
+
+      printPathsMap();
 
       return true;
     }
@@ -939,89 +982,107 @@ namespace ufo
       if (prjcts.size() < sz) shrinkPrjcts(prjcts);
     }
 
-    void collectPhaseGuards(int cycle, bool weakenPhases = false)
-    {
-      BndExpl bnd(ruleManager, (debug > 0));
-      ExprSet cands;
-//      vector<int>& cycle = ruleManager.cycles[0];
-      HornRuleExt* hr = &ruleManager.chcs[cycle];
-      Expr rel = hr->srcRelation;
-      int invNum = getVarIndex(invDecl, decls);
-      ExprVector& srcVars = invVars;
-      ExprVector& dstVars = invVarsPr;
-      assert(srcVars.size() == dstVars.size());
-      ExprSet dstVarsSet;
-      for (auto& d: dstVars) dstVarsSet.insert(d);
+    ExprSet prjctsGlob;
+    void collectPhaseAtomics(std::set<int> cycles) {
+      for(auto& cycle: cycles) {
+        setPointers(cycle); // sets Vars containers based on cycle.
+        testPointers();
 
-      outs() << "\nBODY: " << hr->body << "\n\n";
+        //      vector<int>& cycle = ruleManager.cycles[0];
+        HornRuleExt* hr = &ruleManager.chcs[cycle];
+        ExprVector& srcVars = invVars;
+        ExprVector& dstVars = invVarsPr;
+        assert(srcVars.size() == dstVars.size());
+        ExprSet dstVarsSet;
+        for (auto& d: dstVars) dstVarsSet.insert(d);
 
-      ExprVector vars2keep, prjcts, prjcts1, prjcts2;
-      ExprSet prjctsTmp;
-      bool hasArray = false;
-      for (int i = 0; i < srcVars.size(); i++) {
-        if (containsOp<ARRAY_TY>(srcVars[i]))
-        {
-          hasArray = true;
-          vars2keep.push_back(dstVars[i]);
-        }
-        else
-        {
-          vars2keep.push_back(srcVars[i]);
-        }
-      }
+        outs() << "BODY: " << hr->body << "\n";
 
-      u.flatten(hr->body, prjcts1, false, vars2keep, keepQuantifiersRepl);
-
-      for (auto p : prjcts1)
-      {
-        if (hasArray)
-        {
-          p = ufo::eliminateQuantifiers(p, dstVarsSet);
-          p = weakenForVars(p, dstVars);
-        }
-        else
-        {
-          p = weakenForVars(p, dstVars);
-          p = simplifyArithm(normalize(p));
-        }
-        getConj(p, prjctsTmp);
-        if (debug >= 3) outs() << "Generated MBP: " << p << "\n";
-      }
-      testPointers();
-
-      prjcts.insert(prjcts.end(), prjctsTmp.begin(), prjctsTmp.end());
-      u.removeRedundantConjunctsVec(prjcts);
-
-      for (auto it = prjcts.begin(); it != prjcts.end();)
-      {
-        bool toRemove = false;
-        for (auto it2 = prjcts.begin(); it2 != it; ++it2)
-        {
-          if (u.isEquiv(*it, mkNeg(*it2)))
+        ExprVector vars2keep, prjcts, prjcts1;
+        ExprSet prjctsTmp;
+        bool hasArray = false;
+        for (int i = 0; i < srcVars.size(); i++) {
+          if (containsOp<ARRAY_TY>(srcVars[i]))
           {
-            toRemove = true;
-            break;
+            hasArray = true;
+            vars2keep.push_back(dstVars[i]);
+          }
+          else
+          {
+            vars2keep.push_back(srcVars[i]);
           }
         }
-        if (toRemove)
+
+        u.flatten(hr->body, prjcts1, false, vars2keep, keepQuantifiersRepl);
+
+        for (auto p : prjcts1)
+        {
+          if (hasArray)
+          {
+            p = ufo::eliminateQuantifiers(p, dstVarsSet);
+            p = weakenForVars(p, dstVars);
+          }
+          else
+          {
+            p = weakenForVars(p, dstVars);
+            p = simplifyArithm(normalize(p));
+          }
+          getConj(p, prjctsTmp);
+          if (debug >= 3) outs() << "Generated MBP: " << p << "\n";
+        }
+        testPointers();
+
+        prjcts.insert(prjcts.end(), prjctsTmp.begin(), prjctsTmp.end());
+        u.removeRedundantConjunctsVec(prjcts);
+
+        for (auto it = prjcts.begin(); it != prjcts.end();)
+        {
+          bool toRem = false;
+          for (auto it2 = prjcts.begin(); it2 != it; ++it2)
+          {
+            if (u.isEquiv(*it, mkNeg(*it2)))
+            {
+              toRem = true;
+              break;
+            }
+          }
+          if (toRem)
           it = prjcts.erase(it);
-        else
+          else
           ++it;
+        }
+
+        if (debug >= 3)
+        {
+          outs() << "Split MBP: \n";
+          pprint(prjcts, 3);
+        }
+
+        shrinkPrjcts(prjcts);
+        for(auto& p: prjcts) prjctsGlob.insert(p);
+        // prjctsGlob.insert(prjctsGlob.end(), prjcts.begin(), prjcts.end());
       }
 
-      if (debug >= 3)
-      {
-        outs() << "Split MBP: \n";
-        pprint(prjcts, 3);
+      if(debug >= 2) {
+        outs() << "Global projections\n";
+        for(auto& pg: prjctsGlob) {
+          outs() << "  : " << pg << "\n";
+        }
       }
 
-      shrinkPrjcts(prjcts);
+      setPointers(1); // Reset the pointers to the first loop.
+    }
 
+    void makeCombs() {
+      ExprVector prjcts;
       vector<ExprVector> res;
-      getCombs(cycle, prjcts, 0, res);
+
+      for(auto& pg : prjctsGlob) prjcts.push_back(pg);
+
+      getCombs(prjcts, 0, res);
       for (auto & r : res)
       {
-        phases[cycle].push_back(conjoin(r, m_efac));
+        phases.push_back(conjoin(r, m_efac));
         if (debug >= 3) {
           outs () << "  comb: ";
           pprint(r);
@@ -1029,28 +1090,6 @@ namespace ufo
         }
       }
       testPointers();
-      pairPhases(cycle);
-      if (debug >= 3) {
-        outs() << "\n";
-        for (auto& v: phasePairs) {
-          outs() << "  : "<< v.first << " --> " << v.second << "\n";
-        }
-        outs() << "\n";
-      }
-      if (!sortPhases(cycle))
-      {
-        if (!weakenPhases) {
-          if (debug >=3) outs() << "Path finding failed. Trying again.\n";
-          phasePairs.clear();
-          paths[cycle].clear();
-          phases[cycle].clear();
-          collectPhaseGuards(cycle, true);
-        }
-        else {
-          outs() << "Path finding failed.\n";
-          exit(1);
-        }
-      }
     }
 
     void setPointers(int cycle) {
@@ -1076,10 +1115,16 @@ namespace ufo
     void testPointers() {
       if(fc == nullptr || tr == nullptr || qr == nullptr) {
         outs() << "ERROR: NULLPTR\n";
+        exit(0);
       }
-      outs() << "fc: " << fc->body << "\n";
-      outs() << "tr: " << tr->body << "\n";
-      outs() << "qr: " << qr->body << "\n";
+      else if(debug >= 3) {
+        outs() << "Pointers are safe\n";
+      }
+      if(debug >= 5) {
+        outs() << "fc: " << fc->body << "\n";
+        outs() << "tr: " << tr->body << "\n";
+        outs() << "qr: " << qr->body << "\n";
+      }
     }
 
     bool multiHoudiniExtr(vector<HornRuleExt*>& worklist, bool recur = true)
@@ -1433,12 +1478,12 @@ namespace ufo
             rerun = false;
           }
           if (debug >= 2) outs() << "  unknown\n\n";
-          // if (i+1 == boundsV.size()) {
-          //   if (phaseNum < phases[cycle].size())
-          //     block = mk<TRUE>(m_efac);
-          //     //continue;
-          //     //boundSolve(src, dst, mk<TRUE>(m_efac), lvl); // refactor to remove this recursion.
-          // }
+          if (i+1 == boundsV.size()) {
+            if (phaseNum < phases.size())
+              block = mk<TRUE>(m_efac);
+              //continue;
+              //boundSolve(src, dst, mk<TRUE>(m_efac), lvl); // refactor to remove this recursion.
+          }
           continue;
         }
 
@@ -1505,9 +1550,9 @@ namespace ufo
       return true;
     }
 
-    void pathsSolve(int cycle) {
+    void pathsSolve() {
       ExprSet finals;
-      for (auto & p : paths[cycle])
+      for (auto & p : paths)
       {
         if (debug >= 2) {
           outs () << "\n===== NEXT PATH =====\n    ";
@@ -1552,10 +1597,14 @@ namespace ufo
       pprint(finals, 5);
     }
 
-    void makeWorklist(int cycle) {}
+    void makeHyperChains() {
+      outs() << "\n=== MAKE HYPER CHAINS ===\n\n";
+      printPathsMap();
+
+    }
 
     void startPathFinding() {
-      set<int> cycles;
+      std::set<int> cycles;
       outs() << "cycles size: " << ruleManager.cycles.size() << "\n";
       for(auto& c: ruleManager.cycles) {
         for(auto& cc: c) {
@@ -1564,22 +1613,35 @@ namespace ufo
         }
       }
 
-      for(auto c = cycles.rbegin(); c != cycles.rend(); c++) {
-        setPointers(*c);
-        testPointers();
-        collectPhaseGuards(*c);
-      }
+      // At this point we have the CHCs set up with ghost vars.
+      // Now we need to collect the possible paths through the program.
+      // Done in a general way, this should collect "Predicate chains"
+      // for each loop, with no assumptions made on the input.
+      // Then, beginning at the first loop, the Init condition is considered.
+      // Each of the potential paths through the loops are connected by
+      // considering the last link in the previous loop and the first link
+      // in the next loop.
 
-      for(auto& c : cycles) {
-        outs() << "\ncycle: " << c << "\n";
-        for(auto& p : paths[c]) {
-          for(auto& l : p) {
-            outs() << l << " -> ";
-          }
-          outs() << "\n";
+      // So, write something that find "general" chains in each loop.
+      collectPhaseAtomics(cycles);
+      makeCombs();
+      pairLinks(cycles);
+      sortLinkPairs();
+      // At this point we have possible chains through each loop.
+      // Now they need to be connected together to make hyper chains.
+      makeHyperChains();
+      exit(0);
+
+
+      // loops through the cycles within this function.
+      // collectPhaseGuards(cycles);
+
+      for(auto& p : paths) {
+        for(auto& l : p) {
+          outs() << l << " -> ";
         }
+        outs() << "\n";
       }
-      // pathsSolve(*c);
 
     }
 
@@ -1626,7 +1688,6 @@ namespace ufo
       outs() << "Contains Query\n";
 //      return;
     }
-
     spec.setUpQueryAndSpec();
     outs() << "startPathFinding\n";
     spec.startPathFinding();
