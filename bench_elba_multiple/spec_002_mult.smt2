@@ -27,10 +27,10 @@
   )
 )
 
-(rule (=> (inv1 x1 y1 z1) (inv x1 y1 z1)))
+(rule (=> (and (not (> z1 0)) (inv1 x1 y1 z1)) (inv x1 y1 z1)))
 
-(rule (=> (and (> x1 5) (<= z1 0) (inv x1 y1 z1)) (inv2 x1 y1 z1)))
-(rule (=> (and (<= x1 5) (<= z1 0) (inv x1 y1 z1)) (inv3 x1 y1 z1)))
+(rule (=> (and (> x1 5) (inv x1 y1 z1)) (inv2 x1 y1 z1)))
+(rule (=> (and (<= x1 5) (inv x1 y1 z1)) (inv3 x1 y1 z1)))
 
 (rule (=>
     (and

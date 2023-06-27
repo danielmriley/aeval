@@ -1,5 +1,5 @@
 ; Three loops, but only two will execute on any given execution.
-; BOUND: gh = x + y
+; BOUND: gh = max(x,y)
 
 (declare-rel inv1 (Int Int))
 (declare-rel inv2 (Int Int))
@@ -27,7 +27,7 @@
   )
 )
 
-(rule (=> (inv1 x1 y1) (inv2 x1 y1)))
+(rule (=> (and (not (and (> x1 0) (> y1 0)))  (inv1 x1 y1)) (inv2 x1 y1)))
 
 (rule (=>
     (and
@@ -35,11 +35,11 @@
       (> y1 0)
       (= y2 (- y1 1))
     )
-    (inv2 x2 y2)
+    (inv2 x1 y2)
   )
 )
 
-(rule (=> (inv2 x1 y1) (inv3 x1 y1)))
+(rule (=> (and (not (> y1 0)) (inv2 x1 y1)) (inv3 x1 y1)))
 
 (rule (=>
     (and
@@ -47,6 +47,6 @@
       (> x1 0)
       (= x2 (- x1 1))
     )
-    (inv3 x2 y2)
+    (inv3 x2 y1)
   )
 )

@@ -16,3 +16,11 @@
     (inv x1 y1)
   )
 )
+
+;int x, y;
+;assume(x > y);
+
+;while(x != y) {
+;  x -= 2;
+;  y--;
+;}
