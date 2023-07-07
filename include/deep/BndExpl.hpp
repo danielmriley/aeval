@@ -857,7 +857,7 @@ namespace ufo
           ExprVector& dtVars,
   			  vector<vector<double> >& models,
           Expr gh_cond, // Expr invs, Expr preCond,
-          int k = 2)
+          int k = 3)
     {
       assert (gh_cond != NULL);
 
@@ -905,7 +905,7 @@ namespace ufo
         int l = 0;                        // starting index (before the loop)
         if (ruleManager.hasAnyArrays) l++; // first iter is usually useless
 
-        if(isOpX<TRUE>(gh_cond)) trace.push_back(0);
+        //if(isOpX<TRUE>(gh_cond)) trace.push_back(0);
         for (int j = 0; j < k; j++)
           for (int m = 0; m < loop.size(); m++)
             trace.push_back(loop[m]);
@@ -926,18 +926,21 @@ namespace ufo
 
         if (!u.isSat(ssa))
         {
-          if (debug) outs () << "  BMC formula unsat\n";
+          if (debug) {
+            outs () << "  BMC formula unsat\n";
+            // pprint(ssa,2);
+          }
           return false;
         }
 
         ExprMap allModels;
         u.getModel(allVars, allModels);
 
-        ExprSet gh_condVars;
-        set<int> gh_condVarsIndex; // Get gh_cond vars here
-        filter(gh_cond, bind::IsConst(), inserter(gh_condVars, gh_condVars.begin()));
-        for (auto & a : gh_condVars)
-          gh_condVarsIndex.insert(getVarIndex(a, srcVars));
+        // ExprSet gh_condVars;
+        // set<int> gh_condVarsIndex; // Get gh_cond vars here
+        // filter(gh_cond, bind::IsConst(), inserter(gh_condVars, gh_condVars.begin()));
+        // for (auto & a : gh_condVars)
+        //   gh_condVarsIndex.insert(getVarIndex(a, srcVars));
 
         if (debug) outs () << "\n  Unroll and execute the cycle for " <<  srcRel
             << " and TERM " << gh_cond << "\n  - - - - - \n";
