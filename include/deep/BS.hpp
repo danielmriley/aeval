@@ -265,17 +265,30 @@ namespace ufo
       replaceRule(tr_new, tr);
     }
 
-    void setUpQr(HornRuleExt* tr)
+    void setUpQr(HornRuleExt* tr, Expr qrGuard)
     {
       HornRuleExt* qr = new HornRuleExt();
       qr->srcRelation = tr->srcRelation; // Need to pick the rel from the last loop.
       qr->srcVars = tr->srcVars;
-      outs() << "SETUPQR " << loopGuard << " GG " << ghostGuard << "\n";
-      Expr lg = conjoin(allLoopGuards, m_efac);
-      qr->body = mk<AND>(lg, ghostGuard);
       qr->dstRelation = mkTerm<string> ("err", m_efac);
       qr->isQuery = true;
       ruleManager.hasQuery = true;
+
+      Expr lastRel = ruleManager.chcs[lastCycle].srcRelation;
+      Expr lastBound, lastGuards;
+      if(isOpX<IMPL>(qrGuard)) {
+        // This means there are extra conditions that need to be put on the QR
+        // along with the bound.
+        lastBound = qrGuard->right();
+        lastGuards = qrGuard->left();
+      }
+      else {
+        // This should probably only hit at the first go around.
+        lastBound = qrGuard;
+      }
+      // Expr lg = conjoin(allLoopGuards, m_efac);
+      outs() << "SETUPQR " << loopGuard << " GG " << ghostGuard << "\n";
+      qr->body = mk<AND>(mkNeg(loopGuard), mkNeg(lastBound));
 
       ruleManager.addFailDecl(qr->dstRelation);
       ruleManager.addRule(qr);
@@ -876,7 +889,7 @@ namespace ufo
         Expr rel = hr->srcRelation;
         vector<pair<Expr, Expr>> phasePairs;
 
-        setPointers(cycle);
+        setPointers(cycle, mkNeg(ghostGuard));
 
         for (auto& p : phasesMap[rel]) {
           for(auto& i: init) {
@@ -1051,7 +1064,7 @@ namespace ufo
     map<Expr, ExprSet> prjctsGlob;
     void collectPhaseAtomics(std::set<int> cycles) {
       for(auto& cycle: cycles) {
-        setPointers(cycle); // sets Vars containers based on cycle.
+        setPointers(cycle, mkNeg(ghostGuard)); // sets Vars containers based on cycle.
         testPointers();
 
         HornRuleExt* hr = &ruleManager.chcs[cycle];
@@ -1138,7 +1151,7 @@ namespace ufo
         }
       }
 
-      setPointers(1); // Reset the pointers to the first loop.
+      setPointers(1, mkNeg(ghostGuard)); // Reset the pointers to the first loop.
     }
 
     void makeCombs() {
@@ -1164,12 +1177,12 @@ namespace ufo
       }
     }
 
-    void setPointers(int cycle) {
+    void setPointers(int cycle, Expr qrGuard) {
       HornRuleExt hr = ruleManager.chcs[cycle];
       loopGuard = ruleManager.getPrecondition(&hr);
       Expr rel = hr.srcRelation;
       removeQuery();
-      setUpQr(&hr);
+      setUpQr(&hr, qrGuard);
       if (debug >= 4) outs() << "src relation: " << rel << "\n";
       if(debug >= 5) ruleManager.print(true);
 
@@ -1238,6 +1251,14 @@ namespace ufo
     // adapted from RndLearnerV3
     bool multiHoudini(vector<HornRuleExt*>& worklist, bool recur = true)
     {
+      if(debug >= 7) {
+        outs() << "\n**** WORKLIST ****\n\n";
+        for(auto& v: worklist) {
+          outs() << v->body << "\n\n";
+        }
+        outs() << "\n****          ****\n\n";
+      }
+
       if (!anyProgress(worklist)) {
         if (debug >= 5) outs() << "No progress\n";
         return false;
@@ -1294,15 +1315,10 @@ namespace ufo
       for (auto & hr : ruleManager.chcs)
       {
         if (containsOp<ARRAY_TY>(hr.body)) hasArrays = true;
-        if((hr.isInductive && hr.srcRelation == rel) || hr.isFact || hr.isQuery) {
+        if((hr.isInductive/* && hr.srcRelation == rel*/) || hr.isFact || hr.isQuery) {
           worklist.push_back(&hr);
         }
       }
-      outs() << "\n**** WORKLIST ****\n\n";
-      for(auto& v: worklist) {
-        outs() << v->body << "\n\n";
-      }
-      outs() << "\n****          ****\n\n";
       if (debug > 1) outs () << "stage 0\n";
       auto candidatesTmp = candidates;
       multiHoudiniExtr(worklist);
@@ -1528,13 +1544,13 @@ namespace ufo
         candidates[specDecl].insert(replaceAll(boundsV[i], tr->srcVars, fc->srcVars));
         candidates[invDecl].insert(boundsV[i]);
 
-        ExprSet factCands;
-        getConj(keepQuantifiers(fc->body, fc->srcVars), factCands);
-        for (auto & c : factCands)
-        {
-          candidates[specDecl].insert(c);
-          candidates[invDecl].insert(replaceAll(c, fc->srcVars, tr->srcVars));
-        }
+        // ExprSet factCands;
+        // getConj(keepQuantifiers(fc->body, fc->srcVars), factCands);
+        // for (auto & c : factCands)
+        // {
+        //   candidates[specDecl].insert(c);
+        //   candidates[invDecl].insert(replaceAll(c, fc->srcVars, tr->srcVars));
+        // }
 
         if (debug >= 2) outs() << "\n  >> Considering bound " << boundsV[i] << "\n\n";
 
@@ -1628,6 +1644,7 @@ namespace ufo
       return true;
     }
 
+    map<Expr,ExprSet> allFinals;
     void pathsSolve(Expr rel) {
       ExprSet finals;
       grds2gh.clear();
@@ -1676,75 +1693,77 @@ namespace ufo
       }
       outs () << "FINAL:\n";
       pprint(finals, 5);
+      allFinals[rel] = finals;
     }
 
-    void makeHyperChains(std::set<int> cycles) {
-      if(debug >= 2) outs() << "\n=== MAKE HYPER CHAINS ===\n\n";
-      if(debug >= 3) printPathsMap();
+    // void makeHyperChains(std::set<int> cycles) {
+    //   if(debug >= 2) outs() << "\n=== MAKE HYPER CHAINS ===\n\n";
+    //   if(debug >= 3) printPathsMap();
+    //
+    //   auto cycle = cycles.rbegin();
+    //
+    //   for(auto& pm: pathsMap) {
+    //     if(pathsMap.size() == 1) {
+    //       for(auto& m: pm.second) {
+    //         ExprVector hc;
+    //         hc.insert(hc.end(), m.begin(), m.end());
+    //         hyperChains.push_back(hc);
+    //       }
+    //       return;
+    //     }
+    //     for(auto& pm2: pathsMap) {
+    //       if(pm == pm2) continue;
+    //       setPointers(1 + 2*(getVarIndex(pm2.first, decls)));
+    //
+    //       // Now link up the chains for each loop together
+    //       // to make Hyper Chains.
+    //       for(auto& vpm: pm.second) {
+    //         for(auto& vpm2: pm2.second) {
+    //           Expr last = *(++(vpm.rbegin()));
+    //           Expr first = *(++(vpm2.begin()));
+    //           if(last == first) {
+    //             // Now connect the chains.
+    //             ExprVector chain1, chain2;
+    //             chain1.insert(chain1.end(), vpm.begin(), --(vpm.end()));
+    //             chain2.insert(chain2.end(), ++(++(vpm2.begin())), vpm2.end());
+    //             ExprSet conjs;
+    //             getConj(tr->body,conjs);
+    //             getConj(chain1.back(),conjs);
+    //             getConj(replaceAll(chain2.front(), invVars, invVarsPr),conjs);
+    //             if(u.isSat(conjs)) {
+    //               if(debug >= 3) outs() << "ADDING TO HYPER CHAIN\n";
+    //               if(*(chain1.end()) != *(chain2.begin())) {
+    //                 ExprVector hc;
+    //                 if(debug >= 5) {
+    //                   outs() << "\n=== CONNECT CHAINS ===\n\n";
+    //                   for(auto& v: chain1) outs() << v << " -> ";
+    //                   outs() << "\n";
+    //                   for(auto& v: chain2) outs() << v << " -> ";
+    //                   outs() << "\n";
+    //                 }
+    //                 hc.insert(hc.end(), chain1.begin(), chain1.end());
+    //                 hc.insert(hc.end(), chain2.begin(), chain2.end());
+    //                 hyperChains.push_back(hc);
+    //               }
+    //             }
+    //           }
+    //         }
+    //       }
+    //     }
+    //     cycle++;
+    //   }
+    //   if(debug >= 4) {
+    //     outs() << "\n=== HYPER CHAINS FOUND ===\n\n";
+    //     for(auto& v: hyperChains) {
+    //       for(auto& hc: v) {
+    //         outs() << "  " << hc << " -> ";
+    //       }
+    //       outs() << "\n";
+    //     }
+    //   }
+    // }
 
-      auto cycle = cycles.rbegin();
-
-      for(auto& pm: pathsMap) {
-        if(pathsMap.size() == 1) {
-          for(auto& m: pm.second) {
-            ExprVector hc;
-            hc.insert(hc.end(), m.begin(), m.end());
-            hyperChains.push_back(hc);
-          }
-          return;
-        }
-        for(auto& pm2: pathsMap) {
-          if(pm == pm2) continue;
-          setPointers(1 + 2*(getVarIndex(pm2.first, decls)));
-
-          // Now link up the chains for each loop together
-          // to make Hyper Chains.
-          for(auto& vpm: pm.second) {
-            for(auto& vpm2: pm2.second) {
-              Expr last = *(++(vpm.rbegin()));
-              Expr first = *(++(vpm2.begin()));
-              if(last == first) {
-                // Now connect the chains.
-                ExprVector chain1, chain2;
-                chain1.insert(chain1.end(), vpm.begin(), --(vpm.end()));
-                chain2.insert(chain2.end(), ++(++(vpm2.begin())), vpm2.end());
-                ExprSet conjs;
-                getConj(tr->body,conjs);
-                getConj(chain1.back(),conjs);
-                getConj(replaceAll(chain2.front(), invVars, invVarsPr),conjs);
-                if(u.isSat(conjs)) {
-                  if(debug >= 3) outs() << "ADDING TO HYPER CHAIN\n";
-                  if(*(chain1.end()) != *(chain2.begin())) {
-                    ExprVector hc;
-                    if(debug >= 5) {
-                      outs() << "\n=== CONNECT CHAINS ===\n\n";
-                      for(auto& v: chain1) outs() << v << " -> ";
-                      outs() << "\n";
-                      for(auto& v: chain2) outs() << v << " -> ";
-                      outs() << "\n";
-                    }
-                    hc.insert(hc.end(), chain1.begin(), chain1.end());
-                    hc.insert(hc.end(), chain2.begin(), chain2.end());
-                    hyperChains.push_back(hc);
-                  }
-                }
-              }
-            }
-          }
-        }
-        cycle++;
-      }
-      if(debug >= 4) {
-        outs() << "\n=== HYPER CHAINS FOUND ===\n\n";
-        for(auto& v: hyperChains) {
-          for(auto& hc: v) {
-            outs() << "  " << hc << " -> ";
-          }
-          outs() << "\n";
-        }
-      }
-    }
-
+    int lastCycle;
     void startPathFinding() {
       std::set<int> cycles;
       if(debug >= 3) outs() << "cycles size: " << ruleManager.cycles.size() << "\n";
@@ -1764,21 +1783,27 @@ namespace ufo
       // considering the last link in the previous loop and the first link
       // in the next loop.
 
-      // So, write something that find "general" chains in each loop.
+      lastCycle = *cycles.rbegin();
+      Expr lastRel = ruleManager.chcs[lastCycle].srcRelation;
+      allFinals[lastRel].insert(mk<EQ>(ghostVars[0], mpzZero));
+
       collectPhaseAtomics(cycles);
       makeCombs();
       pairLinks(cycles);
       makePredicateChains();
+
       for(auto i = cycles.rbegin(); i != cycles.rend(); i++) {
         Expr rel = ruleManager.chcs[*i].srcRelation;
-        setPointers(*i);
-        pathsSolve(rel);
+        // If there are many previous bounds then they all need to be used in the qr.
+        ExprSet lastFinals = allFinals[lastRel];
+        for(auto bi = lastFinals.begin(); bi != lastFinals.end(); bi++) {
+          setPointers(*i, *bi); // This is where the QR is set for the next run.
+          pathsSolve(rel);
+        }
+
+        lastCycle = *i;
+        lastRel = rel;
       }
-      // // At this point we have possible chains through each loop.
-      // // Now they need to be connected together to make hyper chains.
-      // makeHyperChains(cycles);
-      // setPointers(1);
-      // pathsSolve();
     }
 
     void printCandsEx(bool ppr = true) {
