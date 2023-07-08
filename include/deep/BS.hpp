@@ -22,6 +22,8 @@ namespace ufo
     ZSolver<EZ3> smt;
     SMTUtils u;
     CHCs& ruleManager;
+    map<int, CHCs*> rms;
+
     int varCnt = 0;
     ExprVector ssaSteps;
     map<Expr, ExprSet> candidates;
@@ -593,8 +595,8 @@ namespace ufo
      {
        for (auto & hr : ruleManager.chcs)
        {
-         if (hr.isQuery && !checkQuery) continue;
-         if (!checkCHC(hr, candidates)) return false;
+         if (hr.isQuery && !checkQuery) { outs() << "continuing\n"; continue; }
+         if (!checkCHC(hr, candidates)) { outs() << "returning false\n"; return false; }
        }
       if (weak)
       {
@@ -723,6 +725,7 @@ namespace ufo
        }
        {
          Expr rel = hr.srcRelation;
+         outs() << "rel: " << rel << std::endl;
          ExprSet lms = annotations[rel];
          Expr overBody = replaceAll(conjoin(lms, m_efac), ruleManager.invVars[rel], hr.srcVars);
          if (debug >= 6) outs() << "overbody: " << overBody << "\n";
@@ -1064,8 +1067,10 @@ namespace ufo
     map<Expr, ExprSet> prjctsGlob;
     void collectPhaseAtomics(std::set<int> cycles) {
       for(auto& cycle: cycles) {
-        setPointers(cycle, mkNeg(ghostGuard)); // sets Vars containers based on cycle.
-        testPointers();
+        // setPointers(cycle, mkNeg(ghostGuard)); // sets Vars containers based on cycle.
+        // testPointers();
+        outs() << "Start collectPhaseAtomics" << std::endl;
+        // CHCs* ruleManager = rms[cycle];
 
         HornRuleExt* hr = &ruleManager.chcs[cycle];
         Expr rel = hr->srcRelation;
@@ -1109,7 +1114,6 @@ namespace ufo
           getConj(p, prjctsTmp);
           if (debug >= 3) outs() << "Generated MBP: " << p << "\n";
         }
-        testPointers();
 
         prjcts.insert(prjcts.end(), prjctsTmp.begin(), prjctsTmp.end());
         u.removeRedundantConjunctsVec(prjcts);
@@ -1139,7 +1143,6 @@ namespace ufo
 
         shrinkPrjcts(prjcts);
         for(auto& p: prjcts) prjctsGlob[rel].insert(p);
-        // prjctsGlob.insert(prjctsGlob.end(), prjcts.begin(), prjcts.end());
       }
 
       if(debug >= 2) {
@@ -1173,7 +1176,6 @@ namespace ufo
             outs () << "\n";
           }
         }
-        testPointers();
       }
     }
 
@@ -1322,7 +1324,11 @@ namespace ufo
       if (debug > 1) outs () << "stage 0\n";
       auto candidatesTmp = candidates;
       multiHoudiniExtr(worklist);
-
+      if (debug >= 3) {
+        outs() << "==================\n";
+        printCandsEx();
+        outs() << "==================\n";
+      }
 
       // stage 0:
       if (checkAllOver(true, true, src, dst)) return Result_t::UNSAT;
@@ -1354,7 +1360,11 @@ namespace ufo
       if (debug > 1) outs () << "stage 1\n";
       candidatesTmp = candidates;
       multiHoudiniExtr(worklist);
-
+      if (debug >= 3) {
+        outs() << "==================\n";
+        printCandsEx();
+        outs() << "==================\n";
+      }
       // stage 1:
       if (checkAllOver(true, true, src, dst)) return Result_t::UNSAT;
 
@@ -1370,7 +1380,11 @@ namespace ufo
 
       if (debug > 1) outs () << "stage 2\n";
       multiHoudiniExtr(worklist);
-
+      if (debug >= 3) {
+        outs() << "==================\n";
+        printCandsEx();
+        outs() << "==================\n";
+      }
       // stage 2:
       if (checkAllOver(true, true, src, dst)) return Result_t::UNSAT;
 
@@ -1398,7 +1412,11 @@ namespace ufo
 
       if (debug > 1) outs () << "stage 3\n";
       multiHoudiniExtr(worklist);
-
+      if (debug >= 3) {
+        outs() << "==================\n";
+        printCandsEx();
+        outs() << "==================\n";
+      }
       // stage 3:
       if (checkAllOver(true, true, src, dst)) return Result_t::UNSAT;
 
@@ -1467,7 +1485,7 @@ namespace ufo
         return true;
       }
 
-      outs() << "entering exploreBounds\n";
+      outs() << "entering exploreBounds" << std::endl;
       boost::tribool res = exploreBounds(src, dst, bounds, block);
       if (res == false)
       {
@@ -1774,6 +1792,30 @@ namespace ufo
         }
       }
 
+      lastCycle = *cycles.rbegin();
+      Expr lastRel = ruleManager.chcs[lastCycle].srcRelation;
+      allFinals[lastRel].insert(mk<EQ>(ghostVars[0], mpzZero));
+
+      for(auto c: cycles) {
+        outs() << "CYCLE: " << c << std::endl;
+        setPointers(c, mkNeg(ghostGuard));
+        outs() << "AFTER SET POINTERS" << std::endl;
+        if(c > 1) {
+          ExprSet fc_body;
+          for (int i = 0; i < specVars.size(); i++) {
+            fc_body.insert(mk<EQ>(specVars[i], invVarsPr[i]));
+          }
+          fc->body = conjoin(fc_body, m_efac);
+        }
+
+        rms[c] = new CHCs(m_efac,z3);
+        rms[c]->addRule(fc);
+        rms[c]->addRule(tr);
+        rms[c]->addRule(qr);
+      }
+
+      if(debug >= 4) for(auto c: cycles) rms[c]->print(true);
+
       // At this point we have the CHCs set up with ghost vars.
       // Now we need to collect the possible paths through the program.
       // Done in a general way, this should collect "Predicate chains"
@@ -1783,14 +1825,12 @@ namespace ufo
       // considering the last link in the previous loop and the first link
       // in the next loop.
 
-      lastCycle = *cycles.rbegin();
-      Expr lastRel = ruleManager.chcs[lastCycle].srcRelation;
-      allFinals[lastRel].insert(mk<EQ>(ghostVars[0], mpzZero));
-
       collectPhaseAtomics(cycles);
       makeCombs();
       pairLinks(cycles);
       makePredicateChains();
+
+      exit(0);
 
       for(auto i = cycles.rbegin(); i != cycles.rend(); i++) {
         Expr rel = ruleManager.chcs[*i].srcRelation;
