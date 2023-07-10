@@ -26,7 +26,7 @@ namespace ufo
     ExprVector ssaSteps;
     map<Expr, ExprSet> candidates;
 
-    HornRuleExt* tr; // This should be a vector to handle multiple loops.
+    HornRuleExt* tr;
     HornRuleExt* fc;
     HornRuleExt* qr;
 
@@ -52,7 +52,8 @@ namespace ufo
     Expr ghost0Minus1;
     Expr ghost1Minus1;
     Expr ghostAss;
-    Expr ghostGuard;
+    Expr ghostValue;
+    Expr previousGuard;
     Expr ghostGuardPr;
     Expr loopGuard;
     Expr loopGuardPr;
@@ -68,20 +69,18 @@ namespace ufo
     ExprMap stren, grds2gh, fgrds2gh; // associate a guard (phi(vars)) with a precond of gh (f(vars))
 
 
-    string SYGUS_BIN;
-//    int globalIter = 0;
     int strenBound;
     int debug = 0;
 
-    bool hornspec = false;
     bool dg = false;
     bool data2 = false;
     bool doPhases = false;
 
   public:
+    Expr ghostGuard;
 
     BoundSolver (CHCs& r, int _b, bool _dg, bool d2, bool _dp, int dbg = 0)
-      : m_efac(r.m_efac), ruleManager(r), u(m_efac), strenBound(_b), SYGUS_BIN(""),
+      : m_efac(r.m_efac), ruleManager(r), u(m_efac), strenBound(_b),
         z3(m_efac), smt(z3), dg(_dg), data2(d2), doPhases(_dp), debug(dbg)
     {
       specDecl = mkTerm<string>(specName, m_efac);
@@ -237,18 +236,26 @@ namespace ufo
       tr_orig = *tr;
     }
 
-    void setUpQr()
+    void setUpQr(Expr g, Expr b)
     {
+      Expr boundCond = mk<AND>(g,b);
       qr = new HornRuleExt();
       qr->srcRelation = tr->srcRelation; // Need to pick the rel from the last loop.
       qr->srcVars = tr->srcVars;
-      qr->body = mk<AND>(mkNeg(loopGuard), ghostGuard);
+      qr->body = mk<AND>(mkNeg(loopGuard), boundCond);
       qr->dstRelation = mkTerm<string> ("err", m_efac);
       qr->isQuery = true;
       ruleManager.hasQuery = true;
 
       ruleManager.addFailDecl(qr->dstRelation);
       ruleManager.addRule(qr);
+
+      ghostValue = b->right();
+      previousGuard = simplifyBool(g);
+      if(debug >= 4) outs() << "GHOSTVALUE: " << ghostValue << std::endl;
+      if(debug >= 4) outs() << "PREVIOUS GUARD: " << previousGuard << std::endl;
+      ghostGuard = boundCond;
+      ghostGuardPr = replaceAll(boundCond, invVars, invVarsPr);
 
       for (auto & a : ruleManager.chcs)    // r.chcs changed by r.addRule, so pointers to its elements are broken
         if (a.isInductive) tr = &a;
@@ -257,7 +264,7 @@ namespace ufo
       tr_orig = *tr;
     }
 
-    bool setUpQueryAndSpec()
+    bool setUpQueryAndSpec(Expr g, Expr b)
     {
       //setUpCounters();
 
@@ -289,7 +296,7 @@ namespace ufo
 
       specUpFc();
       setUpTr();
-      setUpQr();
+      setUpQr(g, b);
 
       return true;
     }
@@ -754,12 +761,20 @@ namespace ufo
       if (prjcts.size() < sz) shrinkPrjcts(prjcts);
     }
 
-    void collectPhaseGuards(bool weakenPhases = false)
+    bool collectPhaseGuards(bool weakenPhases = false)
     {
+      if(u.isFalse(qr->body)) {
+        outs() << "QR is false" << std::endl;
+        return false;
+      }
+      if(u.isFalse(mk<AND>(replaceAll(previousGuard, invVars, fc->srcVars), fc->body))) {
+        outs() << "Infeasible init state" << std::endl;
+        return false;
+      }
       BndExpl bnd(ruleManager, (debug > 0));
       ExprSet cands;
-      vector<int>& cycle = ruleManager.cycles[0];
-      HornRuleExt* hr = &ruleManager.chcs[cycle[0]];
+      // vector<int>& cycle = ruleManager.cycles[0];
+      HornRuleExt* hr = &ruleManager.chcs[0];
       Expr rel = hr->srcRelation;
       int invNum = getVarIndex(invDecl, decls);
       ExprVector& srcVars = tr->srcVars;
@@ -889,6 +904,8 @@ namespace ufo
           exit(1);
         }
       }
+
+      return true;
     }
 
     void parseForGuards() {
@@ -997,11 +1014,11 @@ namespace ufo
 
     void bubbleSort(ExprVector& v) {
       for (int i = 0; i < v.size(); i++) {
-        for (int j = 0; j < v.size(); j++) {
-          if (v[i]->left()->arity() > v[j]->left()->arity()) {
-            Expr e = v[i];
-            v[i] = v[j];
-            v[j] = e;
+        for (int j = 0; j < v.size()-1; j++) {
+          if (v[j]->left()->arity() > v[j+1]->left()->arity()) {
+            Expr e = v[j];
+            v[j] = v[j+1];
+            v[j+1] = e;
           }
         }
       }
@@ -1050,13 +1067,30 @@ namespace ufo
                                  mk<EQ>(pc, grds2gh[dst])))); // hack for now
       tr->body = u.removeITE(mk<AND>(src, tr_orig.body));
 
-      if (debug > 2)
+      if (debug > 2) {
         outs () << "  using " << grds2gh[dst] << "\n    as bound for " << dst << "\n";
-      auto dst1 = mk<AND>(mk<NEG>(src), mk<AND>(dst, stren[dst]), mk<EQ>(pc, grds2gh[dst]));
+        outs() << "PC = GRDS2GH[DST]: " << mk<EQ>(pc, grds2gh[dst]) << std::endl;
+      }
 
+      auto dst1 = mk<AND>(mk<NEG>(src), mk<AND>(previousGuard, dst, stren[dst]), mk<EQ>(pc, grds2gh[dst]));
+
+      if(debug >= 4) outs() << "SRC: " << src << std::endl;
+      // src = mk<AND>(src, previousGuard);
+      if(debug >= 4) outs() << "SRC2: " << src << std::endl;
       auto src1 = u.simplifiedAnd(block, src);
-      if (isOpX<TRUE>(block))
+      if(debug >= 4) outs() << "SRC1: " << src1 << std::endl;
+      if(debug >= 4) outs() << "DST1: " << dst1 << std::endl;
+      if(u.isFalse(dst1)) {
+        if(debug >= 5) {
+          outs() << "dst1 is false" << std::endl;
+        }
+        return false;
+      }
+
+      if (isOpX<TRUE>(block)) {
         src1 = replaceAll(src1, invVars, fc->srcVars);
+      }
+      // src1 = mk<AND>(src1, previousGuard);
       res = dl2.connectPhase(src1, dst1, invDecl, block, invs, loopGuard);
       if (res == true)
         dl2.getDataCands(candMap[invDecl], invDecl);  // GF
@@ -1239,7 +1273,8 @@ namespace ufo
     boost::tribool boundSolveRec(Expr src, Expr dst, Expr block, int lvl = 0) {
       map<Expr,ExprSet> bounds;
       dataGrds.clear();
-
+      if(debug >= 5) outs() << "Begin boundSolveRec" << std::endl;
+      outs() << "LOOPGUARD: " << loopGuard << std::endl;
       if (!u.isSat(fcBodyInvVars,loopGuard)) {
         if (debug >= 2) outs() << "PROGRAM WILL NEVER ENTER LOOP\n";
         return true;
@@ -1250,7 +1285,8 @@ namespace ufo
 
       if (isOpX<FALSE>(dst))
       {
-        grds2gh[src] = mkMPZ(0, m_efac);
+        grds2gh[src] = ghostValue;
+        // grds2gh[src] = mkMPZ(0, m_efac;
         if (debug >= 2) outs () << "  assign 0 grds2gh (0) for " << src << "\n";
         return true;
       }
@@ -1258,6 +1294,9 @@ namespace ufo
       boost::tribool res = exploreBounds(src, dst, bounds, block);
       if (res == false)
       {
+        if(debug >= 5) {
+          outs() << "exploreBounds returned false" << std::endl;
+        }
         return true;
       }
       else if (res == indeterminate) {
@@ -1270,6 +1309,7 @@ namespace ufo
       getConj(dst, grdsDst);
       genCands(grdsDst, ghostVars[0]);
       getConj(src, grds);
+      // grds.insert(previousGuard);
 
       zs.clear();
       if (dg) {
@@ -1343,8 +1383,10 @@ namespace ufo
 
       bool rerun = false;
       for (auto b = boundsV.begin(), end = boundsV.end(); b != end && res; b++) {
+        for(auto e: exploredBounds) outs() << "exploredBounds: " << e << "\n";
+        if(exploredBounds.find(*b) != exploredBounds.end()) { continue; }
         candidates.clear();
-
+        exploredBounds.insert(*b);
         if (rerun) {
           if (debug >= 3) outs() << "RERUN\n=====\n";
           b--;
@@ -1390,8 +1432,12 @@ namespace ufo
           }
           if (debug >= 2) outs() << "  unknown\n\n";
           if (std::next(b) == end) {
-            if (phaseNum < phases.size())
+            if (phaseNum < phases.size()) {
               boundSolveRec(src, dst, mk<TRUE>(m_efac), lvl); // refactor to remove this recursion.
+            }
+          }
+          if(debug >= 4) {
+            outs() << "boundSolveRec continuing" << std::endl;
           }
           continue;
         }
@@ -1407,8 +1453,8 @@ namespace ufo
         if (debug >= 2) {
           outs() << "  Guards/bounds:\n";
           for (auto& g: grds2gh) {
-            outs() << "    (*)  " << g.first << "\n";
-            outs() << "         ->  " << g.second << "\n";
+            outs() << "    (*)  " << g.first << "";
+            outs() << "  ->  " << g.second << "\n";
           }
         }
 
@@ -1419,9 +1465,11 @@ namespace ufo
             grds2.insert(g.first);
         }
         Expr grd = disjoin(grds2,m_efac);
-        if (debug >= 4) outs() << "grd: " << grd << "\n";
+        if (debug >= 4) outs() << "mkNeg(grd): " << mkNeg(grd) << " AND " << src << std::endl;;
         if (u.isSat(mkNeg(grd), src)) {
+          // if(b != end) { continue; }
           if (boundSolveRec(src, dst, mkNeg(grd), lvl + 1)) { // refactor to remove this recursion.
+            exploredBounds.clear();
             return true;
           }
         }
@@ -1430,6 +1478,7 @@ namespace ufo
           return true;
         }
       }
+      if(debug >= 5) outs() << "End boundSolveRec" << std::endl;
       return false;
     }
 
@@ -1441,9 +1490,12 @@ namespace ufo
         outs() << "unknown\n";
         exit(0);
       }
+      else {
+        if(debug >= 4) outs() << "boundSolveRec returned true" << std::endl;
+      }
     }
 
-    void pathsSolve()
+    ExprSet pathsSolve()
     {
       ExprSet finals;
       for (auto & p : paths)
@@ -1455,17 +1507,27 @@ namespace ufo
           outs () << "\n";
         }
 
+        Expr ant = mk<AND>(previousGuard,p[p.size()-2]);
+        ant = normalize(ant);
+        ant = simplifyArithm(ant);
+        if(u.isFalse(ant)) continue;
+
         assert(p.size() > 1);
         Expr res;
         int i;
         for (i = p.size() - 2; i >= 0; i--)
         {
           if (debug) outs () << "STEP " << i << "\n";
+          outs() << p[1] << std::endl;
+          outs() << p[0] << std::endl;
+          outs() << fcBodyInvVars << std::endl;
+
           if (p[i] == fcBodyInvVars)
           {
             assert(i == 0);
             break;
           }
+          if(debug >= 5) outs() << "entering boundSolve" << std::endl;
           boundSolve(p[i], p[i+1]);
 
           res = NULL;
@@ -1475,6 +1537,7 @@ namespace ufo
             if (u.implies(g.first, p[i]))
             {
               pre.insert(g.first);
+              // res = g.second;
               if (res == NULL) res = g.second;
               else res = mk<ITE>(g.first, g.second, res);   // GF
             }
@@ -1482,12 +1545,21 @@ namespace ufo
           stren[p[i]] = simplifyBool(distribDisjoin(pre, m_efac));
           if (i != 0) grds2gh[p[i]] = res;
         }
-        finals.insert(mk<IMPL>(stren[p[1]], mk<EQ>(ghostVars[0], res)));
+        // previousGuard = simplifyBool(previousGuard);
+        ant = mk<AND>(previousGuard,stren[p[1]]);
+        ant = normalize(ant);
+        ant = simplifyArithm(ant);
+        if(ant == mk<FALSE>(m_efac)) {
+          outs() << "AFTER LOOP" << std::endl;
+          finals.insert(mk<IMPL>(stren[p[1]], mk<EQ>(ghostVars[0], res)));
+        }
+        else {
+          finals.insert(mk<IMPL>(ant, mk<EQ>(ghostVars[0], res)));
+        }
         grds2gh.clear();
         stren.clear();
       }
-      outs () << "FINAL:\n";
-      pprint(finals, 5);
+      return finals;
     }
 
     void printCandsEx(bool ppr = true) {
@@ -1509,6 +1581,16 @@ namespace ufo
       outs() << "Phases\n======\n";
       for (auto& p: phases) outs() << p << "\n";
     }
+
+    void removeQuery() {
+      for(auto hr = ruleManager.chcs.begin(); hr != ruleManager.chcs.end(); ) {
+        if(hr->isQuery) {
+          if (debug >= 4) outs() << "erasing query\n";
+          hr = ruleManager.chcs.erase(hr);
+        }
+        else { hr++; }
+      }
+    }
   };
 
   inline void findBounds(string smt, int inv, int stren, bool dg,
@@ -1518,29 +1600,104 @@ namespace ufo
     EZ3 z3(m_efac);
     CHCs ruleManager(m_efac, z3, debug);
     ruleManager.parse(smt);
-    BoundSolver spec(ruleManager, stren, dg, data2, doPhases, debug);
-    if (!ruleManager.hasQuery) {
-      if (debug >= 4) ruleManager.print(true);
-      if (ruleManager.decls.size() > 1) {
-        outs() << "Multiple loops\n";
-        return;
-      }
-      else if (debug >= 4) {
-        outs() << "Single loop\n";
-      }
-      // refactor to ELBA to use ruleManager properly instead of using
-      // HornRuleExt pointers for only 3 rules at a time.
-      spec.setUpQueryAndSpec();
-      if (debug >= 3) ruleManager.print(true);
-    }
-    else {
-      outs() << "Unsupported format\n";
-      return;
-    }
+    std::set<int> cycles;
+    if(debug >= 3) outs() << "cycles size: " << ruleManager.cycles.size() << "\n";
 
-    spec.collectPhaseGuards();
-    if (debug >= 2) spec.printPhases();
-    spec.pathsSolve();
+    for(auto& c: ruleManager.cycles) {
+      for(auto& cc: c) {
+        cycles.insert(cc);
+      }
+    }
+    map<int, CHCs*> rms;
+
+    for(auto c: cycles) {
+      Expr rel = ruleManager.chcs[c].srcRelation;
+      rms[c] = new CHCs(m_efac, z3, debug);
+      for(auto& hr: ruleManager.chcs) {
+        if(c == 1 && hr.isFact) {
+          rms[c]->addRule(&hr);
+        }
+        else if(c > 1 && hr.isFact) {
+          HornRuleExt fc = hr;
+          fc.body = mk<TRUE>(m_efac);
+          fc.dstRelation = ruleManager.chcs[c].srcRelation;
+          rms[c]->addRule(&fc);
+        }
+        if(hr.isInductive && hr.srcRelation == rel) {
+          rms[c]->addRule(&hr);
+        }
+      }
+      // QR will be added when "setUpQueryAndSpec" is called.
+      if(debug >= 4) rms[c]->print(true);
+      rms[c]->wtoSort();
+      if(debug >= 4) outs() << "rms[" << c << "]->cycles.size() = " << rms[c]->cycles.size() << std::endl;
+    }
+    // exit(0);
+
+    Expr new_name = mkTerm<string> ("_gh_" + to_string(0), m_efac);
+    Expr var = bind::intConst(new_name);
+
+    Expr ghostGuard = mk<EQ>(var, mkMPZ(0, m_efac));
+
+    map<int, BoundSolver*> elbas;
+    map<int, ExprSet> bounds;
+    bounds[*cycles.rbegin()].insert(ghostGuard);
+    int lastCycle = *cycles.rbegin();
+    for(auto c = cycles.rbegin(); c != cycles.rend(); c++) {
+      ExprSet prevBounds = bounds[lastCycle];
+      if(c == cycles.rbegin()) {
+        bounds[lastCycle].clear();
+      }
+      lastCycle = *c;
+      if(debug >= 4) outs() << "prevBounds SIZE: " << prevBounds.size() << std::endl;
+      bool ranOnceAlready = false;
+      elbas[*c] = new BoundSolver(*rms[*c], stren, dg, data2, doPhases, debug);
+      int counter = 0;
+      for(auto& bnd: prevBounds) {
+        if(debug >= 2) outs() << "Loop " << *c << " Bound " << counter++ << std::endl;
+        Expr b = bnd;
+        Expr prevGrd, prevBound;
+        if(isOpX<IMPL>(b)) {
+          prevGrd = b->left();
+          prevBound = b->right();
+        }
+        else {
+          prevGrd = mk<TRUE>(m_efac);
+          prevBound = b;
+        }
+
+        if(debug >= 4) outs() << "NEXT BOUND: " << b << std::endl;
+
+        if(ranOnceAlready) {
+          elbas[*c]->removeQuery();
+          elbas[*c]->setUpQr(prevGrd, prevBound);
+        }
+        else {
+          elbas[*c]->setUpQueryAndSpec(prevGrd, prevBound);
+        }
+
+        if(debug >= 4) rms[*c]->print(true);
+        bool badGuard = elbas[*c]->collectPhaseGuards();
+        if(!badGuard) {
+          if(debug >= 4) outs() << "Infeasible path" << std::endl;
+          // Previous guard leads to an infeasible path.
+        }
+        else {
+          if (debug >= 2) elbas[*c]->printPhases();
+          ExprSet results = elbas[*c]->pathsSolve();
+          bounds[*c].insert(results.begin(), results.end());
+        }
+        ranOnceAlready = true;
+
+
+        outs() << "\n\n====================";
+        outs() << "====================\n";
+        outs() <<     "FINAL: \n";
+        pprint(bounds[*c], 5);
+        outs() << "\n====================";
+        outs() << "====================\n" << std::endl;
+      }
+    }
   }
 }
 

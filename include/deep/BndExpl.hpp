@@ -905,7 +905,7 @@ namespace ufo
         int l = 0;                        // starting index (before the loop)
         if (ruleManager.hasAnyArrays) l++; // first iter is usually useless
 
-        //if(isOpX<TRUE>(gh_cond)) trace.push_back(0);
+        // if(isOpX<TRUE>(gh_cond)) trace.push_back(0);
         for (int j = 0; j < k; j++)
           for (int m = 0; m < loop.size(); m++)
             trace.push_back(loop[m]);
@@ -914,6 +914,7 @@ namespace ufo
         ssa.push_back(src);
         getSSA(trace, ssa);
         ssa.push_back(replaceAll(dst, srcVars, bindVars[bindVars.size() - 1]));
+        if(debug) pprint(ssa,2);
 
         int traceSz = trace.size();
         // compute vars for opt constraint
