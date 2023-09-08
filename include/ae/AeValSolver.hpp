@@ -792,6 +792,12 @@ namespace ufo
     return eliminateQuantifiers(tmp, vars);
   }
 
+  inline static Expr eliminateQuantifier(Expr fla, Expr var)
+  {
+    ExprSet varsSet = {var};
+    return eliminateQuantifiers(fla, varsSet);
+  }
+
   inline static Expr keepQuantifiers(Expr fla, ExprVector& vars)
   {
     ExprSet varsSet;

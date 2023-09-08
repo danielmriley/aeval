@@ -378,17 +378,24 @@ namespace ufo
         hr.assignVarsAndRewrite (origSrcSymbs, invVars[hr.srcRelation],
                                  origDstSymbs, invVarsPrime[hr.dstRelation], lin);
 
+        hr.body = eliminateQuantifiers(conjoin(lin, m_efac), hr.locVars,
+                                               !hasBV && doArithm, false);
         if (doElim)
         {
-          hr.body = eliminateQuantifiers(conjoin(lin, m_efac), hr.locVars,
-                                                 !hasBV && doArithm, false);
           hr.body = u.removeITE(hr.body);
           hr.body = simplifyArr(hr.body);
           hr.shrinkLocVars();
         }
-        else
-          hr.body = conjoin(lin, m_efac);
+        // else
+          // hr.body = conjoin(lin, m_efac);
       }
+
+      if(!hasQuery) {
+        if(debug >= 3) outs() << "No query in file\n";
+        // Add a dummy query here..
+        dummyQuery();
+      }
+
       if (doElim)
       {
         int sz = chcs.size();
@@ -452,6 +459,27 @@ namespace ufo
         print(debug >= 4, true);
       }
       return true;
+    }
+
+    void dummyQuery() {
+      ExprVector loopGuards;
+      for(auto &hr : chcs) {
+        if(hr.isInductive) {
+          loopGuards.push_back(getPrecondition(&hr));
+        }
+      }
+
+      HornRuleExt* qr = new HornRuleExt();
+      qr->isQuery = true;
+      hasQuery = true;
+      qr->srcRelation = chcs.back().dstRelation;
+      qr->srcVars = chcs.back().srcVars;
+      qr->dstRelation = mkTerm<string> ("err", m_efac);
+      qr->body = conjoin(loopGuards, m_efac);
+      addFailDecl(qr->dstRelation);
+      addRule(qr);
+      // print(true);
+      // exit(1);
     }
 
     bool eliminateTrivTrueOrFalse()
@@ -739,7 +767,7 @@ namespace ufo
         {
           if (debug >= 2)
           {
-            outs () << "    Disjoing bodies of " << toComb.size() << " CHCs: "
+            outs () << "    Disjoining bodies of " << toComb.size() << " CHCs: "
                     << s.srcRelation << " -> " << s.dstRelation << "\n";
           }
           ExprVector all;
@@ -1130,7 +1158,7 @@ namespace ufo
         }
       }
 
-      // WTO sorting is here now:
+      // wtoSort is done here now:
       if (tracesFound)
       {
         if (src == dst)

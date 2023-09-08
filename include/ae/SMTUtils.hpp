@@ -452,8 +452,9 @@ namespace ufo
     // to extend
     Expr simplifiedAnd(Expr a, Expr b)
     {
-      ExprVector disjs, vars;
-      flatten(a, disjs, false, vars, [](Expr a, ExprVector& b){return a;});
+      ExprSet disjs, vars;
+      // flatten(a, disjs, false, vars, [](Expr a, ExprVector& b){return a;});
+      getDisj(a, disjs);
       for (auto it = disjs.begin(); it != disjs.end(); )
       {
         if (!isSat(*it, b)) it = disjs.erase(it);
@@ -625,6 +626,24 @@ namespace ufo
         if (implies(b, *it)) it = cnjs.erase(it);
         else ++it;
       return conjoin(cnjs, efac);
+    }
+
+    inline static string varType (Expr var)
+    {
+      if (bind::isIntConst(var))
+        return "Int";
+      else if (bind::isRealConst(var))
+        return "Real";
+      else if (bind::isBoolConst(var))
+        return "Bool";
+      else if (bind::isConst<ARRAY_TY> (var))
+      {
+        Expr name = mkTerm<string> ("", var->getFactory());
+        Expr s1 = bind::mkConst(name, var->last()->right()->left());
+        Expr s2 = bind::mkConst(name, var->last()->right()->right());
+        return string("(Array ") + varType(s1) + string(" ") + varType(s2) + string(")");
+      }
+      else return "";
     }
 
     void print (Expr e, std::ostream& out = outs())

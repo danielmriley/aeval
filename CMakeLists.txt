@@ -52,7 +52,7 @@ endif ()
 include(ExternalProject)
 set_property(DIRECTORY PROPERTY EP_STEP_TARGETS configure build test)
 
-set (Z3_TAG "z3-4.8.10" CACHE STRING "Z3 git tag to use")
+set (Z3_TAG "z3-4.12.2" CACHE STRING "Z3 git tag to use")
 set (Z3_REPO "https://github.com/Z3Prover/z3.git" CACHE STRING "Z3 repo")
 if (CMAKE_BUILD_TYPE STREQUAL "Debug")
   set (Z3_DEBUG "-d")
@@ -132,7 +132,7 @@ find_package(Armadillo)
 if (ARMADILLO_FOUND)
   add_definitions(-DHAVE_ARMADILLO)
   include_directories(${ARMADILLO_INCLUDE_DIR})
-endif()  
+endif()
 
 install(DIRECTORY include/
   DESTINATION include
