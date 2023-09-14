@@ -17,10 +17,9 @@
     (and
       (itp1 x1 y1 z1)
       (< x1 10)
-      (= x2 (+ x1 1))
       (= y2 0)
     )
-    (itp2 x2 y2 z1)
+    (itp2 x1 y2 z1)
   )
 )
 
@@ -28,7 +27,6 @@
     (and
       (itp2 x1 y1 z1)
       (< y1 10)
-      (= y2 (+ y1 1))
       (= x2 x1)
       (= z2 0)
     )
@@ -48,6 +46,7 @@
   )
 )
 
-(rule (=> (and (itp3 x1 y1 z1) (>= z1 10)) (itp2 x1 y1 z1)))
+(rule (=> (and (itp3 x1 y1 z1) (= y2 (+ y1 1)) (>= z1 10)) (itp2 x1 y2 z1)))
 
-(rule (=> (and (itp2 x1 y1 z1) (>= y1 10)) (itp1 x1 y1 z1)))
+
+(rule (=> (and (itp2 x1 y1 z1) (= x2 (+ x1 1)) (>= y1 10)) (itp1 x2 y1 z1)))

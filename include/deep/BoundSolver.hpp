@@ -273,7 +273,7 @@ namespace ufo
         else if (a.isQuery) qr = &a;
       tr_orig = *tr;
 
-      invDecl = tr->srcRelation; // Need to handle multiple loops, so this can't be assigned in this way.
+      invDecl = tr->srcRelation;
       invVars = tr->srcVars;
       invVarsPr = tr->dstVars;
       invVarsSz = invVars.size();
@@ -1598,6 +1598,47 @@ namespace ufo
     }
   };
 
+  Expr concatLoopBody(int cycleNum1, int cycleNum2, CHCs& ruleManager) {
+    // Need a double primed var set to differentiate between top and bottom halves of the loop.
+    ExprVector vars = ruleManager.invVars[ruleManager.chcs[cycleNum1].srcRelation];
+    ExprVector invVarsPrPr;
+    for(auto& v: vars) {
+      Expr name = mkTerm<string>(lexical_cast<string>(v) + "''", ruleManager.m_efac);
+      Expr var = fapp (intConstDecl (name)); // generalize this... DR
+      invVarsPrPr.push_back(var);
+      outs() << "New Var: " << var << "\n";
+    }
+
+    outs() << "cyc1: " << cycleNum1 << "  |  cyc2: " << cycleNum2 << "\n";
+    ExprSet topBody;
+    Expr top = ruleManager.chcs[cycleNum1].body;
+    outs() << "TOP: " << top << "\n";
+    getConj(ruleManager.chcs[cycleNum1].body, topBody);
+    Expr botBody = ruleManager.chcs[cycleNum2].body;
+    botBody = replaceAll(botBody, ruleManager.invVarsPrime[ruleManager.chcs[cycleNum1].srcRelation], invVarsPrPr);
+    botBody = replaceAll(botBody, ruleManager.invVars[ruleManager.chcs[cycleNum1].srcRelation], ruleManager.invVarsPrime[ruleManager.chcs[cycleNum1].srcRelation]);
+    outs() << "BOT: " << botBody << "\n";
+    Expr preCond2 = ruleManager.getPrecondition(&ruleManager.chcs[cycleNum2]);
+    outs() << "PreCond2: " << preCond2 << "\n";
+    ExprSet bodyConjsBot;
+    ExprSet preCondSetBot;
+    preCondSetBot.insert(preCond2);
+    getConj(botBody, bodyConjsBot);
+    minusSets(bodyConjsBot, preCondSetBot);
+
+    for(auto& e: bodyConjsBot) outs() << "  |  " << e << "\n";
+    botBody = conjoin(bodyConjsBot, ruleManager.m_efac);
+    outs() << "New BOT: " << botBody << "\n";
+    topBody.insert(bodyConjsBot.begin(), bodyConjsBot.end());
+    Expr newTr = conjoin(topBody, ruleManager.m_efac);
+    ExprSet newTrConj;
+    getConj(newTr, newTrConj);
+    newTr = simpEquivClasses(ruleManager.invVarsPrime[ruleManager.chcs[cycleNum1].srcRelation], newTrConj, ruleManager.m_efac);
+
+    outs() << "New TR: " << newTr << "\n";
+    return newTr;
+  }
+
   inline void findBounds(string smt, int inv, int stren, bool dg,
     bool data2, bool doPhases, int debug = 0)
     {
@@ -1624,13 +1665,19 @@ namespace ufo
 
       for(auto& l: ruleManager.loopheads) {
         outs() << "Loophead: " << l << "\n";
+      }
+
+      for(auto& l: ruleManager.loopheads) {
         vector<vector<int>> cycles = ruleManager.cycles[l];
 
         for(auto& cc: cycles)
         if(cc.size() > 1) {
           nestedLoops = true;
           // Need to concatenate the two CHCs that this loophead has to make a complete loop.
-          outs() << "Support for nested loops coming soon!\n";
+          outs() << "Nested loop support in progress\n";
+          rms[l] = new CHCs(m_efac, z3, debug);
+          Expr newTr = concatLoopBody(cc[0], cc[1], ruleManager);
+
         }
         else {
           // Proceed with the single TR for this loophead.
@@ -1639,7 +1686,7 @@ namespace ufo
           rms[l] = new CHCs(m_efac, z3, debug);
           // call findCycles instead of wtoSort.
 
-          Expr rel = ruleManager.chcs[cycleNum].srcRelation;
+          // Expr rel = ruleManager.chcs[cycleNum].srcRelation;
           for(auto& hr: ruleManager.chcs) {
             if(cycleNum == 1 && hr.isFact) {
               rms[l]->addRule(&hr);
@@ -1650,7 +1697,7 @@ namespace ufo
               fc.dstRelation = ruleManager.chcs[cycleNum].srcRelation;
               rms[l]->addRule(&fc);
             }
-            if(hr.isInductive && hr.srcRelation == rel) {
+            if(hr.isInductive && hr.srcRelation == l) {
               rms[l]->addRule(&hr);
             }
           }
@@ -1666,6 +1713,7 @@ namespace ufo
           if(debug >= 4) outs() << "rms[" << l << "]->cycles.size() = " << rms[l]->cycles.size() << std::endl;
         }
       }
+      exit(0);
       // ruleManagers set up with their "single" loops.
 
       Expr new_name = mkTerm<string> ("_gh_" + to_string(0), m_efac);
