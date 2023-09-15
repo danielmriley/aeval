@@ -204,7 +204,7 @@ namespace ufo
 
     }
 
-    void setUpTr() // Needs to be rewritten to handle multiple loops.
+    void setUpTr()
     {
       HornRuleExt* tr_new = new HornRuleExt();
       tr_new->srcRelation = tr->srcRelation;
@@ -218,7 +218,6 @@ namespace ufo
       tr_new->dstVars.push_back(ghostVarsPr[0]);
       tr_new->isInductive = true;
       ruleManager.addDeclAndVars(invDecl,invVars);
-
 
       ExprSet tmp;
       getConj(tr->body, tmp);
@@ -1598,6 +1597,19 @@ namespace ufo
     }
   };
 
+  HornRuleExt* makeNewTr(Expr body, HornRuleExt* tr) {
+    HornRuleExt* tr_new = new HornRuleExt();
+
+    tr_new->srcRelation = tr->srcRelation;
+    tr_new->srcVars = tr->srcVars;
+    tr_new->dstRelation = tr->dstRelation;
+    tr_new->dstVars = tr->dstVars;
+    tr_new->isInductive = true;
+    tr_new->body = body;
+
+    return tr_new;
+  }
+
   Expr concatLoopBody(int cycleNum1, int cycleNum2, CHCs& ruleManager) {
     // Need a double primed var set to differentiate between top and bottom halves of the loop.
     ExprVector vars = ruleManager.invVars[ruleManager.chcs[cycleNum1].srcRelation];
@@ -1609,23 +1621,31 @@ namespace ufo
       outs() << "New Var: " << var << "\n";
     }
 
+    ExprVector invVars1 = ruleManager.invVars[ruleManager.chcs[cycleNum1].srcRelation];
+    ExprVector invVarsPrime1 = ruleManager.invVarsPrime[ruleManager.chcs[cycleNum1].srcRelation];
+    ExprVector invVars2 = ruleManager.invVars[ruleManager.chcs[cycleNum2].srcRelation];
+    ExprVector invVarsPrime2 = ruleManager.invVarsPrime[ruleManager.chcs[cycleNum2].srcRelation];
+
     outs() << "cyc1: " << cycleNum1 << "  |  cyc2: " << cycleNum2 << "\n";
     ExprSet topBody;
     Expr top = ruleManager.chcs[cycleNum1].body;
     outs() << "TOP: " << top << "\n";
     getConj(ruleManager.chcs[cycleNum1].body, topBody);
     Expr botBody = ruleManager.chcs[cycleNum2].body;
-    botBody = replaceAll(botBody, ruleManager.invVarsPrime[ruleManager.chcs[cycleNum1].srcRelation], invVarsPrPr);
-    botBody = replaceAll(botBody, ruleManager.invVars[ruleManager.chcs[cycleNum1].srcRelation], ruleManager.invVarsPrime[ruleManager.chcs[cycleNum1].srcRelation]);
+    botBody = replaceAll(botBody, invVarsPrime1, invVarsPrPr);
+    botBody = replaceAll(botBody, invVars1, invVarsPrime1);
     outs() << "BOT: " << botBody << "\n";
     Expr preCond2 = ruleManager.getPrecondition(&ruleManager.chcs[cycleNum2]);
+    preCond2 = replaceAll(preCond2, invVars1, invVarsPrime1);
+
     outs() << "PreCond2: " << preCond2 << "\n";
     ExprSet bodyConjsBot;
     ExprSet preCondSetBot;
     preCondSetBot.insert(preCond2);
+    preCond2 = replaceAll(preCond2, invVarsPrime1, invVarsPrPr);
     getConj(botBody, bodyConjsBot);
     minusSets(bodyConjsBot, preCondSetBot);
-
+    bodyConjsBot.insert(preCond2);
     for(auto& e: bodyConjsBot) outs() << "  |  " << e << "\n";
     botBody = conjoin(bodyConjsBot, ruleManager.m_efac);
     outs() << "New BOT: " << botBody << "\n";
@@ -1633,7 +1653,7 @@ namespace ufo
     Expr newTr = conjoin(topBody, ruleManager.m_efac);
     ExprSet newTrConj;
     getConj(newTr, newTrConj);
-    newTr = simpEquivClasses(ruleManager.invVarsPrime[ruleManager.chcs[cycleNum1].srcRelation], newTrConj, ruleManager.m_efac);
+//    newTr = simpEquivClasses(invVarsPrime1, newTrConj, ruleManager.m_efac);
 
     outs() << "New TR: " << newTr << "\n";
     return newTr;
@@ -1677,6 +1697,25 @@ namespace ufo
           outs() << "Nested loop support in progress\n";
           rms[l] = new CHCs(m_efac, z3, debug);
           Expr newTr = concatLoopBody(cc[0], cc[1], ruleManager);
+          int cycleNum = cc[0];
+
+          for(auto& hr: ruleManager.chcs) {
+            if(cycleNum == 1 && hr.isFact) {
+              rms[l]->addRule(&hr);
+            }
+            else if(cycleNum > 1 && hr.isFact) {
+              HornRuleExt fc = hr;
+              fc.body = mk<TRUE>(m_efac);
+              fc.dstRelation = ruleManager.chcs[cycleNum].srcRelation;
+              rms[l]->addRule(&fc);
+            }
+            if(hr.isInductive && hr.srcRelation == l) {
+              // Need to use newTr here to make a new hr.
+              HornRuleExt* tr_new = makeNewTr(newTr, &hr);
+              rms[l]->addRule(&hr);
+            }
+          }
+          rms[l]->dummyQuery();
 
         }
         else {
