@@ -1597,34 +1597,34 @@ namespace ufo
     }
   };
 
-  HornRuleExt* makeNewTr(Expr body, HornRuleExt* tr) {
+  HornRuleExt* makeNewTr(Expr body, Expr rel, CHCs& ruleManager) {
     HornRuleExt* tr_new = new HornRuleExt();
 
-    tr_new->srcRelation = tr->srcRelation;
-    tr_new->srcVars = tr->srcVars;
-    tr_new->dstRelation = tr->dstRelation;
-    tr_new->dstVars = tr->dstVars;
+    tr_new->srcRelation = rel;
+    tr_new->srcVars = ruleManager.invVars[rel];
+    tr_new->dstRelation = rel;
+    tr_new->dstVars = ruleManager.invVarsPrime[rel];
     tr_new->isInductive = true;
     tr_new->body = body;
 
     return tr_new;
   }
 
+  ExprSet filterForChangedVars(ExprSet prevConjs) {
+    ExprSet vars;
+    for(auto& e: prevConjs) {
+      outs() << "PREV: " << e << "\n";
+      if(isOp<NumericOp>(e->right())) {
+        filter (e, bind::IsConst (), inserter (vars, vars.end()));
+        // vars.insert(e->left());
+      }
+    }
+    for(auto& e: vars) outs() << "VAR: " << e << "\n";
+    return vars;
+  }
+
   Expr concatLoopBody(int cycleNum1, int cycleNum2, CHCs& ruleManager) {
     // Need a double primed var set to differentiate between top and bottom halves of the loop.
-    ExprVector vars = ruleManager.invVars[ruleManager.chcs[cycleNum1].srcRelation];
-    ExprVector invVarsPrPr;
-    for(auto& v: vars) {
-      Expr name = mkTerm<string>(lexical_cast<string>(v) + "''", ruleManager.m_efac);
-      Expr var = fapp (intConstDecl (name)); // generalize this... DR
-      invVarsPrPr.push_back(var);
-      outs() << "New Var: " << var << "\n";
-    }
-
-    ExprVector invVars1 = ruleManager.invVars[ruleManager.chcs[cycleNum1].srcRelation];
-    ExprVector invVarsPrime1 = ruleManager.invVarsPrime[ruleManager.chcs[cycleNum1].srcRelation];
-    ExprVector invVars2 = ruleManager.invVars[ruleManager.chcs[cycleNum2].srcRelation];
-    ExprVector invVarsPrime2 = ruleManager.invVarsPrime[ruleManager.chcs[cycleNum2].srcRelation];
 
     outs() << "cyc1: " << cycleNum1 << "  |  cyc2: " << cycleNum2 << "\n";
     ExprSet topBody;
@@ -1632,31 +1632,144 @@ namespace ufo
     outs() << "TOP: " << top << "\n";
     getConj(ruleManager.chcs[cycleNum1].body, topBody);
     Expr botBody = ruleManager.chcs[cycleNum2].body;
-    botBody = replaceAll(botBody, invVarsPrime1, invVarsPrPr);
-    botBody = replaceAll(botBody, invVars1, invVarsPrime1);
     outs() << "BOT: " << botBody << "\n";
     Expr preCond2 = ruleManager.getPrecondition(&ruleManager.chcs[cycleNum2]);
-    preCond2 = replaceAll(preCond2, invVars1, invVarsPrime1);
 
     outs() << "PreCond2: " << preCond2 << "\n";
     ExprSet bodyConjsBot;
     ExprSet preCondSetBot;
     preCondSetBot.insert(preCond2);
-    preCond2 = replaceAll(preCond2, invVarsPrime1, invVarsPrPr);
     getConj(botBody, bodyConjsBot);
     minusSets(bodyConjsBot, preCondSetBot);
     bodyConjsBot.insert(preCond2);
+
     for(auto& e: bodyConjsBot) outs() << "  |  " << e << "\n";
+
     botBody = conjoin(bodyConjsBot, ruleManager.m_efac);
     outs() << "New BOT: " << botBody << "\n";
     topBody.insert(bodyConjsBot.begin(), bodyConjsBot.end());
     Expr newTr = conjoin(topBody, ruleManager.m_efac);
     ExprSet newTrConj;
     getConj(newTr, newTrConj);
-//    newTr = simpEquivClasses(invVarsPrime1, newTrConj, ruleManager.m_efac);
 
+    Expr prevTr;
+    Expr rel = ruleManager.chcs[cycleNum1].dstRelation;
+    for(auto& hr: ruleManager.chcs) {
+      if(hr.isInductive && hr.srcRelation == rel) {
+        prevTr = hr.body;
+      }
+    }
+    outs() << "Prev Tr: " << prevTr << "\n";
+    ExprSet prevConjs;
+    getConj(prevTr, prevConjs);
+    ExprSet innerLoopVars = filterForChangedVars(prevConjs);
+    newTr = weakenForVars(newTr, innerLoopVars);
+
+    ExprSet conjs;
+    getConj(newTr, conjs);
+    for(auto e = conjs.begin(); e != conjs.end(); ) {
+      if(isOpX<EQ>(*e) && !isOp<NumericOp>((*e)->right())) {
+        outs() << "ERASING: " << *e << "\n";
+        e = conjs.erase(e);
+      }
+      else e++;
+    }
+    // ExprSet vars = filterForChangedVars(conjs);
+    newTr = conjoin(conjs, ruleManager.m_efac);
     outs() << "New TR: " << newTr << "\n";
+    if(!ruleManager.u.isSat(newTr)) {
+      outs() << "NewTr is not satisfiable\n";
+
+      exit(1);
+    }
+
     return newTr;
+  }
+
+  void calculateBounds(CHCs& ruleManager, map<Expr, CHCs*>& rms, bool nestedLoops,
+                       int stren, bool dg, bool data2, bool doPhases, int debug = 0) {
+    // Calculate bounds for each loop.
+    if(debug >= 2) outs() << "\n====== Calculate Bounds ======\n";
+
+    Expr new_name = mkTerm<string> ("_gh_" + to_string(0), ruleManager.m_efac);
+    Expr var = bind::intConst(new_name);
+
+    Expr ghostGuard = mk<EQ>(var, mkMPZ(0, ruleManager.m_efac));
+
+    map<Expr, BoundSolver*> elbas;
+    map<Expr, ExprSet> bounds;
+
+    if(nestedLoops) {
+      std::reverse(ruleManager.loopheads.begin(), ruleManager.loopheads.end());
+    }
+
+    // I need to figure out how to navigate the loopheads when there are nested loops. DR
+    // For sequential loops we can go through the loopheads in reverse as they are in the vector.
+
+    // Run through loopheads front to back (this is the loops in order innermost to outermost).
+    // Run through loopheads back to front (this is the loops in reverse sequential order).
+
+    Expr lastLoophead = *ruleManager.loopheads.rbegin();
+    bounds[lastLoophead].insert(ghostGuard);
+
+    for(auto l = ruleManager.loopheads.rbegin(); l != ruleManager.loopheads.rend(); l++) {
+      ExprSet prevBounds = bounds[lastLoophead];
+      if(l == ruleManager.loopheads.rbegin()) {
+        bounds[lastLoophead].clear();
+      }
+      lastLoophead = *l;
+
+      bool ranOnceAlready = false;
+      elbas[*l] = new BoundSolver(*rms[*l], stren, dg, data2, doPhases, debug);
+      int counter = 0;
+
+      for(auto& bnd: prevBounds) {
+        if(debug >= 2) outs() << "Loop " << *l << " Bound " << counter++ << std::endl;
+        Expr b = bnd;
+        Expr prevGrd, prevBound;
+        if(isOpX<IMPL>(b)) {
+          prevGrd = b->left();
+          prevBound = b->right();
+        }
+        else {
+          prevGrd = mk<TRUE>(ruleManager.m_efac);
+          prevBound = b;
+        }
+
+        if(debug >= 4) outs() << "NEXT BOUND: " << b << std::endl;
+
+        if(ranOnceAlready) {
+          elbas[*l]->removeQuery(); // Removes the dummy query added for parsing.
+          elbas[*l]->setUpQr(prevGrd, prevBound);
+        }
+        else {
+          elbas[*l]->removeQuery(); // Removes the dummy query added for parsing.
+          elbas[*l]->setUpQueryAndSpec(prevGrd, prevBound);
+        }
+
+        if(debug >= 4) rms[*l]->print(true);
+        bool badGuard = elbas[*l]->collectPhaseGuards();
+        if(!badGuard) {
+          if(debug >= 4) outs() << "Infeasible path" << std::endl;
+          // Previous guard leads to an infeasible path.
+        }
+        else {
+          if (debug >= 2) elbas[*l]->printPhases();
+          ExprSet results = elbas[*l]->pathsSolve();
+          bounds[*l].insert(results.begin(), results.end());
+        }
+        ranOnceAlready = true;
+
+        if(!bounds[*l].empty()) {
+          outs() << "\n\n====================";
+          outs() << "====================\n";
+          outs() <<     "FINAL: \n";
+          pprint(bounds[*l], 5);
+          outs() << "\n====================";
+          outs() << "====================\n" << std::endl;
+        }
+      }
+    }
   }
 
   inline void findBounds(string smt, int inv, int stren, bool dg,
@@ -1680,6 +1793,13 @@ namespace ufo
         }
       }
 
+      // Parsing is done. Now explore/organize the path information we need.
+      // Use the ideas of prime paths/Cut point graph to lay out the top layer of workflow for elba.
+      // At a simplified level, elba will traverse the prime paths, and at each node(loop head)
+      // it will compute a bound for the loop. This bound is then propagated to the next loop
+      // that is visited.
+      // The prime paths are traversed from back to front.
+
       map<Expr, CHCs*> rms; // One map to rule(Manager) them all.
       bool nestedLoops = false;
 
@@ -1698,24 +1818,45 @@ namespace ufo
           rms[l] = new CHCs(m_efac, z3, debug);
           Expr newTr = concatLoopBody(cc[0], cc[1], ruleManager);
           int cycleNum = cc[0];
+          outs() << "CycleNum: " << cycleNum << "\n";
 
-          for(auto& hr: ruleManager.chcs) {
+          for(auto& hr: ruleManager.chcs) { // Here we only add the fact since the outer TR is not inductive.
+            outs() << "l: " << l << "\n";
+            // This needs to change since there could be some "initialization information" in the outer loop.
             if(cycleNum == 1 && hr.isFact) {
+              outs() << "Making FC: ";
+              outs() << hr.body << "\n";
               rms[l]->addRule(&hr);
             }
             else if(cycleNum > 1 && hr.isFact) {
+              outs() << "Making TRUE" << std::endl;
               HornRuleExt fc = hr;
               fc.body = mk<TRUE>(m_efac);
               fc.dstRelation = ruleManager.chcs[cycleNum].srcRelation;
               rms[l]->addRule(&fc);
             }
-            if(hr.isInductive && hr.srcRelation == l) {
-              // Need to use newTr here to make a new hr.
-              HornRuleExt* tr_new = makeNewTr(newTr, &hr);
-              rms[l]->addRule(&hr);
-            }
+            // if(hr.isInductive && hr.srcRelation == l) {
+            //   // Need to use newTr here to make a new hr.
+            //   outs() << "Making new TR\n";
+            //   HornRuleExt* tr_new = makeNewTr(newTr, &hr);
+            //   rms[l]->addRule(tr_new);
+            // }
           }
+          // Add concatenated TR
+          outs() << "Making new TR\n";
+          HornRuleExt* tr_new = makeNewTr(newTr, l, ruleManager);
+          rms[l]->addRule(tr_new);
+
           rms[l]->dummyQuery();
+
+          // QR will be added when "setUpQueryAndSpec" is called.
+
+          if(debug >= 4) {
+            outs() << "\n==== Printing seperated loop ====\n";
+            rms[l]->print(true);
+          }
+          rms[l]->findCycles();
+          if(debug >= 4) outs() << "rms[" << l << "]->cycles.size() = " << rms[l]->cycles.size() << std::endl;
 
         }
         else {
@@ -1752,86 +1893,11 @@ namespace ufo
           if(debug >= 4) outs() << "rms[" << l << "]->cycles.size() = " << rms[l]->cycles.size() << std::endl;
         }
       }
-      exit(0);
+      // exit(0);
       // ruleManagers set up with their "single" loops.
 
-      Expr new_name = mkTerm<string> ("_gh_" + to_string(0), m_efac);
-      Expr var = bind::intConst(new_name);
+      calculateBounds(ruleManager, rms, nestedLoops, stren, dg, data2, doPhases, debug);
 
-      Expr ghostGuard = mk<EQ>(var, mkMPZ(0, m_efac));
-
-      map<Expr, BoundSolver*> elbas;
-      map<Expr, ExprSet> bounds;
-
-      // I need to figure out how to navigate the loopheads when there are nested loops. DR
-      // For sequential loops we can go through the loopheads in reverse as they are in the vector.
-
-      Expr lastLoophead = *ruleManager.loopheads.rbegin();
-      bounds[lastLoophead].insert(ghostGuard);
-
-      for(auto l = ruleManager.loopheads.rbegin(); l != ruleManager.loopheads.rend(); l++) {
-        ExprSet prevBounds = bounds[lastLoophead];
-        if(l == ruleManager.loopheads.rbegin()) {
-          bounds[lastLoophead].clear();
-        }
-        lastLoophead = *l;
-
-        bool ranOnceAlready = false;
-        elbas[*l] = new BoundSolver(*rms[*l], stren, dg, data2, doPhases, debug);
-        int counter = 0;
-
-        for(auto& bnd: prevBounds) {
-          if(debug >= 2) outs() << "Loop " << *l << " Bound " << counter++ << std::endl;
-          Expr b = bnd;
-          Expr prevGrd, prevBound;
-          if(isOpX<IMPL>(b)) {
-            prevGrd = b->left();
-            prevBound = b->right();
-          }
-          else {
-            prevGrd = mk<TRUE>(m_efac);
-            prevBound = b;
-          }
-
-          if(debug >= 4) outs() << "NEXT BOUND: " << b << std::endl;
-
-          if(ranOnceAlready) {
-            elbas[*l]->removeQuery();
-            elbas[*l]->setUpQr(prevGrd, prevBound);
-          }
-          else {
-            elbas[*l]->removeQuery(); // Removes the dummy query added for parsing.
-            elbas[*l]->setUpQueryAndSpec(prevGrd, prevBound);
-          }
-
-          if(debug >= 4) rms[*l]->print(true);
-          bool badGuard = elbas[*l]->collectPhaseGuards();
-          if(!badGuard) {
-            if(debug >= 4) outs() << "Infeasible path" << std::endl;
-            // Previous guard leads to an infeasible path.
-          }
-          else {
-            if (debug >= 2) elbas[*l]->printPhases();
-            ExprSet results = elbas[*l]->pathsSolve();
-            bounds[*l].insert(results.begin(), results.end());
-          }
-          ranOnceAlready = true;
-
-          outs() << "\n\n====================";
-          outs() << "====================\n";
-          outs() <<     "FINAL: \n";
-          pprint(bounds[*l], 5);
-          outs() << "\n====================";
-          outs() << "====================\n" << std::endl;
-        }
-      }
-
-      // Parsing is done. Now explore/organize the path information we need.
-      // Use the ideas of prime paths/Cut point graph to lay out the top layer of workflow for elba.
-      // At a simplified level, elba will traverse the prime paths, and at each node(loop head)
-      // it will compute a bound for the loop. This bound is then propagated to the next loop
-      // that is visited.
-      // The prime paths are traversed from back to front.
     }
 } // end namespace ufo
 

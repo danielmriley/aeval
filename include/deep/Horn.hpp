@@ -54,10 +54,10 @@ namespace ufo
     private:
     set<int> indeces;
     string varname = "_FH_";
-    SMTUtils u;
 
     public:
 
+    SMTUtils u;
     ExprFactory &m_efac;
     EZ3 &m_z3;
 
@@ -462,24 +462,23 @@ namespace ufo
     }
 
     void dummyQuery() {
-      ExprVector loopGuards;
-      for(auto &hr : chcs) {
+      hasQuery = true;
+      vector<HornRuleExt> chcsTmp = chcs;
+      if(debug >= 5) outs() << "\n==== Adding dummy query ====\n";
+      for(auto& hr: chcsTmp) {
         if(hr.isInductive) {
-          loopGuards.push_back(getPrecondition(&hr));
+          HornRuleExt* qr = new HornRuleExt();
+          qr->isQuery = true;
+          qr->srcRelation = hr.dstRelation;
+          qr->srcVars = hr.srcVars;
+          qr->dstRelation = mkTerm<string> ("err", m_efac);
+          qr->body = mk<TRUE>(m_efac);
+          addFailDecl(qr->dstRelation);
+          addRule(qr);
         }
       }
 
-      HornRuleExt* qr = new HornRuleExt();
-      qr->isQuery = true;
-      hasQuery = true;
-      qr->srcRelation = chcs.back().dstRelation;
-      qr->srcVars = chcs.back().srcVars;
-      qr->dstRelation = mkTerm<string> ("err", m_efac);
-      qr->body = conjoin(loopGuards, m_efac);
-      addFailDecl(qr->dstRelation);
-      addRule(qr);
-      // print(true);
-      // exit(1);
+      if(debug >= 5) print(true);
     }
 
     bool eliminateTrivTrueOrFalse()
@@ -1235,6 +1234,7 @@ namespace ufo
         }
       }
       outgs[srcRel].push_back(chcs.size()-1);
+      if(debug >= 5) outs() << "Rule added\n";
     }
 
     void addDeclAndVars(Expr rel, ExprVector& args)
