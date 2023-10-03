@@ -1274,7 +1274,7 @@ namespace ufo
       map<Expr,ExprSet> bounds;
       dataGrds.clear();
       if(debug >= 5) outs() << "Begin boundSolveRec" << std::endl;
-      outs() << "LOOPGUARD: " << loopGuard << std::endl;
+      if(debug >= 3) outs() << "LOOPGUARD: " << loopGuard << std::endl;
       if (!u.isSat(fcBodyInvVars,loopGuard)) {
         if (debug >= 2) outs() << "PROGRAM WILL NEVER ENTER LOOP\n";
         return true;
@@ -1383,7 +1383,7 @@ namespace ufo
 
       bool rerun = false;
       for (auto b = boundsV.begin(), end = boundsV.end(); b != end && res; b++) {
-        for(auto e: exploredBounds) outs() << "exploredBounds: " << e << "\n";
+        if(debug >= 2) for(auto e: exploredBounds) outs() << "exploredBounds: " << e << "\n";
         if(exploredBounds.find(*b) != exploredBounds.end()) { continue; }
         candidates.clear();
         exploredBounds.insert(*b);
@@ -1518,14 +1518,14 @@ namespace ufo
         for (i = p.size() - 2; i >= 0; i--)
         {
           if (debug) outs () << "STEP " << i << "\n";
-          outs() << p[1] << std::endl;
-          outs() << p[0] << std::endl;
-          outs() << fcBodyInvVars << std::endl;
+          // outs() << p[1] << std::endl;
+          // outs() << p[0] << std::endl;
+          // outs() << fcBodyInvVars << std::endl;
 
           if (p[i] == fcBodyInvVars)
           {
             assert(i == 0);
-            outs() << "BREAK\n";
+            // outs() << "BREAK\n";
             stren[p[i]] = NULL;
             break;
           }
@@ -1545,7 +1545,7 @@ namespace ufo
             }
           }
           stren[p[i]] = simplifyBool(distribDisjoin(pre, m_efac));
-          outs() << "stren[" << i << "] : " << stren[p[i]] << std::endl;
+          if(debug >= 3) outs() << "stren[" << i << "] : " << stren[p[i]] << std::endl;
           if (i != 0) grds2gh[p[i]] = res;
         }
         // previousGuard = simplifyBool(previousGuard);
@@ -1553,8 +1553,7 @@ namespace ufo
         ant = normalize(ant);
         ant = simplifyArithm(ant);
         if(ant == mk<FALSE>(m_efac)) {
-          outs() << "AFTER LOOP" << std::endl;
-          if(stren[p[1]] == mk<FALSE>(m_efac)) { outs() << "stren ele FALSE" << std:: endl; continue; }
+          if(stren[p[1]] == mk<FALSE>(m_efac)) { if (debug >= 3) outs() << "stren ele FALSE" << std::endl; continue; }
           finals.insert(mk<IMPL>(stren[p[1]], mk<EQ>(ghostVars[0], res)));
         }
         else {
@@ -1582,8 +1581,9 @@ namespace ufo
     }
 
     void printPhases() {
-      outs() << "Phases\n======\n";
+      outs() << "*** Phases ***\n========\n";
       for (auto& p: phases) outs() << p << "\n";
+      outs() << "========\n";
     }
 
     void removeQuery() {
@@ -1595,7 +1595,7 @@ namespace ufo
         else { hr++; }
       }
     }
-  };
+  }; // End class BoundSolver.
 
   HornRuleExt* makeNewTr(Expr body, Expr rel, CHCs& ruleManager) {
     HornRuleExt* tr_new = new HornRuleExt();
@@ -1610,32 +1610,32 @@ namespace ufo
     return tr_new;
   }
 
-  ExprSet filterForChangedVars(ExprSet prevConjs) {
+  ExprSet filterForChangedVars(ExprSet prevConjs, int debug = 0) {
     ExprSet vars;
     for(auto& e: prevConjs) {
-      outs() << "PREV: " << e << "\n";
+      if(debug >= 3) outs() << "PREV: " << e << "\n";
       if(isOp<NumericOp>(e->right())) {
         filter (e, bind::IsConst (), inserter (vars, vars.end()));
         // vars.insert(e->left());
       }
     }
-    for(auto& e: vars) outs() << "VAR: " << e << "\n";
+    if(debug >= 3) for(auto& e: vars) outs() << "VAR: " << e << "\n";
     return vars;
   }
 
-  Expr concatLoopBody(int cycleNum1, int cycleNum2, CHCs& ruleManager) {
+  Expr concatLoopBody(int cycleNum1, int cycleNum2, CHCs& ruleManager, Expr prevTr, int debug = 0) {
     // Need a double primed var set to differentiate between top and bottom halves of the loop.
 
-    outs() << "cyc1: " << cycleNum1 << "  |  cyc2: " << cycleNum2 << "\n";
+    if(debug >= 3) outs() << "cyc1: " << cycleNum1 << "  |  cyc2: " << cycleNum2 << "\n";
     ExprSet topBody;
     Expr top = ruleManager.chcs[cycleNum1].body;
-    outs() << "TOP: " << top << "\n";
+    if(debug >= 3) outs() << "TOP: " << top << "\n";
     getConj(ruleManager.chcs[cycleNum1].body, topBody);
     Expr botBody = ruleManager.chcs[cycleNum2].body;
-    outs() << "BOT: " << botBody << "\n";
+    if(debug >= 3) outs() << "BOT: " << botBody << "\n";
     Expr preCond2 = ruleManager.getPrecondition(&ruleManager.chcs[cycleNum2]);
 
-    outs() << "PreCond2: " << preCond2 << "\n";
+    if(debug >= 3) outs() << "PreCond2: " << preCond2 << "\n";
     ExprSet bodyConjsBot;
     ExprSet preCondSetBot;
     preCondSetBot.insert(preCond2);
@@ -1643,40 +1643,42 @@ namespace ufo
     minusSets(bodyConjsBot, preCondSetBot);
     bodyConjsBot.insert(preCond2);
 
-    for(auto& e: bodyConjsBot) outs() << "  |  " << e << "\n";
+    if(debug >= 3) for(auto& e: bodyConjsBot) outs() << "  |  " << e << "\n";
 
     botBody = conjoin(bodyConjsBot, ruleManager.m_efac);
-    outs() << "New BOT: " << botBody << "\n";
+    if(debug >= 3) outs() << "New BOT: " << botBody << "\n";
     topBody.insert(bodyConjsBot.begin(), bodyConjsBot.end());
     Expr newTr = conjoin(topBody, ruleManager.m_efac);
     ExprSet newTrConj;
     getConj(newTr, newTrConj);
 
-    Expr prevTr;
-    Expr rel = ruleManager.chcs[cycleNum1].dstRelation;
-    for(auto& hr: ruleManager.chcs) {
-      if(hr.isInductive && hr.srcRelation == rel) {
-        prevTr = hr.body;
+    // Expr prevTr;
+    if(prevTr == NULL) {
+      Expr rel = ruleManager.chcs[cycleNum1].dstRelation;
+      for(auto& hr: ruleManager.chcs) {
+        if(hr.isInductive && hr.srcRelation == rel) {
+          prevTr = hr.body;
+        }
       }
     }
-    outs() << "Prev Tr: " << prevTr << "\n";
+    if(debug >= 3) outs() << "Prev Tr: " << prevTr << "\n";
     ExprSet prevConjs;
     getConj(prevTr, prevConjs);
-    ExprSet innerLoopVars = filterForChangedVars(prevConjs);
+    ExprSet innerLoopVars = filterForChangedVars(prevConjs, debug);
     newTr = weakenForVars(newTr, innerLoopVars);
 
     ExprSet conjs;
     getConj(newTr, conjs);
     for(auto e = conjs.begin(); e != conjs.end(); ) {
       if(isOpX<EQ>(*e) && !isOp<NumericOp>((*e)->right())) {
-        outs() << "ERASING: " << *e << "\n";
+        if(debug >= 3) outs() << "ERASING: " << *e << "\n";
         e = conjs.erase(e);
       }
       else e++;
     }
     // ExprSet vars = filterForChangedVars(conjs);
     newTr = conjoin(conjs, ruleManager.m_efac);
-    outs() << "New TR: " << newTr << "\n";
+    if(debug >= 3) outs() << "New TR: " << newTr << "\n";
     if(!ruleManager.u.isSat(newTr)) {
       outs() << "NewTr is not satisfiable\n";
 
@@ -1686,7 +1688,32 @@ namespace ufo
     return newTr;
   }
 
-  void calculateBounds(CHCs& ruleManager, map<Expr, CHCs*>& rms, bool nestedLoops,
+  void multiplyResults(map<Expr, ExprSet> bounds, map<Expr, bool> nestedLoops) {
+    ExprSet operands;
+    for(auto& b: bounds) {
+      for(auto& bb: b.second) {
+        operands.insert(bb->right()->right());
+      }
+    }
+
+    Expr res = mkmult(operands, (*bounds.begin()).first->getFactory());
+    ExprSet tmp;
+    for(auto& b: bounds) {
+      for(auto& bb: b.second) {
+        Expr left = bb->left();
+        Expr right = bb->right()->left();
+        tmp.insert(mk<IMPL>(left, mk<EQ>(right, res)));
+      }
+    }
+    for(auto& b: bounds) {
+      b.second.clear();
+      b.second.insert(tmp.begin(), tmp.end());
+    }
+
+    // return res;
+  }
+
+  void calculateBounds(CHCs& ruleManager, map<Expr, CHCs*>& rms, map<Expr, bool> nestedLoops,
                        int stren, bool dg, bool data2, bool doPhases, int debug = 0) {
     // Calculate bounds for each loop.
     if(debug >= 2) outs() << "\n====== Calculate Bounds ======\n";
@@ -1698,10 +1725,6 @@ namespace ufo
 
     map<Expr, BoundSolver*> elbas;
     map<Expr, ExprSet> bounds;
-
-    if(nestedLoops) {
-      std::reverse(ruleManager.loopheads.begin(), ruleManager.loopheads.end());
-    }
 
     // I need to figure out how to navigate the loopheads when there are nested loops. DR
     // For sequential loops we can go through the loopheads in reverse as they are in the vector.
@@ -1717,6 +1740,12 @@ namespace ufo
       if(l == ruleManager.loopheads.rbegin()) {
         bounds[lastLoophead].clear();
       }
+
+      if(nestedLoops[lastLoophead] && !nestedLoops[*l]) {
+        // multiply the results from the nested loops.
+        multiplyResults(bounds, nestedLoops);
+      }
+
       lastLoophead = *l;
 
       bool ranOnceAlready = false;
@@ -1727,13 +1756,18 @@ namespace ufo
         if(debug >= 2) outs() << "Loop " << *l << " Bound " << counter++ << std::endl;
         Expr b = bnd;
         Expr prevGrd, prevBound;
-        if(isOpX<IMPL>(b)) {
+        if(!nestedLoops[*l] && isOpX<IMPL>(b)) {
           prevGrd = b->left();
           prevBound = b->right();
         }
         else {
           prevGrd = mk<TRUE>(ruleManager.m_efac);
-          prevBound = b;
+          if(nestedLoops[*l]) {
+            prevBound = ghostGuard;
+          }
+          else {
+            prevBound = b;
+          }
         }
 
         if(debug >= 4) outs() << "NEXT BOUND: " << b << std::endl;
@@ -1759,15 +1793,19 @@ namespace ufo
           bounds[*l].insert(results.begin(), results.end());
         }
         ranOnceAlready = true;
+      }
+    }
 
-        if(!bounds[*l].empty()) {
-          outs() << "\n\n====================";
-          outs() << "====================\n";
-          outs() <<     "FINAL: \n";
-          pprint(bounds[*l], 5);
-          outs() << "\n====================";
-          outs() << "====================\n" << std::endl;
-        }
+
+    for(auto l = ruleManager.loopheads.rbegin(); l != ruleManager.loopheads.rend(); l++) {
+
+      if(!bounds[*l].empty()) {
+        outs() << "\n====================";
+        outs() << "====================\n";
+        outs() <<     "FINAL: \n";
+        pprint(bounds[*l], 5);
+        outs() << "\n====================";
+        outs() << "====================\n" << std::endl;
       }
     }
   }
@@ -1779,17 +1817,19 @@ namespace ufo
       EZ3 z3(m_efac);
       CHCs ruleManager(m_efac, z3, debug);
       ruleManager.parse(smt,false);
-      if(debug >= 4) ruleManager.print(false);
-      // queries are now added automatically in Horn.hpp.
-      outs() << ruleManager.cycles.size() << "\n";
-      for(auto& cc: ruleManager.cycles) {
-        outs() << "Cycle: " << cc.first << "  ";
-        outs() << "Size: " << cc.second.size() << "\n";
-        for(auto& c: cc.second) {
-          for(auto e: c) {
-            outs() << e << ", ";
+      if(debug >= 4) {
+        ruleManager.print(false);
+        // queries are now added automatically in Horn.hpp.
+        outs() << ruleManager.cycles.size() << "\n";
+        for(auto& cc: ruleManager.cycles) {
+          outs() << "Cycle: " << cc.first << "  ";
+          outs() << "Size: " << cc.second.size() << "\n";
+          for(auto& c: cc.second) {
+            for(auto e: c) {
+              outs() << e << ", ";
+            }
+            outs() << "\n";
           }
-          outs() << "\n";
         }
       }
 
@@ -1801,37 +1841,34 @@ namespace ufo
       // The prime paths are traversed from back to front.
 
       map<Expr, CHCs*> rms; // One map to rule(Manager) them all.
-      bool nestedLoops = false;
+      map<Expr, bool> nestedLoops;
 
-      for(auto& l: ruleManager.loopheads) {
-        outs() << "Loophead: " << l << "\n";
-      }
-
+      Expr newTr;
       for(auto& l: ruleManager.loopheads) {
         vector<vector<int>> cycles = ruleManager.cycles[l];
 
         for(auto& cc: cycles)
         if(cc.size() > 1) {
-          nestedLoops = true;
+          nestedLoops[l] = true;
           // Need to concatenate the two CHCs that this loophead has to make a complete loop.
-          outs() << "Nested loop support in progress\n";
+          // outs() << "Nested loop support in progress\n";
           rms[l] = new CHCs(m_efac, z3, debug);
-          Expr newTr = concatLoopBody(cc[0], cc[1], ruleManager);
+          newTr = concatLoopBody(cc[0], cc[1], ruleManager, newTr, debug);
           int cycleNum = cc[0];
-          outs() << "CycleNum: " << cycleNum << "\n";
+          if(debug >= 3) outs() << "CycleNum: " << cycleNum << "\n";
 
           for(auto& hr: ruleManager.chcs) { // Here we only add the fact since the outer TR is not inductive.
-            outs() << "l: " << l << "\n";
+            if(debug >= 3) outs() << "l: " << l << "\n";
             // This needs to change since there could be some "initialization information" in the outer loop.
             if(cycleNum == 1 && hr.isFact) {
-              outs() << "Making FC: ";
-              outs() << hr.body << "\n";
+              if(debug >= 5) outs() << "Making FC: ";
+              if(debug >= 3) outs() << hr.body << "\n";
               rms[l]->addRule(&hr);
             }
             else if(cycleNum > 1 && hr.isFact) {
-              outs() << "Making TRUE" << std::endl;
+              if(debug >= 5) outs() << "Making TRUE" << std::endl;
               HornRuleExt fc = hr;
-              fc.body = mk<TRUE>(m_efac);
+              // fc.body = mk<TRUE>(m_efac);
               fc.dstRelation = ruleManager.chcs[cycleNum].srcRelation;
               rms[l]->addRule(&fc);
             }
@@ -1843,7 +1880,7 @@ namespace ufo
             // }
           }
           // Add concatenated TR
-          outs() << "Making new TR\n";
+          if(debug >= 5) outs() << "Making new TR\n";
           HornRuleExt* tr_new = makeNewTr(newTr, l, ruleManager);
           rms[l]->addRule(tr_new);
 
@@ -1852,7 +1889,7 @@ namespace ufo
           // QR will be added when "setUpQueryAndSpec" is called.
 
           if(debug >= 4) {
-            outs() << "\n==== Printing seperated loop ====\n";
+            outs() << "\n==== Printing separated loop ====\n";
             rms[l]->print(true);
           }
           rms[l]->findCycles();
@@ -1862,7 +1899,7 @@ namespace ufo
         else {
           // Proceed with the single TR for this loophead.
           int cycleNum = cc[0];
-          outs() << "Single cycle : " << cycleNum << ".\n";
+          if(debug >= 3) outs() << "Single cycle : " << cycleNum << ".\n";
           rms[l] = new CHCs(m_efac, z3, debug);
           // call findCycles instead of wtoSort.
 
@@ -1873,7 +1910,7 @@ namespace ufo
             }
             else if(cycleNum > 1 && hr.isFact) {
               HornRuleExt fc = hr;
-              fc.body = mk<TRUE>(m_efac);
+              // fc.body = mk<TRUE>(m_efac);
               fc.dstRelation = ruleManager.chcs[cycleNum].srcRelation;
               rms[l]->addRule(&fc);
             }
@@ -1886,7 +1923,7 @@ namespace ufo
           // QR will be added when "setUpQueryAndSpec" is called.
 
           if(debug >= 4) {
-            outs() << "\n==== Printing seperated loop ====\n";
+            outs() << "\n==== Printing separated loop ====\n";
             rms[l]->print(true);
           }
           rms[l]->findCycles();
@@ -1895,6 +1932,19 @@ namespace ufo
       }
       // exit(0);
       // ruleManagers set up with their "single" loops.
+
+      for(auto& l: ruleManager.loopheads) {
+        if(nestedLoops[l]) {
+          std::reverse(ruleManager.loopheads.begin(), ruleManager.loopheads.end());
+          break;
+        }
+      }
+
+      if(debug >= 3) {
+        for(auto& l: ruleManager.loopheads) {
+          outs() << "Loophead: " << l << "\n";
+        }
+      }
 
       calculateBounds(ruleManager, rms, nestedLoops, stren, dg, data2, doPhases, debug);
 
