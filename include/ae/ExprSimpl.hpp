@@ -3545,6 +3545,7 @@ namespace ufo
 
       getAddTerm(lhs, all);
       getAddTerm(rhs, allrhs);
+
       for (auto & a : allrhs)
       {
         all.push_back(additiveInverse(a));
@@ -3653,6 +3654,7 @@ namespace ufo
       {
         Expr pl = (newlhs.size() == 1) ? *newlhs.begin(): mknary<PLUS>(newlhs);
         Expr c = mkMPZ (-intconst, fla->getFactory());
+        if(c == mkMPZ(0,fla->getFactory())) pl = additiveInverse(pl);
         return reBuildCmp(fla, pl, c);
       }
     }

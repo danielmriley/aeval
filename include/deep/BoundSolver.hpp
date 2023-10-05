@@ -299,14 +299,46 @@ namespace ufo
       return true;
     }
 
+    void decrementByNestedBound(Expr prevBound)
+    {
+      outs() << "\n==========\n  TR body: " << tr->body << "\n\n";
+      outs() << "Previous Bound: " << prevBound << "\n";
+      // HornRuleExt* tr_new = new HornRuleExt();
+      ExprSet conjs;
+      getConj(tr->body, conjs);
+      bool erased = false;
+      for(auto i = conjs.begin(); i != conjs.end(); ) {
+        if(contains(*i, ghostVars[0])) {
+          i = conjs.erase(i);
+          erased = true;
+        }
+        else {
+          i++;
+        }
+      }
+      if(erased) {
+        conjs.insert(mk<EQ>(ghostVarsPr[0], mk<MINUS>(ghostVars[0], prevBound)));
+      }
+      pprint(conjs, 2);
+      tr->body = conjoin(conjs, m_efac);
+      replaceRule(tr);
+
+      for (auto & a : ruleManager.chcs)    // r.chcs changed by r.addRule, so pointers to its elements are broken
+        if (a.isInductive) tr = &a;
+        else if (!a.isInductive && !a.isQuery) fc = &a;
+      tr_orig = *tr;
+      outs() << "\n==========\n\n";
+      // exit(0);
+    }
+
     bool checkAllOver (bool checkQuery = false, bool weak = true,
         Expr src = NULL, Expr dst = NULL)
-     {
-       for (auto & hr : ruleManager.chcs)
-       {
-         if (hr.isQuery && !checkQuery) continue;
-         if (!checkCHC(hr, candidates)) return false;
-       }
+    {
+      for (auto & hr : ruleManager.chcs)
+      {
+        if (hr.isQuery && !checkQuery) continue;
+        if (!checkCHC(hr, candidates)) return false;
+      }
       if (weak)
       {
         if (debug >= 2) outs () << "try weakening\n";
@@ -1495,6 +1527,17 @@ namespace ufo
       }
     }
 
+    // Expr simplifyBound(Expr bound) {
+    //   ExprSet initConjs;
+    //   Expr normalizedInit = normalize(fcBodyInvVars);
+    //   outs() << "NNNOOOO: " << normalizedInit << "\n";
+    //   // getConj(normalizedInit, initConjs);
+    //   // for(auto& e: initConjs) {
+    //   //   if()
+    //   // }
+    //   // exit(0);
+    // }
+
     ExprSet pathsSolve()
     {
       ExprSet finals;
@@ -1549,6 +1592,8 @@ namespace ufo
           if (i != 0) grds2gh[p[i]] = res;
         }
         // previousGuard = simplifyBool(previousGuard);
+        // simplify the bound if possible.
+        // res = simplifyBound(res);
         ant = mk<AND>(previousGuard,stren[p[1]]);
         ant = normalize(ant);
         ant = simplifyArithm(ant);
@@ -1616,11 +1661,41 @@ namespace ufo
       if(debug >= 3) outs() << "PREV: " << e << "\n";
       if(isOp<NumericOp>(e->right())) {
         filter (e, bind::IsConst (), inserter (vars, vars.end()));
-        // vars.insert(e->left());
       }
     }
     if(debug >= 3) for(auto& e: vars) outs() << "VAR: " << e << "\n";
     return vars;
+  }
+
+  Expr filterForInitExpr(Expr expr, ExprSet& vars) {
+    ExprSet tmp;
+    getConj(expr, tmp);
+
+    // for(auto& v: vars) {
+    //   for(auto i = tmp.begin(); i != tmp.end(); ) {
+    //     Expr e = normalize(*i);
+    //     if(!contains(e, v) && !isNumeric(e->right())) {
+    //       i = tmp.erase(i);
+    //     }
+    //     else {
+    //       i++;
+    //     }
+    //   }
+    // }
+
+    for(auto& v: vars) {
+      for(auto i = tmp.begin(); i != tmp.end(); ) {
+        Expr e = normalize(*i);
+        if(contains(e->left(), v) || isNumeric(e->right())) {
+          i++;
+        }
+        else {
+          i = tmp.erase(i);
+        }
+      }
+    }
+
+    return conjoin(tmp, expr->getFactory());
   }
 
   Expr concatLoopBody(int cycleNum1, int cycleNum2, CHCs& ruleManager, Expr prevTr, int debug = 0) {
@@ -1649,6 +1724,7 @@ namespace ufo
     if(debug >= 3) outs() << "New BOT: " << botBody << "\n";
     topBody.insert(bodyConjsBot.begin(), bodyConjsBot.end());
     Expr newTr = conjoin(topBody, ruleManager.m_efac);
+    if(debug >= 3) outs() << "New TR first: " << newTr << "\n";
     ExprSet newTrConj;
     getConj(newTr, newTrConj);
 
@@ -1665,7 +1741,10 @@ namespace ufo
     ExprSet prevConjs;
     getConj(prevTr, prevConjs);
     ExprSet innerLoopVars = filterForChangedVars(prevConjs, debug);
+    outs() << "newTR before: " << newTr << "\n";
     newTr = weakenForVars(newTr, innerLoopVars);
+    Expr initInfo = filterForInitExpr(newTr, innerLoopVars);
+    outs() << "newTR after: " << newTr << "\n";
 
     ExprSet conjs;
     getConj(newTr, conjs);
@@ -1688,7 +1767,7 @@ namespace ufo
     return newTr;
   }
 
-  void multiplyResults(map<Expr, ExprSet> bounds, map<Expr, bool> nestedLoops) {
+  void multiplyResults(map<Expr, ExprSet>& bounds, map<Expr, bool>& nestedLoops) {
     ExprSet operands;
     for(auto& b: bounds) {
       for(auto& bb: b.second) {
@@ -1743,7 +1822,7 @@ namespace ufo
 
       if(nestedLoops[lastLoophead] && !nestedLoops[*l]) {
         // multiply the results from the nested loops.
-        multiplyResults(bounds, nestedLoops);
+        // multiplyResults(bounds, nestedLoops);
       }
 
       lastLoophead = *l;
@@ -1756,29 +1835,36 @@ namespace ufo
         if(debug >= 2) outs() << "Loop " << *l << " Bound " << counter++ << std::endl;
         Expr b = bnd;
         Expr prevGrd, prevBound;
-        if(!nestedLoops[*l] && isOpX<IMPL>(b)) {
+        if(isOpX<IMPL>(b)) {
           prevGrd = b->left();
           prevBound = b->right();
         }
         else {
           prevGrd = mk<TRUE>(ruleManager.m_efac);
-          if(nestedLoops[*l]) {
-            prevBound = ghostGuard;
-          }
-          else {
-            prevBound = b;
-          }
+          prevBound = b;
+          // if(nestedLoops[*l]) {
+          //   prevBound = ghostGuard;
+          // }
+          // else {
+          //   prevBound = b;
+          // }
         }
 
-        if(debug >= 4) outs() << "NEXT BOUND: " << b << std::endl;
+        if(debug >= 4) outs() << "\n====> NEXT BOUND: " << b << std::endl;
 
         if(ranOnceAlready) {
           elbas[*l]->removeQuery(); // Removes the dummy query added for parsing.
+          if(nestedLoops[*l]) { // The ghost decrement should be of the value of the previously found guard.
+            elbas[*l]->decrementByNestedBound(prevBound->right());
+          }
           elbas[*l]->setUpQr(prevGrd, prevBound);
         }
         else {
           elbas[*l]->removeQuery(); // Removes the dummy query added for parsing.
           elbas[*l]->setUpQueryAndSpec(prevGrd, prevBound);
+          if(nestedLoops[*l]) { // The ghost decrement should be of the value of the previously found guard.
+            elbas[*l]->decrementByNestedBound(prevBound->right());
+          }
         }
 
         if(debug >= 4) rms[*l]->print(true);
@@ -1793,6 +1879,14 @@ namespace ufo
           bounds[*l].insert(results.begin(), results.end());
         }
         ranOnceAlready = true;
+      }
+      if(!bounds[*l].empty()) {
+        outs() << "\n====================";
+        outs() << "====================\n";
+        outs() <<     "FINAL: \n";
+        pprint(bounds[*l], 5);
+        outs() << "\n====================";
+        outs() << "====================\n" << std::endl;
       }
     }
 
