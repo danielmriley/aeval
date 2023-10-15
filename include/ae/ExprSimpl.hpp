@@ -3540,6 +3540,10 @@ namespace ufo
       Expr lhs = fla->left();
       Expr rhs = fla->right();
 
+      // if(isOpX<MULT>(lhs) || isOpX<MULT>(rhs)) {
+      //   return fla;
+      // }
+
       ExprVector all;
       ExprVector allrhs;
 
@@ -3654,7 +3658,7 @@ namespace ufo
       {
         Expr pl = (newlhs.size() == 1) ? *newlhs.begin(): mknary<PLUS>(newlhs);
         Expr c = mkMPZ (-intconst, fla->getFactory());
-        if(c == mkMPZ(0,fla->getFactory())) pl = additiveInverse(pl);
+        if(isOpX<EQ>(fla) && c == mkMPZ(0,fla->getFactory())) pl = additiveInverse(pl);
         return reBuildCmp(fla, pl, c);
       }
     }
@@ -3673,6 +3677,11 @@ namespace ufo
     {
       Expr lhs = fla->left();
       Expr rhs = fla->right();
+
+      // if(isOpX<MULT>(lhs) || isOpX<MULT>(rhs)) {
+      //   return fla;
+      // }
+
       bool nullvar = false;
 
       if(lhsVar == 0) {

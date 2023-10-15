@@ -71,7 +71,6 @@ namespace ufo
           if (l == mk<TRUE>(m_efac)) continue;
           ev.push_back(l);
           if (debug >= 4) outs() << "  CONNECT: " << *ev.back() << "\n";
-
         }
       }
       if (debug >= 4) outs() << "\n";
@@ -96,6 +95,18 @@ namespace ufo
           if (debug >= 4) outs() << "  CONNECT: " << l << "\n";
         }
       }
+
+      // for (int i = 0; i < n - 1; i++) {
+      //   for (int j = i + 1; j < n - 1; j++) {
+      //     if(cpp_int(e1[i] * e1[j]) == cpp_int(e1[e1.size() - 1])) {
+      //       Expr expr = mk<EQ>(invVars[srcRel][e1.size() - 1],
+      //                    mk<MULT>(invVars[srcRel][i], invVars[srcRel][j]));
+      //       dc[srcRel].insert(expr);
+      //       if (debug >= 4) outs() << "  CONNECT*: " << expr << "\n";
+      //     }
+      //   }
+      // }
+
     }
 
   public:
