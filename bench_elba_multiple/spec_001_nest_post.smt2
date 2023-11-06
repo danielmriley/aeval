@@ -48,5 +48,8 @@
 
 (rule (=> (and (itp3 x1 y1 z1) (= y2 (+ y1 1)) (>= z1 10)) (itp2 x1 y2 z1)))
 
-
 (rule (=> (and (itp2 x1 y1 z1) (= x2 (+ x1 1)) (>= y1 10)) (itp1 x2 y1 z1)))
+
+(rule (=> (and (itp1 x1 y1 z1) (>= x1 10) (>= y1 10) (>= z1 10)) fail))
+
+(query fail :print-certificate true)

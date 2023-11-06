@@ -36,3 +36,8 @@
     (inv2 x1 y2)
   )
 )
+
+(rule (=> (and (inv2 x1 y1) (> x1 0)) fail))
+(rule (=> (and (inv3 x1 y1) (> y1 0)) fail))
+
+(query fail :print-certificate true)

@@ -34,3 +34,7 @@
 )
 
 (rule (=> (and (itp2 x1 y1 n m) (<= y1 0)) (itp1 x1 y2 n m)))
+
+(rule (=> (and (itp1 x1 y1 n m) (> y1 0)) fail))
+
+(query fail :print-certificate true)

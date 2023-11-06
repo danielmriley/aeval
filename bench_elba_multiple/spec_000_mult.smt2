@@ -36,4 +36,6 @@
   )
 )
 
-;(rule (=> (and (itp2 x1 y1) (not (< y1 10)) (not (< x1 10)) ) fail))
+(rule (=> (and (itp2 x1 y1) (not (< y1 10)) (not (< x1 10)) ) fail))
+
+(query fail :print-certificate true)

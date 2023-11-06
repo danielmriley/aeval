@@ -50,3 +50,7 @@
     (inv3 x2 y1)
   )
 )
+
+(rule (=> (and (inv3 x1 y1) (<= x1 0) (<= y1 0)) fail))
+
+(query fail :print-certificate true)

@@ -1784,8 +1784,45 @@ namespace ufo
     return newTr;
   }
 
+  template<typename Range1>
+  bool contains(Expr var1, Range1& bv) {
+    for (auto &var2: bv) {
+      if (var1 == var2) {
+        return false;
+      }
+    }
+    return true;
+  }
+
+  void checkForNesting(CHCs& ruleManager, ExprVector& loop,
+    map<Expr, bool>& nestedLoops) {
+    // Look for nesting and add the loops to the ExprVector.
+    outs() << "\n=====\nLOOP: ";
+    for(auto& l: loop) outs() << l << ", ";
+    outs() << "\n";
+    for(auto l = loop.begin(); l != loop.end(); ) {
+      if(nestedLoops[*l]) {
+        Expr rel = *l;
+        for(auto& hr: ruleManager.chcs) {
+          if(rel == hr.srcRelation) {
+            if(contains(hr.dstRelation, loop)) {
+              l = loop.insert(++l, hr.dstRelation);
+              break;
+            }
+          }
+        }
+      }
+      else {
+        l++;
+      }
+    }
+    outs() << "\nLOOP: ";
+    for(auto& l: loop) outs() << l << ", ";
+    outs() << "\n=====\n";
+  }
+
   void calculateBounds(CHCs& ruleManager, map<Expr, CHCs*>& rms, map<Expr, bool>& nestedLoops,
-                       int stren, bool dg, bool data2, bool doPhases, int debug = 0) {
+    int stren, bool dg, bool data2, bool doPhases, vector<ExprVector>& primePaths, int debug = 0) {
     // Calculate bounds for each loop.
     if(debug >= 2) outs() << "\n====== Calculate Bounds ======\n";
 
@@ -1797,72 +1834,102 @@ namespace ufo
     map<Expr, BoundSolver*> elbas;
     map<Expr, ExprSet> bounds;
 
+    for(auto& l: ruleManager.loopheads) {
+      outs() << "Loophead: " << l << "\n";
+    }
+
+    for(auto& v: primePaths) {
+      ExprVector loop = v;
+      Expr lastLoophead = *loop.rbegin();
+      bounds[lastLoophead].insert(ghostGuard);
+
+      checkForNesting(ruleManager, loop, nestedLoops);
+
+      for(auto l = loop.rbegin(); l != loop.rend(); l++) {
+        if(contains(*l, ruleManager.loopheads)) {
+          // *l is not a loophead (not inductive)
+          outs() << *l << " is NOT inductive\n";
+        }
+        else {
+          // *l is a loophead (is inductive)
+          outs() << *l << " is inductive\n";
+
+          ExprSet prevBounds = bounds[lastLoophead];
+          if(l == loop.rbegin()) {
+            bounds[lastLoophead].clear();
+          }
+
+          lastLoophead = *l;
+
+          bool ranOnceAlready = false;
+          elbas[*l] = new BoundSolver(*rms[*l], stren, dg, data2, doPhases, debug);
+          int counter = 0;
+
+          for(auto& bnd: prevBounds) {
+            if(debug >= 2) outs() << "Loop " << *l << " Bound " << counter++ << std::endl;
+            Expr b = bnd;
+            Expr prevGrd, prevBound;
+            if(isOpX<IMPL>(b)) {
+              prevGrd = b->left();
+              prevBound = b->right();
+            }
+            else {
+              prevGrd = mk<TRUE>(ruleManager.m_efac);
+              prevBound = b;
+            }
+
+            if(debug >= 4) outs() << "\n====> NEXT BOUND: " << b << std::endl;
+
+            if(ranOnceAlready) {
+              elbas[*l]->removeQuery(); // Removes the dummy query added for parsing.
+              if(nestedLoops[*l]) { // The ghost decrement should be of the value of the previously found guard.
+                elbas[*l]->decrementByNestedBound(prevBound->right());
+                elbas[*l]->setUpQr(prevGrd, mk<EQ>(prevBound->left(), mkMPZ(0, prevBound->getFactory())));
+              }
+              else {
+                elbas[*l]->setUpQr(prevGrd, prevBound);
+              }
+            }
+            else {
+              elbas[*l]->removeQuery(); // Removes the dummy query added for parsing.
+              if(!nestedLoops[*l]) { elbas[*l]->setUpQueryAndSpec(prevGrd, prevBound); }
+              if(nestedLoops[*l]) { // The ghost decrement should be of the value of the previously found guard.
+                elbas[*l]->setUpQueryAndSpec(prevGrd, mk<EQ>(prevBound->left(), mkMPZ(0, prevBound->getFactory())));
+                elbas[*l]->decrementByNestedBound(prevBound->right());
+              }
+            }
+
+            if(debug >= 4) rms[*l]->print(true);
+            bool badGuard = elbas[*l]->collectPhaseGuards();
+            if(!badGuard) {
+              if(debug >= 4) outs() << "Infeasible path" << std::endl;
+              // Previous guard leads to an infeasible path.
+            }
+            else {
+              if (debug >= 2) elbas[*l]->printPhases();
+              ExprSet results = elbas[*l]->pathsSolve();
+              bounds[*l].insert(results.begin(), results.end());
+            }
+            ranOnceAlready = true;
+          }
+          if(debug >= 4 && !bounds[*l].empty()) {
+            outs() << "\n====================";
+            outs() << "====================\n";
+            outs() <<     "BOUND so far " << *l << ": \n";
+            pprint(bounds[*l], 5);
+            outs() << "\n====================";
+            outs() << "====================\n" << std::endl;
+          }
+        }
+      }
+    }
+    // exit(0);
     // Run through loopheads front to back (this is the loops in order innermost to outermost).
     // Run through loopheads back to front (this is the loops in reverse sequential order).
 
-    Expr lastLoophead = *ruleManager.loopheads.rbegin();
-    bounds[lastLoophead].insert(ghostGuard);
-
     for(auto l = ruleManager.loopheads.rbegin(); l != ruleManager.loopheads.rend(); l++) {
-      ExprSet prevBounds = bounds[lastLoophead];
-      if(l == ruleManager.loopheads.rbegin()) {
-        bounds[lastLoophead].clear();
-      }
 
-      lastLoophead = *l;
-
-      bool ranOnceAlready = false;
-      elbas[*l] = new BoundSolver(*rms[*l], stren, dg, data2, doPhases, debug);
-      int counter = 0;
-
-      for(auto& bnd: prevBounds) {
-        if(debug >= 2) outs() << "Loop " << *l << " Bound " << counter++ << std::endl;
-        Expr b = bnd;
-        Expr prevGrd, prevBound;
-        if(isOpX<IMPL>(b)) {
-          prevGrd = b->left();
-          prevBound = b->right();
-        }
-        else {
-          prevGrd = mk<TRUE>(ruleManager.m_efac);
-          prevBound = b;
-        }
-
-        if(debug >= 4) outs() << "\n====> NEXT BOUND: " << b << std::endl;
-
-        if(ranOnceAlready) {
-          elbas[*l]->removeQuery(); // Removes the dummy query added for parsing.
-          if(nestedLoops[*l]) { // The ghost decrement should be of the value of the previously found guard.
-            elbas[*l]->decrementByNestedBound(prevBound->right());
-            elbas[*l]->setUpQr(prevGrd, mk<EQ>(prevBound->left(), mkMPZ(0, prevBound->getFactory())));
-          }
-          else {
-            elbas[*l]->setUpQr(prevGrd, prevBound);
-          }
-        }
-        else {
-          elbas[*l]->removeQuery(); // Removes the dummy query added for parsing.
-          if(!nestedLoops[*l]) { elbas[*l]->setUpQueryAndSpec(prevGrd, prevBound); }
-          if(nestedLoops[*l]) { // The ghost decrement should be of the value of the previously found guard.
-            elbas[*l]->setUpQueryAndSpec(prevGrd, mk<EQ>(prevBound->left(), mkMPZ(0, prevBound->getFactory())));
-            elbas[*l]->decrementByNestedBound(prevBound->right());
-          }
-        }
-
-        if(debug >= 4) rms[*l]->print(true);
-        bool badGuard = elbas[*l]->collectPhaseGuards();
-        if(!badGuard) {
-          if(debug >= 4) outs() << "Infeasible path" << std::endl;
-          // Previous guard leads to an infeasible path.
-        }
-        else {
-          if (debug >= 2) elbas[*l]->printPhases();
-          ExprSet results = elbas[*l]->pathsSolve();
-          bounds[*l].insert(results.begin(), results.end());
-        }
-        ranOnceAlready = true;
-      }
-      if(debug >= 4 && !bounds[*l].empty()) {
+      if(!bounds[*l].empty()) {
         outs() << "\n====================";
         outs() << "====================\n";
         outs() <<     "FINAL " << *l << ": \n";
@@ -1872,22 +1939,88 @@ namespace ufo
       }
     }
 
-    if(bounds.size() == ruleManager.loopheads.size()) {
-      for(auto l = ruleManager.loopheads.rbegin(); l != ruleManager.loopheads.rend(); l++) {
+  }
 
-        if(!bounds[*l].empty()) {
-          outs() << "\n====================";
-          outs() << "====================\n";
-          outs() <<     "FINAL " << *l << ": \n";
-          pprint(bounds[*l], 5);
-          outs() << "\n====================";
-          outs() << "====================\n" << std::endl;
+  // adapted from BndExpl:: getAllTraces
+  bool getPrimePaths(Expr src, Expr dst, int len, ExprVector trace,
+    vector<ExprVector>& traces, vector<pair<Expr,Expr>>& graphPairs, int debug)
+  {
+    if (len == 1)
+    {
+      for (auto a : graphPairs)
+      {
+        if (a.first == src && a.second == dst)
+        {
+          for (auto & b : trace)
+          {
+            if (a.second == b)
+            {
+              if (debug >= 1)
+                outs () << "looking for prime paths only\n";
+              return false;
+            }
+          }
+          ExprVector newtrace = trace;
+          newtrace.push_back(dst);
+          traces.push_back(newtrace);
         }
       }
     }
-    else {
-      outs() << "Bounds for each loop not found.\n";
+    else
+    {
+      for (auto a : graphPairs)
+      {
+        if (a.first == src)
+        {
+          for (auto & b : trace)
+          {
+            if (a.second == b)
+            {
+              if (debug >= 1)
+                outs () << "looking for prime paths only\n";
+              return false;
+            }
+          }
+          ExprVector newtrace = trace;
+          newtrace.push_back(a.second);
+          bool  res = getPrimePaths(a.second, dst, len-1, newtrace, traces, graphPairs, debug);
+          if (!res) return false;
+        }
+      }
     }
+
+    return true;
+  }
+
+  bool findPrimePaths(Expr first, Expr last, vector<ExprVector>& primePaths,
+    vector<pair<Expr,Expr>>& graphPairs, int debug) {
+    ExprSet init;
+    init.insert(first);
+
+    for (auto & in : init)
+    {
+      int len = primePaths.size();
+      for (int i = 1; i <= graphPairs.size() ; i++) {
+        bool res = getPrimePaths (in, last, i, {in}, primePaths, graphPairs, debug);
+        if (!res) return false;
+      }
+      outs() << "paths size: " << primePaths.size() << "\n";
+      assert (primePaths.size() > len && "No paths found\n");
+    }
+
+    if (debug >=4) {
+      for (auto & p : primePaths)
+      {
+        outs () << "Found path: ";
+        for (auto & pp : p)
+          outs () << pp << " -> ";
+        outs () << "\n";
+      }
+    }
+    if (debug >= 3 || debug == -1)
+      outs() << "# of paths " << primePaths.size() << "\n";
+
+    return true;
   }
 
   inline void findBounds(string smt, int inv, int stren, bool dg,
@@ -1905,12 +2038,42 @@ namespace ufo
           outs() << "Cycle: " << cc.first << "  ";
           outs() << "Size: " << cc.second.size() << "\n";
           for(auto& c: cc.second) {
+            outs() << "  ";
             for(auto e: c) {
               outs() << e << ", ";
             }
             outs() << "\n";
           }
         }
+      }
+
+      for(auto& hr : ruleManager.decls) outs() << hr->left() << ", ";
+      outs() << "\n";
+
+      vector<pair<Expr, Expr>> graphPairs;
+      Expr firstInv;
+      Expr failDecl = ruleManager.failDecl;
+
+      for(auto& hr : ruleManager.chcs) {
+        if(hr.isFact) firstInv = hr.srcRelation;
+        if(!hr.isInductive) {
+          graphPairs.push_back(make_pair(hr.srcRelation, hr.dstRelation));
+        }
+      }
+
+      for(auto& gp: graphPairs) {
+        outs() << gp.first << " -> " << gp.second << "\n";
+      }
+
+      vector<ExprVector> primePaths;
+
+      bool foundPrimePaths = findPrimePaths(firstInv, failDecl, primePaths, graphPairs, debug);
+
+      for(auto& pp : primePaths) {
+        for(auto& p : pp) {
+          outs() << p << " - > ";
+        }
+        outs() << "\n";
       }
 
       // Parsing is done. Now explore/organize the path information we need.
@@ -2006,25 +2169,25 @@ namespace ufo
       }
       // ruleManagers set up with their "single" loops.
 
-      bool reverseLoopheads = false;
-      for(auto& l: ruleManager.loopheads) {
-        if(nestedLoops[l]) {
-          reverseLoopheads = true;
-          break;
-        }
-      }
+      // bool reverseLoopheads = false;
+      // for(auto& l: ruleManager.loopheads) {
+      //   if(nestedLoops[l]) {
+      //     reverseLoopheads = true;
+      //     break;
+      //   }
+      // }
+      //
+      // if(reverseLoopheads) {
+      //   std::reverse(ruleManager.loopheads.begin(), ruleManager.loopheads.end());
+      // }
 
-      if(reverseLoopheads) {
-        std::reverse(ruleManager.loopheads.begin(), ruleManager.loopheads.end());
-      }
+      // if(debug >= 3) {
+      //   for(auto& l: ruleManager.loopheads) {
+      //     outs() << "Loophead: " << l << "\n";
+      //   }
+      // }
 
-      if(debug >= 3) {
-        for(auto& l: ruleManager.loopheads) {
-          outs() << "Loophead: " << l << "\n";
-        }
-      }
-
-      calculateBounds(ruleManager, rms, nestedLoops, stren, dg, data2, doPhases, debug);
+      calculateBounds(ruleManager, rms, nestedLoops, stren, dg, data2, doPhases, primePaths, debug);
 
     }
 } // end namespace ufo

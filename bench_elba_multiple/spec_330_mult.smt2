@@ -8,6 +8,8 @@
 (declare-var z0 Int)
 (declare-var z1 Int)
 
+(declare-rel fail ())
+
 (rule (inv x0 y0 z0))
 
 (rule (=> (and
@@ -42,3 +44,7 @@
   )
   (inv2 x0 y0 z1)
 ))
+
+(rule (=> (and (inv2 x0 y0 z0) (<= x0 0) (<= y0 0) (<= z0 0)) fail))
+
+(query fail :print-certificate true)
