@@ -2,7 +2,6 @@
 
 (declare-rel inv1 (Int Int))
 (declare-rel inv2 (Int Int))
-(declare-rel inv3 (Int Int))
 (declare-rel inv (Int Int))
 
 (declare-var x1 Int)
@@ -37,7 +36,7 @@
   )
 )
 
-(rule (=> (and (inv2 x1 y1) (> x1 0)) fail))
-(rule (=> (and (inv3 x1 y1) (> y1 0)) fail))
+(rule (=> (and (inv1 x1 y1) (> x1 0)) fail))
+(rule (=> (and (inv2 x1 y1) (> y1 0)) fail))
 
 (query fail :print-certificate true)

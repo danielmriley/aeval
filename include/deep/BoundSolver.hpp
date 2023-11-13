@@ -1923,10 +1923,7 @@ namespace ufo
         }
       }
     }
-    // exit(0);
-    // Run through loopheads front to back (this is the loops in order innermost to outermost).
-    // Run through loopheads back to front (this is the loops in reverse sequential order).
-
+    
     for(auto l = ruleManager.loopheads.rbegin(); l != ruleManager.loopheads.rend(); l++) {
 
       if(!bounds[*l].empty()) {
@@ -1938,7 +1935,6 @@ namespace ufo
         outs() << "====================\n" << std::endl;
       }
     }
-
   }
 
   // adapted from BndExpl:: getAllTraces
@@ -2169,26 +2165,7 @@ namespace ufo
       }
       // ruleManagers set up with their "single" loops.
 
-      // bool reverseLoopheads = false;
-      // for(auto& l: ruleManager.loopheads) {
-      //   if(nestedLoops[l]) {
-      //     reverseLoopheads = true;
-      //     break;
-      //   }
-      // }
-      //
-      // if(reverseLoopheads) {
-      //   std::reverse(ruleManager.loopheads.begin(), ruleManager.loopheads.end());
-      // }
-
-      // if(debug >= 3) {
-      //   for(auto& l: ruleManager.loopheads) {
-      //     outs() << "Loophead: " << l << "\n";
-      //   }
-      // }
-
       calculateBounds(ruleManager, rms, nestedLoops, stren, dg, data2, doPhases, primePaths, debug);
-
     }
 } // end namespace ufo
 
