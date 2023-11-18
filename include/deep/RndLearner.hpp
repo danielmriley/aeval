@@ -407,7 +407,7 @@ namespace ufo
 
     void initializeDecl(Expr invDecl)
     {
-      if (printLog) outs () << "\nINITIALIZE PREDICATE " << invDecl << "\n=========================\n";
+      if (printLog) outs () << "\nINITIALIZE PREDICATE " << invDecl << "\n====================\n";
 //      assert (invDecl->arity() > 2);
       assert(decls.size() == invNumber);
       assert(sfs.size() == invNumber);

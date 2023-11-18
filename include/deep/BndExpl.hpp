@@ -743,7 +743,7 @@ namespace ufo
 
           // for arrays, make sure the ranges are large enough
           for (auto & v : arrRanges[srcRel])
-          ssa.insert(ssa.begin(), replaceAll(mk<GT>(v, mkMPZ(k, m_efac)), srcVars, bindVars[0]));
+          ssa.insert(ssa.begin(), replaceAll(mk<GEQ>(v, mkMPZ(k, m_efac)), srcVars, bindVars[0]));
 
           bool toContinue = false;
           bool noopt = false;

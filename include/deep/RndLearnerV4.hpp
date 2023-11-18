@@ -569,14 +569,13 @@ namespace ufo
       for (auto & a : deferredCandidates) defSz[a.first] = a.second.size();
       ExprSet cands;
       bool rndStarted = false;
+      int lsz = ruleManager.loopheads.size();
       for (int i = 0; i < maxAttempts; i++)
       {
         // next cand (to be sampled)
         // TODO: find a smarter way to calculate; make parametrizable
-        Expr rel1 = ruleManager.loopheads[i % ruleManager.loopheads.size()];
-        int cycleNum = i % ruleManager.cycles[rel1].size();
-        int tmp = ruleManager.cycles[rel1][cycleNum][0];
-        Expr rel = ruleManager.chcs[tmp].srcRelation;
+        Expr rel = ruleManager.loopheads[i % lsz];
+        int cycleNum = i % ruleManager.cycles[rel].size();
         int invNum = getVarIndex(rel, decls);
         candidates.clear();
         SamplFactory& sf = sfs[invNum].back();
@@ -956,7 +955,7 @@ namespace ufo
       }
 
       if (!qvits[invNum].empty()) {
-        if(printLog >= 3) outs() << "rel: " << rel << " : has arrays\n";
+        if (printLog >= 3) outs() << "rel: " << rel << " : has arrays\n";
         ruleManager.hasArrays[rel] = true;
       }
     }
@@ -997,24 +996,25 @@ namespace ufo
                     dFwd, dRec, dGenerous, debug);
 
     map<Expr, ExprSet> cands;
-    for(auto& cyc : ruleManager.cycles) {
+    for (auto& cyc : ruleManager.cycles)
+    {
       Expr rel = cyc.first;
       for (int i = 0; i < cyc.second.size(); i++)
       {
-        Expr dcl = ruleManager.chcs[cyc.second[i][0]].srcRelation;
-        if (ds.initializedDecl(dcl)) continue;
-        ds.initializeDecl(dcl);
+        assert(rel == ruleManager.chcs[cyc.second[i][0]].srcRelation);
+        if (ds.initializedDecl(rel)) continue;
+        ds.initializeDecl(rel);
         if (!dSee) continue;
 
         Expr pref = bnd.compactPrefix(rel, i);
         ExprSet tmp;
         getConj(pref, tmp);
         for (auto & t : tmp)
-        if (hasOnlyVars(t, ruleManager.invVars[dcl]))
-        cands[dcl].insert(t);
+        if (hasOnlyVars(t, ruleManager.invVars[rel]))
+        cands[rel].insert(t);
 
-        if (mut > 0) ds.mutateHeuristicEq(cands[dcl], cands[dcl], dcl, true);
-        ds.initializeAux(cands[dcl], bnd, rel, i, pref);
+        if (mut > 0) ds.mutateHeuristicEq(cands[rel], cands[rel], rel, true);
+        ds.initializeAux(cands[rel], bnd, rel, i, pref);
       }
     }
     if (dat > 0) ds.getDataCandidates(cands);

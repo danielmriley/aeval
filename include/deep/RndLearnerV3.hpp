@@ -600,19 +600,17 @@ namespace ufo
 
       ExprSet cands;
       bool rndStarted = false;
+      int lsz = ruleManager.loopheads.size();
       for (int i = 0; i < maxAttempts; i++)
       {
         // next cand (to be sampled)
         // TODO: find a smarter way to calculate; make parametrizable
-        Expr rel1 = ruleManager.loopheads[i % ruleManager.loopheads.size()];
-        int cycleNum = i % ruleManager.cycles[rel1].size();
-        int tmp = ruleManager.cycles[rel1][cycleNum][0];
-        Expr rel = ruleManager.chcs[tmp].srcRelation;
+        Expr rel = ruleManager.loopheads[i % lsz];
         int invNum = getVarIndex(rel, decls);
         candidates.clear();
         SamplFactory& sf = sfs[invNum].back();
         Expr cand = sf.getFreshCandidate();
-        if(cand == NULL) {
+        if (cand == NULL) {
           outs() << "cand is NULL\n";
           exit(1);
         }
@@ -1462,7 +1460,7 @@ namespace ufo
 
     map<Expr, ExprSet> cands;
 
-    for(auto& cyc : ruleManager.cycles) {
+    for (auto& cyc : ruleManager.cycles) {
       Expr rel = cyc.first;
       for (int i = 0; i < cyc.second.size(); i++)
       {
