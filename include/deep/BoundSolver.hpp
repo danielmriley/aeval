@@ -1839,23 +1839,45 @@ namespace ufo
     }
 
     for(auto& v: primePaths) {
-      ExprVector loop = v;
-      Expr lastLoophead = *loop.rbegin();
+      ExprVector path = v;
+      Expr lastLoophead = *path.rbegin();
       bounds[lastLoophead].insert(ghostGuard);
 
-      checkForNesting(ruleManager, loop, nestedLoops);
+      checkForNesting(ruleManager, path, nestedLoops);
 
-      for(auto l = loop.rbegin(); l != loop.rend(); l++) {
+      for(auto l = path.rbegin(); l != path.rend(); l++) {
         if(contains(*l, ruleManager.loopheads)) {
           // *l is not a loophead (not inductive)
+          // These are the "branching" or "bridge" CHCs.
+          // There should be some analysis that takes the branching
+          // condition and adds it to the bound being computed.
           outs() << *l << " is NOT inductive\n";
+          HornRuleExt* br;
+          Expr preCond;
+          bool isInit = false;
+          for(auto &hr : ruleManager.chcs) {
+            if(hr.srcRelation == *l && hr.dstRelation == lastLoophead) {
+              preCond = ruleManager.getPrecondition(&hr);
+              if(hr.isFact) isInit = true;
+              outs() << "BRIDGE CHC: " << *l << " => " << lastLoophead << "\n";
+            }
+          }
+          if(isInit || nestedLoops[*l] || preCond == NULL) continue;
+          outs() << "PRECOND: " << preCond << "\n";
+          ExprSet prevBounds = bounds[lastLoophead];
+          ExprSet tmp;
+          for(auto& b: prevBounds) {
+            outs() << "b: " << b->left() << "\n";
+            tmp.insert(mk<IMPL>(mk<AND>(preCond, b->left()),b->right()));
+          }
+          bounds[lastLoophead].swap(tmp);
         }
         else {
           // *l is a loophead (is inductive)
           outs() << *l << " is inductive\n";
 
           ExprSet prevBounds = bounds[lastLoophead];
-          if(l == loop.rbegin()) {
+          if(l == path.rbegin()) {
             bounds[lastLoophead].clear();
           }
 
@@ -1923,7 +1945,7 @@ namespace ufo
         }
       }
     }
-    
+
     for(auto l = ruleManager.loopheads.rbegin(); l != ruleManager.loopheads.rend(); l++) {
 
       if(!bounds[*l].empty()) {
