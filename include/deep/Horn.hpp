@@ -74,7 +74,6 @@ namespace ufo
     map<Expr, vector<vector<int>>> cycles, prefixes;
     vector<vector<int>> acyclic;
     ExprVector seqPoints;
-    // vector<vector<int>> prefixes, cycles;  // for cycles
     map<Expr, bool> hasArrays;
     bool hasAnyArrays, hasBV = false;
     bool hasQuery = false;
@@ -148,6 +147,7 @@ namespace ufo
 
     void addDecl (Expr a)
     {
+      outs() << "addDecl: " << a << "\n";
       if (invVars[a->left()].size() == 0)
       {
         decls.insert(a);
@@ -444,7 +444,6 @@ namespace ufo
       for (int i = 0; i < chcs.size(); i++)
         outgs[chcs[i].srcRelation].push_back(i);
 
-      // wtoSort();
       findCycles(); // wtoSort is done in here now.
 
       // prepare a version of wtoCHCs w/o queries
@@ -456,7 +455,7 @@ namespace ufo
       if (debug >= 1)
       {
         outs () << (doElim ? "  Simplified " : "  Parsed ") << "CHCs:\n";
-        print(debug >= 4, true);
+        if(debug >= 5) print(debug >= 4, true);
       }
       return true;
     }
@@ -464,9 +463,9 @@ namespace ufo
     void dummyQuery() {
       hasQuery = true;
       vector<HornRuleExt> chcsTmp = chcs;
-      if(debug >= 5) outs() << "\n==== Adding dummy query ====\n";
-      for(auto& hr: chcsTmp) {
-        if(hr.isInductive) {
+      if (debug >= 5) outs() << "\n==== Adding dummy query ====\n";
+      for (auto& hr: chcsTmp) {
+        if (hr.isInductive) {
           HornRuleExt* qr = new HornRuleExt();
           qr->isQuery = true;
           qr->srcRelation = hr.dstRelation;
@@ -1077,7 +1076,9 @@ namespace ufo
       // filter wtoDecls
       for (auto it = wtoDecls.begin(); it != wtoDecls.end();)
       {
-        if (*it == failDecl || isOpX<TRUE>(*it)) it = wtoDecls.erase(it);
+        if (*it == failDecl || isOpX<TRUE>(*it)) { 
+          it = wtoDecls.erase(it);
+        } 
         else ++it;
       }
 
@@ -1132,6 +1133,8 @@ namespace ufo
           tmp.push_back(chcNum);
           if (find(avoid.begin(), avoid.end(), r) == avoid.end())
           {
+            if (debug >= 7)
+              outs() << "ADDING PREF " << chcNum << "\n";
             prefs[r].push_back(tmp);
             unique_push_back(r, highLevelRels);
           }
@@ -1153,6 +1156,8 @@ namespace ufo
         bool nestedCycle = findCycles(d, d, avoid2);
         if (nestedCycle)
         {
+          if (debug >= 7)
+            outs() << "PREFIX ADDED: " << d << "\n";
           prefixes[d] = prefs[d]; // to debug
         }
       }
@@ -1234,7 +1239,7 @@ namespace ufo
         }
       }
       outgs[srcRel].push_back(chcs.size()-1);
-      if(debug >= 5) outs() << "Rule added\n";
+      if(debug >= 6) outs() << "Rule added\n";
     }
 
     void addDeclAndVars(Expr rel, ExprVector& args)

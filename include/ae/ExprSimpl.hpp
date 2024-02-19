@@ -58,6 +58,19 @@ namespace ufo
     return emptyIntersect(a, bv);
   }
 
+  template <typename Range>
+  bool containsExpr(Expr var1, Range &bv)
+  {
+    for (auto &var2 : bv)
+    {
+      if (var1 == var2)
+      {
+        return false;
+      }
+    }
+    return true;
+  }
+
   // if at the end disjs is empty, then a == true
   inline static void getConj (Expr a, ExprSet &conjs)
   {
@@ -73,6 +86,15 @@ namespace ufo
     } else {
       conjs.insert(a);
     }
+  }
+
+  inline static void getConj (Expr a, ExprVector& conjs)
+  {
+    ExprSet conjsSet;
+    conjsSet.insert(conjs.begin(), conjs.end());
+    conjs.clear();
+    getConj(a, conjsSet);
+    conjs.insert(conjs.begin(), conjsSet.begin(), conjsSet.end());
   }
 
   // if at the end disjs is empty, then a == false
@@ -100,6 +122,16 @@ namespace ufo
       else ++it;
     }
   }
+
+  // template<typename Range1, typename Range2>
+  // static void minusSets(Range1& v1, Range2& v2) {
+  //   ExprSet a;
+  //   a.insert(v1.begin(), v1.end());
+  //   v1.clear();
+  //   minusSets(a,v2);
+  //   v1.insert(v1.begin(),a.begin(),a.end());
+  // }
+
 
   // rewrites v1 to contain only v2
   template<typename Range1, typename Range2> static void keepOnly(Range1& v1, Range2& v2){

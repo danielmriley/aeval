@@ -45,6 +45,8 @@ namespace ufo
     map<Expr, ExprSet> concrInvs;
     set<vector<int>> unsat_prefs;
 
+    vector<ExprVector> getBindVars() { return bindVars; }
+
     void guessRandomTrace(vector<int>& trace)
     {
       std::srand(std::time(0));
@@ -112,8 +114,10 @@ namespace ufo
 
     Expr compactPrefix (Expr rel, int num, int unr = 0)
     {
+      outs() << "Prefs size: " << ruleManager.prefixes[rel].size() << "\n";
       vector<int> pr = ruleManager.prefixes[rel][num];
       if (pr.size() == 0) return mk<TRUE>(m_efac);
+      outs() << "HERE2\n";
 
       for (int j = pr.size() - 1; j >= 0; j--)
       {
@@ -121,7 +125,7 @@ namespace ufo
         for (int i = 0; i < unr; i++)
           pr.insert(pr.begin() + j, tmp.begin(), tmp.end());
       }
-
+      outs() << "AFTER LOOP\n";
       pr.push_back(ruleManager.cycles[rel][num][0]);   // we are interested in prefixes, s.t.
                                                   // the cycle is reachable
       ExprVector ssa;
@@ -656,8 +660,16 @@ namespace ufo
           vector<int> mainInds;
           vector<int> arrInds;
           auto & loop = ruleManager.cycles[invRel][cyc];
-          if (srcRel != ruleManager.chcs[loop[0]].srcRelation) continue;
-          if (models.size() > 0) continue;
+          if (srcRel != ruleManager.chcs[loop[0]].srcRelation) {
+            if(debug) outs() << "continuing\n";
+            continue;
+          }
+          if (models.size() > 0)
+          {
+            if (debug)
+              outs() << "continuing\n";
+            continue;
+          }
           ExprVector& srcVars = ruleManager.chcs[loop[0]].srcVars;
 
           ExprVector vars;
@@ -681,8 +693,13 @@ namespace ufo
               }*/
             }
           }
-          if (vars.size() < 2 && cyc == ruleManager.cycles[invRel].size() - 1)
-          continue; // does not make much sense to run with only one var when it is the last cycle
+          if (vars.size() < 2 && cyc == ruleManager.cycles[invRel].size() - 1) {
+            if(debug) {
+              outs() << "continuing because of vars size\n";
+              outs() << "Vars size: " << vars.size() << "\n";
+            }
+            continue; // does not make much sense to run with only one var when it is the last cycle
+          }
           dtVars = vars;
 
           auto & prefix = ruleManager.prefixes[invRel][cyc];
@@ -699,7 +716,10 @@ namespace ufo
           ssa.push_back(src);
           getSSA(trace, ssa);
           ssa.push_back(replaceAll(dst, srcVars, bindVars[bindVars.size() - 1]));
-          if(debug) pprint(ssa,2);
+          // if(debug) {
+          //   outs() << "SSA BND: ";
+          //   pprint(ssa,2);
+          // } 
 
           int traceSz = trace.size();
           // compute vars for opt constraint
@@ -767,7 +787,9 @@ namespace ufo
 
       }
 
-      return true;
+      if(models.size() > 0) 
+        return true;
+      return false;
     }
 
     //used for multiple loops to unroll inductive clauses k times and collect corresponding models

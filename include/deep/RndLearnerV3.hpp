@@ -113,6 +113,7 @@ namespace ufo
 
     Expr renameCand(Expr newCand, ExprVector& varsRenameFrom, int invNum)
     {
+      outs() << "varsRenameFrom.size(): " << varsRenameFrom.size() << " : invarVarsShort[" << invNum << "].size(): " << invarVarsShort[invNum].size() << "\n";
       newCand = replaceAll(newCand, varsRenameFrom, invarVarsShort[invNum]);
       return newCand;
     }
@@ -189,9 +190,10 @@ namespace ufo
     {
       if (!containsOp<FORALL>(candToProp) && !u.isSat(candToProp, constraint))
         return false; // sometimes, maybe we should return true.
-
+      outs() << "rel: " << rel << " : relFrom: " << relFrom << "\n";
       int invNum = getVarIndex(rel, decls);
       int invNumFrom = getVarIndex(relFrom, decls);
+      outs() << "invNum: " << invNum << " : invNumFrom: " << invNumFrom << "\n";
 
       if (containsOp<FORALL>(candToProp))
       {
@@ -351,12 +353,13 @@ namespace ufo
     {
       propped.clear();
       checked.clear();
+      outs() << "rel from propagate: " << rel << "\n";
       return propagateRec(rel, cand, seed);
     }
 
     bool propagateRec(Expr rel, Expr cand, bool seed)
     {
-      if (printLog >= 3) outs () << "     Propagate:   " << cand << "\n";
+      if (printLog >= 3) outs () << "rel: " << rel << "     Propagate:   " << cand << "\n";
       bool res = true;
       checked.insert(rel);
       for (auto & hr : ruleManager.chcs)
@@ -389,6 +392,7 @@ namespace ufo
     bool checkCand(int invNum, bool propa = true)
     {
       Expr rel = decls[invNum];
+      outs() << "rel from check cand: " << rel << "\n";
       if (!checkInit(rel)) return false;
       if (!checkInductiveness(rel)) return false;
 
@@ -576,21 +580,29 @@ namespace ufo
     {
       for (auto & dcl: ruleManager.wtoDecls)
       {
+        outs() << "dcl: " << *dcl << "\n";
         int invNum = getVarIndex(dcl, decls);
+        outs() << "MAKING SF\n";
         SamplFactory& sf = sfs[invNum].back();
+        outs() << "Made SF\n";
+        outs() << "sf.learnedExprs.size() = " << sf.learnedExprs.size() << "\n";
         for (auto & l : sf.learnedExprs)
         {
+          outs() << "LEARNED EXPR: " << l << std::endl;
           if (containsOp<ARRAY_TY>(l) || findNonlin(l) || containsOp<BOOL_TY>(l))
             continue;
           Expr learnedCand = normalizeDisj(l, invarVarsShort[invNum]);
           Sampl& s = sf.exprToSampl(learnedCand);
           sf.assignPrioritiesForLearned();
         }
+        outs() << "AFTER LOOP\n";
         for (auto & failedCand : tmpFailed[invNum])
         {
+          outs() << "FAILED CANDS\n";
           Sampl& s = sf.exprToSampl(failedCand);
           sf.assignPrioritiesForFailed();
         }
+        outs() << "AFTER SECOND LOOP\n";
       }
     }
 
@@ -1124,7 +1136,7 @@ namespace ufo
     virtual void postBootCands(int invNum, Expr c, Expr cand) {}
 
     bool bootstrap()
-    {
+    { 
       if (printLog) outs () << "\nBOOTSTRAPPING\n=============\n";
       filterUnsat();
 

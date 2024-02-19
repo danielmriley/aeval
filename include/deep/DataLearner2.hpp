@@ -110,16 +110,26 @@ namespace ufo
     }
 
   public:
-    DataLearner2(CHCs& r, EZ3& z3, int _debug = 0) :
+    DataLearner2(CHCs& r, EZ3& z3, int _debug) :
       ruleManager(r), bnd(ruleManager, (_debug > 0)), m_efac(r.m_efac), debug(_debug) {}
 
-      boost::tribool connectPhase(Expr src, Expr dst,
+      boost::tribool connectPhase(Expr src, Expr dst, int k = 1,
                     Expr srcRel = NULL, Expr block = NULL, Expr invs = NULL,
                     Expr preCond = NULL)
       {
         // Get data matrix.
+        // Refactor so that the matrix isn't built over and over.
+        // seperate the BndExpl from DL2 so that DL2 is provided with the matrix rather
+        // than creating it each time itself.
         boost::tribool res = bnd.unrollAndExecuteTermPhase
-          (src, dst, srcRel, invVars[srcRel], models[srcRel], block);
+          (src, dst, srcRel, invVars[srcRel], models[srcRel], block, k);
+
+        if(debug > 0 && res) {
+          outs() << "RES IS TRUE\n";
+        }
+        else if(debug > 0 && !res) {
+          outs() << "RES IS FALSE\n";
+        }
 
         if (res) {
           createCandsFromData(srcRel);

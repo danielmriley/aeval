@@ -2,14 +2,20 @@
 (declare-var x Int)
 (declare-var x1 Int)
 
-(rule (inv x))
+(declare-rel fail ())
+
+(rule (inv 0))
 
 (rule (=>
     (and
         (inv x)
-        (= x 7)
-        (= x1 (- x 1))
+        (< x 2)
+        (= x1 (+ x 1))
     )
     (inv x1)
   )
 )
+
+(rule (=> (and (inv x) (not (< x 2)) ) fail))
+
+(query fail :print-certificate true)

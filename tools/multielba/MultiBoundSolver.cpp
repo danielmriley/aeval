@@ -1,4 +1,4 @@
-#include "deep/BoundSolverV2.hpp"
+#include "deep/MultiBoundSolver.hpp"
 
 using namespace ufo;
 using namespace std;
@@ -62,9 +62,8 @@ int main (int argc, char ** argv)
     return 0;
   }
 
-  int learn = getIntValue("--learn", 2, argc, argv);
-  int limit = getIntValue("--limit", 3, argc, argv);
   int cex = getIntValue("--cex", 0, argc, argv);
+  int limit = getIntValue("--limit", 3, argc, argv);
   int str = getIntValue("--stren", 5, argc, argv);
   int debug = getIntValue("--debug", 0, argc, argv);
   bool useDataGrds = !getBoolValue("--data-guards", false, argc, argv);
@@ -78,10 +77,7 @@ int main (int argc, char ** argv)
     return 0;
   }
 
-  if(learn == 1) 
-    learnBounds(string(argv[argc-1]), cex, str, useDataGrds, data2, doPhases, debug);
-  else
-    learnBoundsV2(string(argv[argc-1]), cex, str, useDataGrds, data2, doPhases, limit, debug);
-    
+  learnMultipleBounds(string(argv[argc - 1]), cex, str, useDataGrds, data2, doPhases, limit, debug);
+  
   return 0;
 }

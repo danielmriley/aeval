@@ -2,7 +2,7 @@ cmake_minimum_required(VERSION 2.8.11)
 
 project (FreqHorn)
 set (FreqHorn_VERSION_MAJOR 0)
-set (FreqHorn_VERSION_MINOR 5)
+set (FreqHorn_VERSION_MINOR 6)
 
 if (NOT PACKAGE_VERSION)
   set(PACKAGE_VERSION
