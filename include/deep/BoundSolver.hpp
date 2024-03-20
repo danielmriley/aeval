@@ -1072,7 +1072,7 @@ namespace ufo
 
       for (int i = 0; i < bounds.size(); i++) {
         Expr e = normalize(bounds[i]);
-        if (isOpX<MPZ>(e->right()) && e->right() != mpzZero) {
+        if (e->arity() > 0 && isOpX<MPZ>(e->right()) && e->right() != mpzZero) {
           holdMPZ.push_back(e);
         }
         else {
@@ -1095,6 +1095,11 @@ namespace ufo
         }
         else i++;
       }
+      ExprSet tmp;
+      for(auto& e : candSet) {
+        tmp.insert(normalize(e, ghostVars[0]));
+      }
+      candSet = tmp;
     }
 
     boost::tribool dataForBoundPhase(Expr src, Expr dst,

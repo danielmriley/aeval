@@ -147,7 +147,6 @@ namespace ufo
 
     void addDecl (Expr a)
     {
-      outs() << "addDecl: " << a << "\n";
       if (invVars[a->left()].size() == 0)
       {
         decls.insert(a);
@@ -470,7 +469,7 @@ namespace ufo
           qr->isQuery = true;
           qr->srcRelation = hr.dstRelation;
           qr->srcVars = hr.srcVars;
-          qr->dstRelation = mkTerm<string> ("err", m_efac);
+          qr->dstRelation = mkTerm<string> ("fail", m_efac);
           qr->body = mk<TRUE>(m_efac);
           addFailDecl(qr->dstRelation);
           addRule(qr);

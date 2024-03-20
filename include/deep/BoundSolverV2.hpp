@@ -9,8 +9,9 @@ namespace ufo {
     ExprMap bounds;
     Expr fcBodyOrig;
     int n; // parameter to control the number of trace iterations.
+    int limit;
 
-    int to = 1000;
+    int to = 100;
     int freqs = 1;
     int aggp = 1;
     int mut = 1;
@@ -28,8 +29,8 @@ namespace ufo {
 
   public:
     // Constructor
-    BoundSolverV2(CHCs &r, int _b, bool _dg, bool d2, bool _dp, int limit, int dbg)
-        : BoundSolver(r,_b,_dg,d2,_dp,dbg), n(limit)
+    BoundSolverV2(CHCs &r, int _b, bool _dg, bool d2, bool _dp, int _limit, int dbg)
+        : BoundSolver(r,_b,_dg,d2,_dp,dbg), limit(_limit), n(_limit)
     {
       // TODO: Initialize any additional member variables specific to BoundSolverV2
       for(auto& chc: r.chcs) 
@@ -42,35 +43,16 @@ namespace ufo {
       }
     }
 
-    // Public member functions
-    boost::tribool invFromData(Expr src, Expr dst, Expr block, map<Expr, ExprSet>& candMap, int n) {
-      DataLearner2 dl2(ruleManager, z3, debug);
-      Expr invs = mk<TRUE>(m_efac);
-      boost::tribool res = true;
-
-      outs() << "src: " << src << "\n";
-      outs() << "dst: " << dst << "\n";
-      outs() << "block: " << block << "\n";
-      outs() << "n: " << n << "\n";
-
-      if(debug >= 3) ruleManager.print(true);
-
-      // Replace this to reuse the SSA that is built previously.
-      res = dl2.connectPhase(src, dst, n, invDecl, block, invs, loopGuard);
-      if (res == true)
-      {
-        dl2.getDataCands(candMap[invDecl], invDecl);
-      }
-
-      if (debug >= 2)
-      {
-        for (auto &e : candMap[invDecl])
-        {
-          outs() << "invs from data: " << e << "\n";
-        }
-      }
-      return res;
-
+    void copyRule(HornRuleExt* dst, HornRuleExt* src)
+    {
+      dst->srcRelation = src->srcRelation;
+      dst->dstRelation = src->dstRelation;
+      dst->srcVars = src->srcVars;
+      dst->dstVars = src->dstVars;
+      dst->body = src->body;
+      dst->isFact = src->isFact;
+      dst->isQuery = src->isQuery;
+      dst->isInductive = src->isInductive;
     }
 
     void prepareRuleManager(CHCs& rm, vector<HornRuleExt*>& rules)
@@ -82,23 +64,24 @@ namespace ufo {
         rm.addRule(r);
       }
       rm.findCycles();
-      rm.wtoCHCs = ruleManager.wtoCHCs;
-      rm.dwtoCHCs = ruleManager.dwtoCHCs;
-      rm.allCHCs = ruleManager.allCHCs;
-      rm.wtoDecls = ruleManager.wtoDecls;
+
+      rm.dwtoCHCs = rm.wtoCHCs;
+      for (auto it = rm.dwtoCHCs.begin(); it != rm.dwtoCHCs.end();)
+        if ((*it)->isQuery) it = rm.dwtoCHCs.erase(it);
+          else ++it;
+
+      if(debug >= 4) rm.print(true);
     }
 
-    boost::tribool checkSafety(Expr elim, Expr preCond)
+    void prepareRulesWithPrecond(Expr elim, Expr preCond, CHCs& rm)
     {
-      // add precondition to be checked to the ruleManager.
-      CHCs rm(m_efac, z3, debug);
-
-      HornRuleExt* fc_withPrecond = fc;
-      fc_withPrecond->isFact = true;
-      fc_withPrecond->srcRelation = mk<TRUE>(m_efac);
+      HornRuleExt* fcWithPrecond = new HornRuleExt();
+      copyRule(fcWithPrecond, fc);
+      fcWithPrecond->isFact = true;
+      fcWithPrecond->srcRelation = mk<TRUE>(m_efac);
       Expr fcPreCond = replaceAll(elim, tr->srcVars, fc->srcVars);
-      fc_withPrecond->body = replaceAll(mk<AND>(fcPreCond, preCond), fc_withPrecond->srcVars, tr->dstVars);
-      fc_withPrecond->srcVars.clear();
+      fcWithPrecond->body = replaceAll(mk<AND>(fcPreCond, preCond), fcWithPrecond->srcVars, tr->dstVars);
+      fcWithPrecond->srcVars.clear();
 
       ExprVector qrBody;
       getConj(qr->body, qrBody);
@@ -108,21 +91,33 @@ namespace ufo {
         else ++c;
       }
       qrBody.push_back(mkNeg(ghostGuard));
-      qr->body = conjoin(qrBody, m_efac);
-      vector<HornRuleExt*> rules;
+      HornRuleExt* qrForFH = new HornRuleExt();
+      copyRule(qrForFH, qr);
+      qrForFH->body = conjoin(qrBody, m_efac);
 
-      rules.push_back(fc_withPrecond);
+      vector<HornRuleExt*> rules;
+      rules.push_back(fcWithPrecond);
       rules.push_back(tr);
-      rules.push_back(qr);
+      rules.push_back(qrForFH);
       prepareRuleManager(rm, rules);
+    }
+
+    boost::tribool checkSafety(Expr elim, Expr preCond)
+    {
+
+      if(debug >= 2) outs() << "\n\nCheck Safety\n============\n";
+      // add precondition to be checked to the ruleManager.
+      CHCs rm(m_efac, z3, debug);
+
+      prepareRulesWithPrecond(elim, mk<AND>(preCond, replaceAll(branchPreCond, invVars, invVarsPr)), rm);
 
       BndExpl bnd(rm, to, debug);
       RndLearnerV4 ds(m_efac, z3, rm, to, freqs, aggp, mut, dat,
                       doDisj, mbpEqs, dAllMbp, dAddProp, dAddDat, dStrenMbp,
-                      dFwd, dRec, dGenerous, debug);
+                      dFwd, dRec, dGenerous, (debug >= 6 ? 2 : 0));
 
       map<Expr, ExprSet> cands;
-      rm.print(true);
+      if(debug>= 4) rm.print(true);
       for (auto &cyc : rm.cycles)
       {
         Expr rel = cyc.first;
@@ -161,67 +156,198 @@ namespace ufo {
       { 
         return true;
       }
-      outs() << "To Calculate Statistics\n";
       ds.calculateStatistics();
-      outs() << "To Deferred Priorities\n";
       ds.deferredPriorities();
       std::srand(std::time(0));
-      outs() << "To Synthesize\n";
       return ds.synthesize(to);
     }
 
-    Expr inferGT(Expr c, ExprSet vars)
+    void removeCommonExpr(ExprVector &d, ExprVector& toDisj, Expr& cm)
     {
-      ExprSet res;
-      for(auto& v: vars)
+      if (d.size() <= 1)
       {
-        outs() << "v: " << v << "\n";
-        Expr gt = mk<GT>(v, mkMPZ(0, m_efac));
-        if(u.implies(c, gt))
-        {
-          outs() << "gt: " << gt << "\n";
-          res.insert(gt);
-        }
+        toDisj = d;
+        cm = mk<TRUE>(m_efac);
+        return;
       }
 
-      return conjoin(res, m_efac);
-    }
-
-    Expr inferLT(Expr c, ExprSet vars)
-    {
-      ExprSet res;
-      for (auto &v : vars)
+      ExprSet comm;
+      vector<ExprSet> dsjs;
+      dsjs.push_back(ExprSet());
+      auto it = d.begin();
+      getConj(*it, dsjs.back());
+      comm = dsjs.back();
+      for (it = std::next(it); it != d.end(); ++it)
       {
-        Expr lt = mk<LT>(v, mkMPZ(0, m_efac));
-        if (u.implies(c, lt))
-        {
-          res.insert(lt);
-        }
+        ExprSet updComm, tmp;
+        dsjs.push_back(ExprSet());
+        getConj(*it, dsjs.back());
+        tmp = dsjs.back();
+        distribDisjoin(comm, tmp, updComm);
+        comm = updComm;
       }
 
-      return conjoin(res, m_efac);
+      for (auto a : dsjs)
+      {
+        minusSets(a, comm);
+        toDisj.push_back(conjoin(a, m_efac));
+      }
+      
+      cm = conjoin(comm, m_efac);
     }
 
-    Expr infer(Expr c)
+    void splitExprs(ExprVector& BigPhi, map<Expr,ExprVector>& infMap)
     {
+      for (auto &v : invVars)
+      {
+        for(auto& c: BigPhi)
+        {
+          ExprSet tmp;
+          getConj(c, tmp);
+          for(auto& t: tmp)
+          {
+            if (contains(t, v))
+            {
+              infMap[v].push_back(t);
+            }
+          }
+        }
+      }
+    }
+
+    ExprSet infer(ExprVector& BigPhi1)
+    {
+
+      if(debug >= 3) outs() << "\n\nInfer\n=====\n";
       // Break equalities into inequalities.
       // Find weakest.
       // Check that the previous expr is an overapproximation.
       // Process them in order, run simplifyArithm on each one.
-      ExprSet disjs;
-      getDisj(c, disjs);
+      ExprSet inferredRet;
+      map<Expr, ExprVector> infMap;
+      ExprVector BigPhi;
+      Expr common; // Sometimes common will be needed. For ABC_ex01 it is not.
 
-      for(auto& d: disjs) {
-        outs() << "d: " << d << "\n";
+      removeCommonExpr(BigPhi1, BigPhi, common);
+      splitExprs(BigPhi, infMap);
+
+      for(auto ev: infMap)
+      {
+        ExprSet inferred;
+        for(int i = 0; i < ev.second.size(); i++)
+        {
+          Expr c = ev.second[i];
+          c = simplifyArithm(c);
+          c = u.removeRedundantConjuncts(c);
+          if(debug >= 4) outs() << "  c: " << c << "\n";
+          ExprVector inferSeeds;
+          if(isOpX<EQ>(c))
+          {
+            inferSeeds = {mk<GEQ>(c->left(), c->right()), 
+                          mk<LEQ>(c->left(), c->right())};
+          }
+          else
+          {
+            inferSeeds = {c};
+          }
+
+          if(i == 0)
+          {
+            inferred.insert(inferSeeds.begin(), inferSeeds.end());
+          }
+          else
+          {
+            for(auto itr = inferred.begin(); itr != inferred.end(); )
+            {
+              bool toBreak = false;
+              if(!u.implies(c, *itr) || u.implies(*itr, c))
+              {
+                itr = inferred.erase(itr);
+                toBreak = true;
+              }
+              if(toBreak) break;
+              itr++;              
+            }
+          }
+
+          if(debug >= 4)
+          {
+            outs() << "Current inferred:\n";
+            pprint(inferred, 2);
+          }
+          
+        }
+        inferredRet.insert(inferred.begin(), inferred.end());
       }
 
-      ExprSet vars;
-      filter(c, bind::IsConst(), inserter(vars, vars.begin()));
+      if(debug >= 2)
+      {
+        for (auto &i : inferredRet)
+        {
+          outs() << "\nInferred: " << i << "\n";
+        }
+        outs() << "Common: " << common << "\n";
+      }
+      if (common != mk<TRUE>(m_efac))
+        inferredRet.insert(common);
 
-      Expr res;
-      res = inferGT(c, vars);
-      res = mk<AND>(res, inferLT(c, vars));
+      // exit(0);
+      return inferredRet;
+    }
 
+    Expr branchPreCond = mk<TRUE>(m_efac);
+    // Public member functions
+    boost::tribool invFromData(Expr src, Expr dst, Expr block, 
+                               map<Expr, ExprSet>& candMap, int n) {
+      
+      if(debug >= 3) outs() << "\n\nInvFromData\n===========\n";
+      DataLearner2 dl2(ruleManager, z3, debug);
+      Expr invs = mk<TRUE>(m_efac);
+      boost::tribool res = true;
+      src = replaceAll(src, invVarsPr, invVars);
+
+      if(debug >= 5) 
+      {
+        outs() << "  src: " << src << "\n";
+        outs() << "  dst: " << dst << "\n";
+        outs() << "  block: " << block << "\n";
+        outs() << "  n: " << n << "\n";
+      }
+
+      if(debug >= 3) ruleManager.print(true);
+
+      // Replace this to reuse the SSA that is built previously.
+      res = dl2.connectPhase(src, dst, n, invDecl, block, invs, loopGuard);
+      if (res == true)
+      {
+        dl2.getDataCands(candMap[invDecl], invDecl);
+      }
+
+      filterNonGhExp(candMap[invDecl]);
+      u.removeRedundantConjuncts(dataGrds);
+      if(debug >= 3) 
+      {
+        outs() << "dataGuards: \n";
+        for (auto &d : dataGrds)
+        {
+          outs() << d << "\n";
+        }
+      }
+
+      branchPreCond = conjoin(dataGrds, m_efac);
+      branchPreCond = simplifyArithm(branchPreCond);
+      if (debug >= 3)
+      {
+        outs() << "  branchPreCond: " << branchPreCond << "\n";
+      }
+      // block = branchPreCond;
+      if (debug >= 2)
+      {
+        for (auto &e : candMap[invDecl])
+        {
+          outs() << "  invs from data: " << e << "\n";
+        }
+      }
       return res;
     }
 
@@ -231,127 +357,200 @@ namespace ufo {
       // Find weakest.
       // Check that the previous expr is an overapproximation.
       // Process them in order, run simplifyArithm on each one.
-      Expr c = disjoin(BigPhi, m_efac);
-      
-      outs() << "c: " << c << "\n";
-      
-      c = simplifyArithm(c);
-      c = infer(c);
-
-      outs() << "inferred c: " << c << "\n";
-
-      ExprSet conjs;
-      getConj(c, conjs);
-      for(auto& c: conjs) {
-        outs() << "c: " << c << "\n";
-        boost::tribool safe = checkSafety(c, preCond);
-        if(safe) outs() << "SAFE\n";
-        else outs() << "UNSAFE\n";
-        if(safe) return c;
+      if(debug >= 2) outs() << "\n\nWeaken & Split\n==============\n";
+      if(debug >= 4)
+      {
+        outs() << "  BigPhi size: " << BigPhi.size() << "\n";
+        for(auto& c: BigPhi)
+        {
+          outs() << "  From BigPhi: " << c << "\n";
+        }
       }
+      ExprSet inferred = infer(BigPhi);
+      Expr c = conjoin(inferred, m_efac);
+      // for(auto& c: inferred) {
+        if(debug >= 4) outs() << "  c: " << c << "\n";
+        boost::tribool safe = checkSafety(c, preCond);
+        if(debug >= 4) 
+        {
+          if(!safe) outs() << "\n\n********\n*UNSAFE*\n********\n\n";
+        }
+        if(safe) return c;
+      // }
       return mk<TRUE>(m_efac);
+    }
+
+    Expr abduction(Expr& phi, Expr& f, Expr& preCond, 
+                int k, vector<ExprVector>& vars, vector<int>& trace,
+                BndExpl& bnd, CHCs& rm)
+    {
+      trace.push_back(2); // Need to add the query to the trace.
+
+      if(debug >= 4) outs() << "\nAbduction\n=========\n";
+
+      ExprVector ssa;
+      bnd.getSSA(trace, ssa);
+      phi = conjoin(ssa, m_efac);
+      vars = bnd.getBindVars();
+      for (auto v = vars.begin(); v != vars.end(); )
+      {
+        if (v->size() == 0) { v = vars.erase(v); }
+        else { ++v; }
+      }
+
+      if(debug >= 3) 
+      {
+        outs() << "  k: " << k << "  vars size: " << vars[vars.size() - 1].size();
+        outs() << "  invVars.size(): " << rm.invVars[invDecl].size() << "\n\n";
+      }
+
+      Expr ff = normalize(f, ghostVars[0]);
+      if (debug >= 3)
+      {
+        outs() << "  ff: ";
+        pprint(ff, 2);
+      }
+      Expr fg = mk<EQ>(ff->right(), ghostValue);
+      if(debug >= 3) outs() << "  gh value: " << fg << "\n";
+      
+      for (int i = 1; i < k; i++)
+      {
+        fg = replaceAll(fg, vars[vars.size() - i - 1], vars[vars.size() - i]);
+      }
+      fg = replaceAll(fg, rm.invVars[invDecl], vars[vars.size() - 1]);
+      if(debug >= 5) outs() << "  gh value (vars replaced): " << fg << "\n";
+
+      phi = mk<AND>(phi, fg);
+      if(debug >= 4)
+      {
+        outs() << "  phi: ";
+        pprint(phi,2);
+      }
+
+      ff = replaceAll(ff, tr->srcVars, fc->srcVars);
+      preCond = ff;
+
+      Expr elim;
+      elim = eliminateQuantifiers(phi, vars[vars.size() - 1]);
+      for (int i = 1; i < k; i++)
+      {
+        elim = eliminateQuantifiers(elim, vars[vars.size() - i - 1]);
+      }
+
+      return elim;
+    }
+
+    Expr makePretty(Expr elim, int k, vector<ExprVector>& vars, CHCs& rm)
+    {
+      Expr e = elim;
+      for (int i = 1; i < k; i++)
+      {
+        e = replaceAll(e, vars[vars.size() - i - 1], vars[vars.size() - i]);
+      }
+
+      e = replaceAll(e, vars[0], rm.invVars[invDecl]);
+      return e;
     }
 
     Expr getPre(Expr p, Expr f, int n)
     {
       // p holds the conjunction of the negated previous preconditions.
       // f is the data invariant.
-      // Expr phi = fcBodyInvVars;
+      // n is the number of iterations.
+      // returns the precondition for the next iteration.
+
+      if(debug >= 2) outs() << "\n\nGet Pre\n=======\n";
+
       ExprSet Phi;
-      // Expr g = ;
       CHCs rm(m_efac, z3, debug);
-      rm.addRule(&fc_nogh);
-      rm.addRule(&tr_nogh);
-      rm.addRule(&qr_nogh);
+
+      vector<HornRuleExt*> rules;
+      rules.push_back(&fc_nogh);
+      rules.push_back(&tr_nogh);
+      rules.push_back(&qr_nogh);
+      prepareRuleManager(rm, rules);
+
+      for(auto& hr: rm.chcs)
+      {
+        if(hr.isFact)
+        {
+          hr.body = mk<AND>(hr.body, replaceAll(p, invVars, invVarsPr));
+          if(debug >= 4) outs() << "  hr.body: " << hr.body << "\n";
+        }
+      }
+
       BndExpl bnd(rm, (debug > 0));
       ExprVector BigPhi;
       Expr preCond;
 
       for(int k = 1; k <= n; k++) {
         vector<int> trace;
-        trace.push_back(0);
-        for (int i = 0; i < k; i++)
-        {
-          trace.push_back(1);
-        }
+        buildTrace(trace, k);
+
         Expr phi = bnd.toExpr(trace);
-        // phi = replaceAll(phi, fc->srcVars, tr->srcVars);
 
         if (!u.isSat(phi))
         {
           Expr res = mk<TRUE>(m_efac);
-          outs() << "phi UNSAT\n";
-          return res;
+          if(debug >= 4) outs() << "  phi is UNSAT\n";
+          if(BigPhi.size() < 1) return res;
         }
 
-        trace.push_back(2);
-        Expr ff = normalize(f, ghostVars[0]);
-        outs() << "ff: " << ff << "\n";
-        Expr fg = mk<EQ>(ff->right(), ghostValue);
-        outs() << "fg: " << fg << "\n";
-
-        ExprVector ssa;
-        bnd.getSSA(trace, ssa);
-        phi = conjoin(ssa, m_efac);
         vector<ExprVector> vars;
-        vars = bnd.getBindVars();
-        for (auto v = vars.begin(); v != vars.end(); )
-        {
-          if (v->size() == 0) { v = vars.erase(v); }
-          else { ++v; }
-        }
-        for(auto& v: vars) 
-        {
-          outs() << "1\n"; 
-          for (auto &vv : v)
-          {
-            outs() << vv << ", ";
-          }
-          outs() << "\n";
-        }
-        outs() << "\n\n";
-        outs() << "k: " << k << "  vars size: " << vars[vars.size() - 1].size();
-        outs() << "  invVars.size(): " << rm.invVars[invDecl].size() << "\n\n";
-        for (int i = 1; i < k; i++)
-        {
-          fg = replaceAll(fg, vars[vars.size() - i - 1], vars[vars.size() - i]);
-        }
-        fg = replaceAll(fg, rm.invVars[invDecl], vars[vars.size() - 1]);
-        outs() << "fg: " << fg << "\n";
+        Expr elim = simplifyArithm(abduction(phi, f, preCond, k, vars, trace, bnd, rm));
 
-        phi = mk<AND>(phi, fg);
-        outs() << "phi: " << phi << "\n";
-
-        // RETRY ABDUCE FROM AEVAL!!!
-        // phi = bnd.toExpr(trace);
-        ff = replaceAll(ff, tr->srcVars, fc->srcVars);
-        preCond = ff;
-
-        // Expr elim = eliminateQuantifiers(phi, vars[vars.size() - 2]);
-        Expr elim;
-        elim = eliminateQuantifiers(phi, vars[vars.size() - 1]);
-        for (int i = 1; i < k; i++)
-        {
-          elim = eliminateQuantifiers(elim, vars[vars.size() - i - 1]);
-        }
         // value of y = 1, y = 2, y = 4... make an example like this.
         // needs to handle many variables.
+
+        if (debug >= 4)
+        {
+          outs() << "  phi: ";
+          pprint(phi, 2);
+        }
+        if (debug >= 3)
+        {
+          outs() << "  Result from Abduction: ";
+          pprint(elim, 2);
+        }
+        
         if (u.implies(elim, phi))
         {
-          outs() << "ERROR with abduction\n";
-        }
-        outs() << "phi: " << phi << "\n";
-        outs() << "ELIM: " << elim << "\n";
-        // elim = replaceAll(elim, vars[vars.size() - k], vars[vars.size() - k - 1]);
-        for (int i = 1; i < k; i++)
-        {
-          elim = replaceAll(elim, vars[vars.size() - i - 1], vars[vars.size() - i]);
+          if(debug >= 4) outs() << "  ERROR with abduction\n";
+          continue;
         }
 
-        outs() << "GV: " << ghostValue << "\n";
-        elim = replaceAll(elim, vars[0], rm.invVars[invDecl]);
-        outs() << "ADDED TO BIGPHI: " << elim << "\n";
-        BigPhi.push_back(elim);
+        elim = simplifyArithm(makePretty(elim, k, vars, rm));
+
+        ExprVector prjcts, prjcts2;
+        u.flatten(elim, prjcts2, false, invVars, keepQuantifiersRepl);
+
+        for(auto& p: prjcts2)
+        {
+          prjcts.push_back(simplifyArithm(p));
+        }
+
+        for(auto p: prjcts)
+        {
+          if(debug >= 5) outs() << "  Projection: " << p << "\n";
+          if(debug >= 4) outs() << "  isSat? " << p << " && " << branchPreCond << "\n";
+          if(u.isSat(p, branchPreCond))
+          {
+            if (debug >= 3)
+            {
+              outs() << "  ADDED TO BIGPHI: " << p << "\n";
+            }
+            BigPhi.push_back(p);
+          }
+        }
+
+        if(debug >= 5) outs() << "  Ghost Value: " << ghostValue << "\n";
+        // if(debug >= 3)
+        // {
+        //   outs() << "  ADDED TO BIGPHI: "; 
+        //   pprint(elim, 2);
+
+        // } 
+        // BigPhi.push_back(elim);
       }
       // Introduce "weakenAndSplit(BigPhi)".
       Expr c = weakenAndSplit(BigPhi, preCond);
@@ -359,106 +558,197 @@ namespace ufo {
       return c;
     }
 
+    Expr constructPhi(Expr& p)
+    {
+      p = mk<TRUE>(m_efac);
+      // for (auto &b : bounds)
+      // {
+      //   Expr psi = b.first;
+      //   ExprSet tmp;
+      //   getConj(psi, tmp);
+      //   psi = mk<TRUE>(m_efac);
+      //   for(auto& t: tmp)
+      //   {
+      //     psi = mk<AND>(psi, mkNeg(t));
+      //   }
+      //   p = mk<AND>(p, psi);
+      // }
+      for (auto &b : bounds)
+      {
+        Expr psi = b.first;
+        psi = mk<AND>(p, mkNeg(psi));
+        
+        p = mk<AND>(p, psi);
+      }
+
+      Expr phi = mk<AND>(p, replaceAll(fc_nogh.body, invVarsPr, invVars), tr_nogh.body);        
+
+      return phi;
+    }
+
+    void buildTrace(vector<int>& trace, int i, bool addQuery = false)
+    {
+      trace.push_back(0); // We know we have a single loop system.
+      for (int k = 0; k < i; k++) trace.push_back(1);
+      if (addQuery) trace.push_back(2);
+
+      if(debug >= 4) 
+      {
+        outs() << "  Trace information: size: ";
+        outs() << trace.size() << "\n";
+        for (auto &t : trace)
+          outs() << t << "  ";
+        outs() << "\n";
+      }
+    }
+
     void solve()
     {
       // Implements Alg 1 and Alg 2 from the paper "Exact Loop Bound Analysis"
       
+      if(debug) outs() << "\n\nSolve\n=====\n\n";
+
       Expr prevPsi;
-      // use exprset including fc->body and tr->body and the negation of the bound guard
+      // use exprset including fc->body and tr->body 
+      // and the negation of the bound guard
       while (true)
       {
-        Expr p = mk<TRUE>(m_efac);
-        for (auto &b : bounds)
-        {
-          Expr psi = b.first;
-          p = mk<AND>(p, mkNeg(psi));
-        }
+        if(n > 100 * limit) return;
 
-        Expr phi = mk<AND>(p, fc->body, tr->body);
-        outs() << "phi: " << phi << "\n";
+        Expr p;
+        Expr phi = constructPhi(p);
+        if(debug >= 2) 
+        {
+          outs() << "  phi: ";
+          pprint(phi, 2);
+
+        }
 
         if (!u.isSat(phi))
         {
-          outs() << "phi is UNSAT\n";
+          if(debug >= 3) outs() << "  phi is UNSAT\n";
           bounds[simplifyArithm(p)] = mkMPZ(0, m_efac);
           return;
         }
-        outs() << "phi is SAT\n";
-
+        if(debug >= 4) outs() << "  phi is SAT\n";
 
         // rewrite to be more efficient.
         boost::tribool res;
         map<Expr, ExprSet> forms;
         Expr model;
-        int m = -1;
+        vector<int> m;
         for(int i = 0; i < n; i++)
         {
           vector<int> trace;
           BndExpl bnd(ruleManager, (debug > 0));
 
-          trace.push_back(0); // We know we have a single loop system.
-          for (int k = 0; k < i; k++) trace.push_back(1);
-          trace.push_back(2);
-          outs() << "Trace information: size: ";
-          outs() << trace.size() << "\n";
-          for (auto &t : trace)
-            outs() << t << "  ";
-          outs() << "\n\n";
+          buildTrace(trace, i, true);
 
           Expr ssa;
           ssa = mk<AND>(p, bnd.toExpr(trace));
-          if(debug >= 3) {
+          if(debug >= 4) {
             outs() << "SSA: ";
             pprint(ssa, 2);
           }
           if(u.isSat(ssa))
           {
-            m = i;
-            // update models to use for data learning.
-            model = u.getModel(ssa);
-            outs() << "Model: " << model << "\n";
+            m.push_back(i);
+            // update to use models for data learning.
+            model = u.getModel();
+            // if (debug >= 3) outs() << "  Model: " << model << "\n";
+            // if(i > 5) break;
           }
+          else if(debug >= 4) { outs() << "  ====  SSA is UNSAT\n"; }
         }
 
-        if(m == -1) // this is a check to see if we have a nonterminating case.
+        if(m.empty()) // this is a check to see if we have a nonterminating case.
         {
           ExprSet f;
-          f.insert(mkMPZ(-1, m_efac));
+          f.insert(mk<EQ>(ghostVars[0], mkMPZ(-1, m_efac)));
           forms[invDecl] = f;
         }
         else
         {
           // get forms from data.
-          // Make parametric so that different algorithms can be called.
-          res = invFromData(fc->body, qr->body, p, forms, m);
+          // TODO: Make parametric so that different algorithms can be called.
+          res = invFromData(fc->body, qr->body, mk<AND>(p, mkNeg(branchPreCond)), forms, m.back());
         }
 
-        ExprSet invs;
-        Expr psi;
-
-        for (auto &f : forms[invDecl])
+        if(res == true)
         {
-          psi = getPre(p, f, n);
-          psi = simplifyArithm(psi);
-          outs() << "psi: " << psi << "\n";
-          if(psi != mk<TRUE>(m_efac))
+          ExprSet invs;
+          Expr psi;
+
+          ExprVector formsVec;
+          for(auto& s: forms[invDecl])
           {
-            bounds[psi] = normalize(f, ghostVars[0]);
+            formsVec.push_back(s);
           }
+
+          sortBounds(formsVec);
+
+          if(debug >= 3)
+          {
+            outs() << "  ==> Sorted invs from data:\n";
+            pprint(formsVec, 4);
+          }
+
+          for (auto &f : formsVec)
+          {
+            if(debug >= 3) outs() << "f: " << f << "\n";
+            bool toContinue = false;
+            for(auto& b: bounds)
+            {
+              if(b.second == f)
+              {
+                if(debug >= 4) outs() << "  Bound already found\n";
+                toContinue = true;
+              }
+            }
+            if(toContinue) continue;
+
+            psi = getPre(p, f, m.back());
+            psi = simplifyArithm(psi);
+            if(psi != mk<TRUE>(m_efac))
+            {
+              if(debug >= 2) {
+                outs() << "\n---->  Adding bound:\n";
+                pprint(psi);
+                outs() << " => ";
+                outs() << normalize(f, ghostVars[0]) << " 😎\n\n";
+              }
+              bounds[psi] = normalize(f, ghostVars[0]);
+              break;
+            }
+          }
+        }
+        else
+        {
+          n++;
+          if(debug >= 2) outs() << "  UNKNOWN\n";
+          if(debug >= 3) outs() << "  n: " << n << "\n";
         }
       }
     }
 
     void printResults()
     {
-      outs() << "Success! Found bounds:\n";
+      if(!bounds.empty()) outs() << "\nSuccess! Found bounds:\n";
       int i = 0;
       for (auto &b : bounds)
       {
-        if(i < bounds.size() - 1)
-          outs() << "  ite " << b.first << ", " << b.second;
+        if(!u.isSat(mkNeg(b.first), replaceAll(fc_nogh.body, invVarsPr, invVars)))
+        {
+          outs() << b.second << "\n";
+          return;
+        }
         else
-          outs() << ", " << b.second << "\n";
+        {
+          if(i < bounds.size() - 1)
+            outs() << "  ite " << b.first << ", " << b.second;
+          else
+            outs() << ", " << b.second << "\n";
+        }
         i++;
       }
     }
@@ -479,6 +769,7 @@ namespace ufo {
     BoundSolverV2 bs(ruleManager, inv, dg, data2, doPhases, limit, debug);
     bs.removeQuery();
     bs.setUpQueryAndSpec(mk<TRUE>(m_efac), mk<TRUE>(m_efac));
+    bs.collectPhaseGuards();
 
     bs.solve();
     // Print the results.

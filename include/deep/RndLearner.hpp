@@ -412,7 +412,7 @@ namespace ufo
       assert(decls.size() == invNumber);
       assert(sfs.size() == invNumber);
       assert(curCandidates.size() == invNumber);
-      outs() << "invDecl: " << invDecl << "\n";
+      // outs() << "invDecl: " << invDecl << "\n";
       decls.push_back(invDecl);
       invarVars.push_back(map<int, Expr>());
       invarVarsShort.push_back(ExprVector());
@@ -426,16 +426,16 @@ namespace ufo
       for (int i = 0; i < ruleManager.invVars[invDecl].size(); i++)
       {
         Expr var = ruleManager.invVars[invDecl][i];
-        outs() << "VAR: " << var << "\n";
+        // outs() << "VAR: " << var << "\n";
         if (sf.addVar(var))
         {
-          outs() << "ADDED VAR: " << var << "\n";
+          // outs() << "ADDED VAR: " << var << "\n";
           invarVars[invNumber][i] = var;
           invarVarsShort[invNumber].push_back(var);
         }
       }
 
-      outs() << "invarVarsShort[" << invNumber << "]: " << invarVarsShort[invNumber].size() << "\n";
+      // outs() << "invarVarsShort[" << invNumber << "]: " << invarVarsShort[invNumber].size() << "\n";
 
       arrCands.push_back(ExprSet());
       arrAccessVars.push_back(ExprVector());
@@ -517,8 +517,8 @@ namespace ufo
 
     void prepareSeeds (Expr invRel, ExprSet& cands)
     {
-      outs() << "invRel: " << invRel << "\n";
-      for(auto d: decls) outs() << "decls: " << *d << "\n";
+      // outs() << "invRel: " << invRel << "\n";
+      // for(auto d: decls) outs() << "decls: " << *d << "\n";
       int invNum = getVarIndex(invRel, decls);
       if (invNum < 0)
       {

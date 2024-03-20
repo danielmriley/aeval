@@ -114,10 +114,8 @@ namespace ufo
 
     Expr compactPrefix (Expr rel, int num, int unr = 0)
     {
-      outs() << "Prefs size: " << ruleManager.prefixes[rel].size() << "\n";
       vector<int> pr = ruleManager.prefixes[rel][num];
       if (pr.size() == 0) return mk<TRUE>(m_efac);
-      outs() << "HERE2\n";
 
       for (int j = pr.size() - 1; j >= 0; j--)
       {
@@ -125,7 +123,6 @@ namespace ufo
         for (int i = 0; i < unr; i++)
           pr.insert(pr.begin() + j, tmp.begin(), tmp.end());
       }
-      outs() << "AFTER LOOP\n";
       pr.push_back(ruleManager.cycles[rel][num][0]);   // we are interested in prefixes, s.t.
                                                   // the cycle is reachable
       ExprVector ssa;
@@ -716,10 +713,10 @@ namespace ufo
           ssa.push_back(src);
           getSSA(trace, ssa);
           ssa.push_back(replaceAll(dst, srcVars, bindVars[bindVars.size() - 1]));
-          // if(debug) {
-          //   outs() << "SSA BND: ";
-          //   pprint(ssa,2);
-          // } 
+          if(debug) {
+            outs() << "SSA BND: ";
+            pprint(ssa,2);
+          } 
 
           int traceSz = trace.size();
           // compute vars for opt constraint

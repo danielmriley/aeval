@@ -16,6 +16,3 @@
   )
 )
 
-(rule (=> (and (inv x) (not (> x 0)) ) fail))
-
-(query fail :print-certificate true)

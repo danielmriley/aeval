@@ -392,7 +392,6 @@ namespace ufo
     bool checkCand(int invNum, bool propa = true)
     {
       Expr rel = decls[invNum];
-      outs() << "rel from check cand: " << rel << "\n";
       if (!checkInit(rel)) return false;
       if (!checkInductiveness(rel)) return false;
 
@@ -580,29 +579,21 @@ namespace ufo
     {
       for (auto & dcl: ruleManager.wtoDecls)
       {
-        outs() << "dcl: " << *dcl << "\n";
         int invNum = getVarIndex(dcl, decls);
-        outs() << "MAKING SF\n";
         SamplFactory& sf = sfs[invNum].back();
-        outs() << "Made SF\n";
-        outs() << "sf.learnedExprs.size() = " << sf.learnedExprs.size() << "\n";
         for (auto & l : sf.learnedExprs)
         {
-          outs() << "LEARNED EXPR: " << l << std::endl;
           if (containsOp<ARRAY_TY>(l) || findNonlin(l) || containsOp<BOOL_TY>(l))
             continue;
           Expr learnedCand = normalizeDisj(l, invarVarsShort[invNum]);
           Sampl& s = sf.exprToSampl(learnedCand);
           sf.assignPrioritiesForLearned();
         }
-        outs() << "AFTER LOOP\n";
         for (auto & failedCand : tmpFailed[invNum])
         {
-          outs() << "FAILED CANDS\n";
           Sampl& s = sf.exprToSampl(failedCand);
           sf.assignPrioritiesForFailed();
         }
-        outs() << "AFTER SECOND LOOP\n";
       }
     }
 
@@ -645,8 +636,11 @@ namespace ufo
           generalizeArrInvars(invNum, sf);
           if (checkAllLemmas())
           {
-            outs () << "Success after " << (i+1) << " iterations\n";
-            printSolution();
+            if(printLog)
+            {
+              outs () << "Success after " << (i+1) << " iterations\n";
+              printSolution();
+            }
             return true;
           }
         }
@@ -1145,8 +1139,11 @@ namespace ufo
         assignPrioritiesForLearned();
         if (checkAllLemmas())
         {
-          outs () << "Success after bootstrapping\n";
-          printSolution();
+          if (printLog)
+          {
+            outs() << "Success after bootstrapping\n";
+            printSolution();
+          }
           return true;
         }
       }
@@ -1182,8 +1179,11 @@ namespace ufo
               generalizeArrInvars(invNum, sf);
               if (checkAllLemmas())
               {
-                outs () << "Success after bootstrapping\n";
-                printSolution();
+                if(printLog) 
+                {
+                  outs () << "Success after bootstrapping\n";
+                  printSolution();
+                }
                 return true;
               }
             }
@@ -1223,8 +1223,11 @@ namespace ufo
           assignPrioritiesForLearned();
           if (checkAllLemmas())
           {
-            outs () << "Success after bootstrapping\n";
-            printSolution();
+            if (printLog)
+            {
+              outs() << "Success after bootstrapping\n";
+              printSolution();
+            }
             return true;
           }
         }

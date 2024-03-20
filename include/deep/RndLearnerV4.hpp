@@ -565,6 +565,14 @@ namespace ufo
           for (auto & b : a.second)
             outs () << "  Deferred cand for " << a.first << ": " << b << "\n";
 
+      if (printLog >= 4)
+        for(auto& a: sfs)
+          for(auto& b: a)
+          {
+            Expr lemmas = b.getAllLemmas();
+            outs() << "Learned lemmas: " << lemmas << "\n";
+          }  
+
       map<int, int> defSz;
       for (auto & a : deferredCandidates) defSz[a.first] = a.second.size();
       ExprSet cands;
@@ -619,10 +627,14 @@ namespace ufo
           generalizeArrInvars(invNum, sf);
           if (checkAllLemmas())
           {
-            outs () << "Success after " << (i+1) << " iterations "
-                    << (rndStarted ? "(+ rnd)" :
-                       (i > defSz[invNum]) ? "(+ rec)" : "" ) << "\n";
-            printSolution();
+            if(printLog)
+            {
+              outs () << "Success after " << (i+1) << " iterations "
+                      << (rndStarted ? "(+ rnd)" :
+                        (i > defSz[invNum]) ? "(+ rec)" : "" ) << "\n";
+              printSolution();
+            }
+            
             return true;
           }
         }

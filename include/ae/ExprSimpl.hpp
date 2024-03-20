@@ -948,10 +948,56 @@ namespace ufo
     return c;
   }
 
+  // TODO: Handle multiplication and division.
+  // TODO: Try to figure out why it fails with the outer loop enabled.
+  inline static void mergeITEs(ExprVector& plsOps)
+  {
+    ExprVector newOps;
+    // while(true)
+    // {
+    //   bool merger = false;
+      for (auto it = plsOps.begin(); it != plsOps.end(); )
+      {
+        if (isOpX<ITE>(*it))
+        {
+          Expr cond = (*it)->left();
+          Expr then = (*it)->right();
+          Expr els = (*it)->last();
+          it = plsOps.erase(it);
+          for (auto jt = it; jt != plsOps.end(); )
+          {
+            if (isOpX<ITE>(*jt))
+            {
+              if ((*jt)->left() == cond)
+              {
+                // merger = true;
+                then = mk<PLUS>(then, (*jt)->right());
+                els = mk<PLUS>(els, (*jt)->last());
+                jt = plsOps.erase(jt);
+              }
+              else ++jt;
+            }
+            else ++jt;
+          }
+          newOps.push_back(mk<ITE>(cond, then, els));
+        }
+        else
+        {
+          newOps.push_back(*it);
+          ++it;
+        }
+      }
+      plsOps = newOps;
+    //   if(!merger) break;
+    // }
+  }
+
   inline static Expr simplifyPlus (Expr exp)
   {
     ExprVector plsOps;
     getAddTerm (exp, plsOps);
+    // TODO: Merge common ITE.
+    mergeITEs(plsOps);
     cpp_int c = separateConst(plsOps);
     std::sort(plsOps.begin(), plsOps.end(), [](Expr& x, Expr& y) {return x < y;});
     // GF: to write some kind of a fold-operator that counts the numbers of occurences
@@ -1039,6 +1085,7 @@ namespace ufo
     Expr b1;
     Expr b2;
     bool added = false;
+    if(exp->right() == exp->last()) return exp->right();
     if (isNumeric(exp->right()))
     {
       getAddTerm(exp->right(), plusOpsLeft);

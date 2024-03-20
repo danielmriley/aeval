@@ -2,6 +2,8 @@
 (declare-var x Int)
 (declare-var x1 Int)
 
+(declare-rel fail ())
+
 (rule (=> (= x 0) (inv x)))
 
 (rule (=>
