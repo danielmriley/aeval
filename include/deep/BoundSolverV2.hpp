@@ -225,6 +225,7 @@ namespace ufo {
       for(auto& c: BigPhi)
       {
         c = normalize(c);
+        if(debug >= 4) outs() << "  c: " << c << "\n";
       }
 
       DataLearner2 dl2(ruleManager, z3, debug);

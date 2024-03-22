@@ -187,7 +187,7 @@ namespace ufo
           vector<double> row;
           for(int j = 0; j < conjs.size(); j++)
           {
-            if(conjs[j]->left() == vars[j])
+            if(contains(conjs[j]->left(), vars[j]))
             {
               row.push_back(lexical_cast<double>(conjs[j]->right()));
             }
