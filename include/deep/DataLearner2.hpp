@@ -25,7 +25,37 @@ namespace ufo
 
     void createCandsFromData(Expr srcRel)
     {
+      if(debug > 0) outs() << "Creating candidates from data for " << *srcRel << "\n";
+
       dc.clear();
+      if (models[srcRel].size() < 2)
+      {
+        vector<double> e1 = *models[srcRel].rbegin();
+        for(int i = 0; i < e1.size(); i++)
+        {
+          // Expr e = mk<EQ>(invVars[srcRel][i], mkMPZ(cpp_int(e1[i]), m_efac));
+          // dc[srcRel].insert(e);
+          // if(debug > 0) outs() << "  CONNECT: " << *e << "\n";
+          ExprSet ev;
+          for(int j = 0; j < e1.size(); j++)
+          {
+            if(i == j) continue;
+            Expr r = mk<MINUS>(invVars[srcRel][i], invVars[srcRel][j]);
+            Expr l = mk<MINUS>(mkMPZ(cpp_int(e1[i]), m_efac), mkMPZ(cpp_int(e1[j]), m_efac));
+            l = mk<EQ>(l, r);
+            l = simplifyArithm(l);
+            l = normalize(l);
+            if(l == mk<TRUE>(m_efac)) continue;
+            ev.insert(l);
+            if(debug >= 4) outs() << "  CONNECT: " << l << "\n";
+          }
+          for(auto it = ev.begin(); it != ev.end(); it++)
+          {
+            dc[srcRel].insert(*it);
+          }
+        }
+        return;
+      }
       auto ritr = models[srcRel].rbegin();
       vector<double> e1 = *ritr;
       ritr++;
@@ -33,6 +63,7 @@ namespace ufo
       ExprVector ev;
 
       int n = invVars[srcRel].size();
+      if(debug > 3) outs() << "n: " << n << "\n";
       // make Exprs.
       /*
       for (int i = 0; i < n-1; i++) {
@@ -136,6 +167,86 @@ namespace ufo
         }
         return res;
       }
+
+      void makeModel(Expr srcRel, ExprVector& forms)
+      {
+        ExprVector vars;
+        filter(forms.front(), IsConst(), inserter(vars, vars.begin()));
+        invVars[srcRel] = vars;
+        // Expects normalized exprs.
+        ExprVector conjs;
+        for(auto it = forms.begin(); it != forms.end(); it++)
+        {
+          conjs.clear();
+          getConj(*it, conjs);
+          if(conjs.size() != 2) 
+          {
+            if(debug > 0) outs() << "Cannot process at this time: " << *it << "\n";
+            return;
+          }
+          vector<double> row;
+          for(int j = 0; j < conjs.size(); j++)
+          {
+            if(conjs[j]->left() == vars[j])
+            {
+              row.push_back(lexical_cast<double>(conjs[j]->right()));
+            }
+            else 
+            {
+              outs() << "ERROR\n";
+              return;
+            }
+          }
+          models[srcRel].push_back(row);
+        }
+
+        if(debug > 4) printModel(srcRel);
+
+        createCandsFromData(srcRel);
+
+        ExprSet alts;
+        for(auto it: dc[srcRel])
+        {
+          Expr fla = conjs[0];
+          Expr e;
+          if (it->right() == mkMPZ(1, m_efac) && isOpX<GT>(fla))
+          {
+            e = mk<GEQ>(mkMPZ(0, m_efac), it->left());
+            alts.insert(normalize(e, vars[0]));
+          }
+          else if (it->right() == mkMPZ(1, m_efac) && isOpX<LT>(fla))
+          {
+            e = mk<LEQ>(mkMPZ(0, m_efac), it->left());
+            alts.insert(normalize(e, vars[0]));
+          }
+          else
+          {
+            alts.insert(reBuildCmp(fla, it->left(), it->right()));
+          }
+        }
+        dc[srcRel] = alts;
+
+        for (auto &it : dc[srcRel])
+        {
+          if (debug > 0)
+            outs() << "Data candidate: " << normalize(it, vars[0]) << "\n";
+        }
+      }
+
+      void printModel(Expr rel)
+      {
+        outs() << "Model for " << *rel << ":\n";
+        for(auto it = models[rel].begin(); it != models[rel].end(); it++)
+        {
+          for(auto jt = it->begin(); jt != it->end(); jt++)
+          {
+            outs() << *jt << " ";
+          }
+          outs() << "\n";
+        }
+      } 
+
+      void addModel(Expr rel, vector< vector< double> > model) { models[rel] = model; }
 
       void getDataCands(ExprSet& cands, Expr rel) { cands = dc[rel]; }
   };

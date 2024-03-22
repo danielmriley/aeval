@@ -113,7 +113,6 @@ namespace ufo
 
     Expr renameCand(Expr newCand, ExprVector& varsRenameFrom, int invNum)
     {
-      outs() << "varsRenameFrom.size(): " << varsRenameFrom.size() << " : invarVarsShort[" << invNum << "].size(): " << invarVarsShort[invNum].size() << "\n";
       newCand = replaceAll(newCand, varsRenameFrom, invarVarsShort[invNum]);
       return newCand;
     }
@@ -190,10 +189,8 @@ namespace ufo
     {
       if (!containsOp<FORALL>(candToProp) && !u.isSat(candToProp, constraint))
         return false; // sometimes, maybe we should return true.
-      outs() << "rel: " << rel << " : relFrom: " << relFrom << "\n";
       int invNum = getVarIndex(rel, decls);
       int invNumFrom = getVarIndex(relFrom, decls);
-      outs() << "invNum: " << invNum << " : invNumFrom: " << invNumFrom << "\n";
 
       if (containsOp<FORALL>(candToProp))
       {
@@ -353,7 +350,6 @@ namespace ufo
     {
       propped.clear();
       checked.clear();
-      outs() << "rel from propagate: " << rel << "\n";
       return propagateRec(rel, cand, seed);
     }
 

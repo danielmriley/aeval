@@ -645,6 +645,7 @@ namespace ufo
     {
       assert (gh_cond != NULL);
 
+      gh_cond = simplifyArithm(gh_cond);
       // helper var
       string str = to_string(numeric_limits<double>::max());
       str = str.substr(0, str.find('.'));
@@ -711,6 +712,7 @@ namespace ufo
 
           ExprVector ssa;
           ssa.push_back(src);
+          ssa.push_back(gh_cond);
           getSSA(trace, ssa);
           ssa.push_back(replaceAll(dst, srcVars, bindVars[bindVars.size() - 1]));
           if(debug) {

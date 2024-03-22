@@ -3696,7 +3696,12 @@ namespace ufo
             ++it;
           }
         }
-        if (coef != 0) newlhs.insert(mk<MULT>(mkMPZ(coef, fla->getFactory()), v));
+        if (coef != 0)
+        {
+          // if(coef == 1) newlhs.insert(v);
+          // else 
+            newlhs.insert(mk<MULT>(mkMPZ(coef, fla->getFactory()), v));
+        } 
       }
 
       bool success = true;

@@ -80,7 +80,7 @@ namespace ufo {
       fcWithPrecond->isFact = true;
       fcWithPrecond->srcRelation = mk<TRUE>(m_efac);
       Expr fcPreCond = replaceAll(elim, tr->srcVars, fc->srcVars);
-      fcWithPrecond->body = replaceAll(mk<AND>(fcPreCond, preCond), fcWithPrecond->srcVars, tr->dstVars);
+      fcWithPrecond->body = replaceAll(mk<AND>(fcPreCond, normalize(preCond)), fcWithPrecond->srcVars, tr->dstVars);
       fcWithPrecond->srcVars.clear();
 
       ExprVector qrBody;
@@ -106,10 +106,15 @@ namespace ufo {
     {
 
       if(debug >= 2) outs() << "\n\nCheck Safety\n============\n";
+      if(debug >= 4)
+      {
+        outs() << "  elim: " << elim << "\n";
+        outs() << "  preCond: " << preCond << "\n";
+      }
       // add precondition to be checked to the ruleManager.
       CHCs rm(m_efac, z3, debug);
 
-      prepareRulesWithPrecond(elim, mk<AND>(preCond, replaceAll(branchPreCond, invVars, invVarsPr)), rm);
+      prepareRulesWithPrecond(elim, preCond, rm);
 
       BndExpl bnd(rm, to, debug);
       RndLearnerV4 ds(m_efac, z3, rm, to, freqs, aggp, mut, dat,
@@ -117,7 +122,6 @@ namespace ufo {
                       dFwd, dRec, dGenerous, (debug >= 6 ? 2 : 0));
 
       map<Expr, ExprSet> cands;
-      if(debug>= 4) rm.print(true);
       for (auto &cyc : rm.cycles)
       {
         Expr rel = cyc.first;
@@ -215,9 +219,27 @@ namespace ufo {
       }
     }
 
-    ExprSet infer(ExprVector& BigPhi1)
+    ExprSet inferWithData(ExprVector& BigPhi)
     {
+      if(debug >= 3) outs() << "\n\nInfer With Data\n==============\n";
+      for(auto& c: BigPhi)
+      {
+        c = normalize(c);
+      }
 
+      DataLearner2 dl2(ruleManager, z3, debug);
+
+      dl2.makeModel(invDecl, BigPhi);
+      ExprSet cands;
+      dl2.getDataCands(cands, invDecl);
+
+      return cands;
+    }
+
+    ExprSet infer(ExprVector &BigPhi1)
+    {
+      // for >3 vars then do case analysis.
+      // 
       if(debug >= 3) outs() << "\n\nInfer\n=====\n";
       // Break equalities into inequalities.
       // Find weakest.
@@ -227,8 +249,12 @@ namespace ufo {
       map<Expr, ExprVector> infMap;
       ExprVector BigPhi;
       Expr common; // Sometimes common will be needed. For ABC_ex01 it is not.
-
+      if(BigPhi1.empty()) return inferredRet;
       removeCommonExpr(BigPhi1, BigPhi, common);
+      // Here perform data learning on BigPhi.
+      ExprSet inferredFromData;
+      inferredFromData = inferWithData(BigPhi); // infer2
+
       splitExprs(BigPhi, infMap);
 
       for(auto ev: infMap)
@@ -291,7 +317,8 @@ namespace ufo {
       if (common != mk<TRUE>(m_efac))
         inferredRet.insert(common);
 
-      // exit(0);
+      // inferredRet.insert(conjoin(dataGrds, m_efac));
+      inferredRet.insert(inferredFromData.begin(), inferredFromData.end());
       return inferredRet;
     }
 
@@ -306,7 +333,11 @@ namespace ufo {
       boost::tribool res = true;
       src = replaceAll(src, invVarsPr, invVars);
 
-      if(debug >= 5) 
+      src = simplifyArithm(src);
+      dst = simplifyArithm(dst);
+      block = simplifyArithm(block);
+
+      if(debug >= 4) 
       {
         outs() << "  src: " << src << "\n";
         outs() << "  dst: " << dst << "\n";
@@ -322,7 +353,7 @@ namespace ufo {
       {
         dl2.getDataCands(candMap[invDecl], invDecl);
       }
-
+      dataGrds.clear();
       filterNonGhExp(candMap[invDecl]);
       u.removeRedundantConjuncts(dataGrds);
       if(debug >= 3) 
@@ -671,7 +702,7 @@ namespace ufo {
         {
           // get forms from data.
           // TODO: Make parametric so that different algorithms can be called.
-          res = invFromData(fc->body, qr->body, mk<AND>(p, mkNeg(branchPreCond)), forms, m.back());
+          res = invFromData(fc->body, qr->body, p, forms, m.back());
         }
 
         if(res == true)
