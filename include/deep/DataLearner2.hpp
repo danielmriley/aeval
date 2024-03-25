@@ -171,12 +171,13 @@ namespace ufo
       void makeModel(Expr srcRel, ExprVector& forms)
       {
         ExprVector vars;
-        filter(forms.front(), IsConst(), inserter(vars, vars.begin()));
+        filter(forms[0], IsConst(), inserter(vars, vars.begin()));
         invVars[srcRel] = vars;
         // Expects normalized exprs.
         ExprVector conjs;
         for(auto it = forms.begin(); it != forms.end(); it++)
         {
+          if(debug > 0) outs() << "Processing: " << *it << "\n";
           conjs.clear();
           getConj(*it, conjs);
           if(conjs.size() != 2) 
@@ -184,9 +185,11 @@ namespace ufo
             if(debug > 0) outs() << "Cannot process at this time: " << *it << "\n";
             return;
           }
+
           vector<double> row;
           for(int j = 0; j < conjs.size(); j++)
           {
+            if(debug > 0) outs() << "Contains: " << *conjs[j] << " : " << vars[j] << "\n";
             if(contains(conjs[j]->left(), vars[j]))
             {
               row.push_back(lexical_cast<double>(conjs[j]->right()));
@@ -205,6 +208,7 @@ namespace ufo
         createCandsFromData(srcRel);
 
         ExprSet alts;
+        // reqrite this..
         for(auto it: dc[srcRel])
         {
           Expr fla = conjs[0];

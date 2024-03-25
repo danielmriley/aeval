@@ -3612,7 +3612,7 @@ namespace ufo
     }
   }
 
-  inline static Expr normalizeAtom(Expr fla, ExprVector& intVars)
+  inline static Expr normalizeAtom(Expr fla, ExprVector& intVars, bool keepSimple = false)
   {
     if (isOp<ComparissonOp>(fla) && isNumeric(fla->left()))
     {
@@ -3698,8 +3698,8 @@ namespace ufo
         }
         if (coef != 0)
         {
-          // if(coef == 1) newlhs.insert(v);
-          // else 
+          if(keepSimple && coef == 1) newlhs.insert(v);
+          else 
             newlhs.insert(mk<MULT>(mkMPZ(coef, fla->getFactory()), v));
         } 
       }
@@ -3902,7 +3902,7 @@ namespace ufo
     return normalizeAtom(fla, vars, lhsVar);
   }
 
-  inline static Expr normalize(Expr fla)
+  inline static Expr normalize(Expr fla, bool keepSimple = false)
   {
     ExprVector vars;
     filter (fla, IsConst (), inserter(vars, vars.begin()));
@@ -3910,13 +3910,13 @@ namespace ufo
     {
       ExprSet args;
       for (int i = 0; i < fla->arity(); i++){
-        args.insert(normalizeAtom(fla->arg(i), vars));
+        args.insert(normalizeAtom(fla->arg(i), vars, keepSimple));
       }
 
       return simplifyBool(isOpX<AND>(fla) ? conjoin (args, fla->getFactory()) :
         disjoin (args, fla->getFactory()));
     }
-    return normalizeAtom(fla, vars);
+    return normalizeAtom(fla, vars, keepSimple);
   }
 
   inline static bool getLinCombCoefs(Expr ex, set<cpp_int>& intCoefs)

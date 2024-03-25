@@ -194,7 +194,7 @@ namespace ufo {
       for (auto a : dsjs)
       {
         minusSets(a, comm);
-        toDisj.push_back(conjoin(a, m_efac));
+        toDisj.push_back(normalize(conjoin(a, m_efac)));
       }
       
       cm = conjoin(comm, m_efac);
@@ -219,20 +219,98 @@ namespace ufo {
       }
     }
 
-    ExprSet inferWithData(ExprVector& BigPhi)
+    void filterBigPhi(ExprVector& BigPhi)
+    {
+      ExprVector temp;
+      for (auto &c : BigPhi)
+      {
+        c = normalize(c, true);
+        if (debug >= 4)
+          outs() << "  c: " << c << "\n";
+        ExprSet conjs;
+        getConj(c, conjs);
+        ExprVector vars;
+        Expr toChange;
+        Expr conj;
+        for (auto &t : conjs)
+        {
+          if (debug >= 4) {
+            outs() << "    t: " << t << "\n";
+            outs() << "    arity: " << t->left()->arity() << "\n";
+          }
+          if (t->left()->arity() == 1)
+          {
+            outs() << "arity 1\n";
+            toChange = t->right();
+            conj = t;
+            if (debug >= 4)
+            {
+              outs() << "    toChange: " << toChange << "\n";
+              outs() << "    conj: " << conj << "\n";
+            }
+            filter(t, IsConst(), inserter(vars, vars.begin()));
+          }
+        }
+        for (auto &t : conjs)
+        {
+          if (!vars.empty() && t->left()->arity() > 1 && contains(t, vars[0]))
+          {
+            if (debug >= 4)
+              outs() << "    t2: " << t << "\n";
+            ExprSet tmp;
+            getConj(t, tmp);
+            for (auto &tt : tmp)
+            {
+              if (contains(tt, vars[0]))
+              {
+                outs() << "    var: " << vars[0] << "\n";
+                Expr ttt = tt;
+                ttt = simplifyArithm(replaceAll(ttt, vars[0], toChange));
+                ttt = ineqReverter(ttt);
+                if (debug >= 4)
+                  outs() << "      ttt: " << ttt << "\n";
+                temp.push_back(normalize(mk<AND>(ttt, conj)));
+              }
+            }
+          }
+        }
+      }
+      BigPhi = temp;
+    }
+
+    ExprSet inferWithData(ExprVector BigPhi)
     {
       if(debug >= 3) outs() << "\n\nInfer With Data\n==============\n";
-      for(auto& c: BigPhi)
+      // filterBigPhi(BigPhi);
+      if (debug >= 4)
       {
-        c = normalize(c);
-        if(debug >= 4) outs() << "  c: " << c << "\n";
+        outs() << "  BigPhi size: " << BigPhi.size() << "\n";
+        for (auto &c : BigPhi)
+        {
+          outs() << "  From BigPhi: " << c << "\n";
+        }
       }
-
       DataLearner2 dl2(ruleManager, z3, debug);
 
       dl2.makeModel(invDecl, BigPhi);
+      if(debug >= 3) dl2.printModel(invDecl);
       ExprSet cands;
       dl2.getDataCands(cands, invDecl);
+
+      for (auto c = cands.begin(); c != cands.end();)
+      {
+        if (debug >= 4)
+          outs() << "  cands: " << *c << "\n";
+        if (!u.isSat(*c, tr->body))
+        {
+          outs() << "  Removed: " << *c << "\n";
+          c = cands.erase(c);
+        }
+        else
+        {
+          ++c;
+        }
+      }
 
       return cands;
     }
@@ -249,12 +327,31 @@ namespace ufo {
       ExprSet inferredRet;
       map<Expr, ExprVector> infMap;
       ExprVector BigPhi;
+
       Expr common; // Sometimes common will be needed. For ABC_ex01 it is not.
       if(BigPhi1.empty()) return inferredRet;
       removeCommonExpr(BigPhi1, BigPhi, common);
+
       // Here perform data learning on BigPhi.
       ExprSet inferredFromData;
       inferredFromData = inferWithData(BigPhi); // infer2
+      
+      // filter BigPhi with what's been learned from data.
+      ExprVector smallphi = BigPhi;
+      Expr fromData = conjoin(inferredFromData, m_efac);
+      for(auto it = smallphi.begin(); it != smallphi.end(); )
+      {
+        if(!u.isSat(*it, fromData))
+        {
+          it = smallphi.erase(it);
+        }
+        else
+        {
+          ++it;
+        }
+      }
+
+      BigPhi = smallphi;
 
       splitExprs(BigPhi, infMap);
 
@@ -399,8 +496,10 @@ namespace ufo {
         }
       }
       ExprSet inferred = infer(BigPhi);
-      Expr c = conjoin(inferred, m_efac);
-      // for(auto& c: inferred) {
+      // Expr c = conjoin(inferred, m_efac);
+      Expr c = mk<TRUE>(m_efac);
+      for(auto& i: inferred) {
+        c = mk<AND>(c, i);
         if(debug >= 4) outs() << "  c: " << c << "\n";
         boost::tribool safe = checkSafety(c, preCond);
         if(debug >= 4) 
@@ -408,7 +507,7 @@ namespace ufo {
           if(!safe) outs() << "\n\n********\n*UNSAFE*\n********\n\n";
         }
         if(safe) return c;
-      // }
+      }
       return mk<TRUE>(m_efac);
     }
 
@@ -564,15 +663,15 @@ namespace ufo {
         for(auto p: prjcts)
         {
           if(debug >= 5) outs() << "  Projection: " << p << "\n";
-          if(debug >= 4) outs() << "  isSat? " << p << " && " << branchPreCond << "\n";
-          if(u.isSat(p, branchPreCond))
-          {
+          // if(debug >= 4) outs() << "  isSat? " << p << " && " << branchPreCond << "\n";
+          // if(u.isSat(p, branchPreCond))
+          // {
             if (debug >= 3)
             {
               outs() << "  ADDED TO BIGPHI: " << p << "\n";
             }
             BigPhi.push_back(p);
-          }
+          // }
         }
 
         if(debug >= 5) outs() << "  Ghost Value: " << ghostValue << "\n";
