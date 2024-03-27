@@ -140,6 +140,89 @@ namespace ufo
 
     }
 
+    void linCombIneq(Expr srcRel, ExprVector &forms)
+    {
+      if(debug >= 5) outs() << "Processing linear combination of inequalities\n";
+      ExprSet res;
+      for(auto& f: forms) 
+      {
+        Expr const1;
+        ExprVector conjs;
+        getConj(f, conjs);
+        Expr eq = mk<TRUE>(m_efac);
+        Expr inEq = mk<TRUE>(m_efac);
+        for(auto& c: conjs)
+        {
+          // get the value of the constant.
+          if(debug >= 5) outs() << "Processing inEq/Eq: " << *c << "\n";
+          if(isOpX<EQ>(c))
+          {
+            if(eq != mk<TRUE>(m_efac)) inEq = c;
+            else eq = c;
+          }
+          else if(!isOpX<NEQ>(c)) // Not handling NEQs for now.
+          {
+            if(inEq != mk<TRUE>(m_efac)) eq = c;
+            else inEq = c;
+          }
+        }
+        if(debug >= 5)
+        {
+          outs() << "eq: " << *eq << "\n";
+          outs() << "inEq: " << *inEq << "\n";
+        }
+        double eqConst = lexical_cast<double>(eq->right());
+        double inEqConst = lexical_cast<double>(inEq->right());
+
+        if ((isOpX<GEQ>(inEq) || isOpX<GT>(inEq)) && inEqConst > eqConst)
+        {
+          Expr e = mk<GT>(inEq->left(), eq->left());
+          res.insert(normalize(e));
+        }
+        else if ((isOpX<LEQ>(inEq) || isOpX<LT>(inEq)) && inEqConst < eqConst)
+        {
+          Expr e = mk<LT>(inEq->left(), eq->left());
+          res.insert(normalize(e));
+        }
+        else if ((isOpX<GEQ>(inEq) || isOpX<GT>(inEq)) && inEqConst < eqConst)
+        {
+          Expr e = mk<GEQ>(inEq->left(), eq->left());
+          res.insert(normalize(e));
+        }
+        else if ((isOpX<LEQ>(inEq) || isOpX<LT>(inEq)) && inEqConst > eqConst)
+        {
+          Expr e = mk<LEQ>(inEq->left(), eq->left());
+          res.insert(normalize(e));
+        }
+        else if ((isOpX<GEQ>(inEq) || isOpX<GT>(inEq)) && inEqConst >= eqConst)
+        {
+          Expr e = mk<GEQ>(inEq->left(), eq->left());
+          res.insert(normalize(e));
+        }
+        else if ((isOpX<LEQ>(inEq) || isOpX<LT>(inEq)) && inEqConst <= eqConst)
+        {
+          Expr e = mk<LEQ>(inEq->left(), eq->left());
+          res.insert(normalize(e));
+        }
+        else if ((isOpX<GEQ>(inEq) || isOpX<GT>(inEq)) && inEqConst <= eqConst)
+        {
+          Expr e = mk<GT>(inEq->left(), eq->left());
+          res.insert(normalize(e));
+        }
+        else if ((isOpX<LEQ>(inEq) || isOpX<LT>(inEq)) && inEqConst >= eqConst)
+        {
+          Expr e = mk<LT>(inEq->left(), eq->left());
+          res.insert(normalize(e));
+        }
+        else if(isOpX<EQ>(inEq) && inEqConst == eqConst)
+        {
+          Expr e = mk<EQ>(inEq->left(), eq->left());
+          res.insert(normalize(e));
+        }
+      }
+      dc[srcRel].insert(res.begin(), res.end());
+    }
+
   public:
     DataLearner2(CHCs& r, EZ3& z3, int _debug) :
       ruleManager(r), bnd(ruleManager, (_debug > 0)), m_efac(r.m_efac), debug(_debug) {}
@@ -174,11 +257,11 @@ namespace ufo
         filter(forms[0], IsConst(), inserter(vars, vars.begin()));
         invVars[srcRel] = vars;
         // Expects normalized exprs.
-        ExprVector conjs;
+        // Creates a matrix of data.
         for(auto it = forms.begin(); it != forms.end(); it++)
         {
           if(debug > 0) outs() << "Processing: " << *it << "\n";
-          conjs.clear();
+          ExprVector conjs;
           getConj(*it, conjs);
           if(conjs.size() != 2) 
           {
@@ -189,51 +272,27 @@ namespace ufo
           vector<double> row;
           for(int j = 0; j < conjs.size(); j++)
           {
-            if(debug > 0) outs() << "Contains: " << *conjs[j] << " : " << vars[j] << "\n";
-            if(contains(conjs[j]->left(), vars[j]))
-            {
+            // if(contains(conjs[j]->left(), vars[j]))
+            // {
               row.push_back(lexical_cast<double>(conjs[j]->right()));
-            }
-            else 
-            {
-              outs() << "ERROR\n";
-              return;
-            }
+            // }
+            // else 
+            // {
+            //   outs() << "ERROR\n";
+            //   return;
+            // }
           }
           models[srcRel].push_back(row);
         }
 
         if(debug > 4) printModel(srcRel);
 
-        createCandsFromData(srcRel);
-
-        ExprSet alts;
-        // reqrite this..
-        for(auto it: dc[srcRel])
-        {
-          Expr fla = conjs[0];
-          Expr e;
-          if (it->right() == mkMPZ(1, m_efac) && isOpX<GT>(fla))
-          {
-            e = mk<GEQ>(mkMPZ(0, m_efac), it->left());
-            alts.insert(normalize(e, vars[0]));
-          }
-          else if (it->right() == mkMPZ(1, m_efac) && isOpX<LT>(fla))
-          {
-            e = mk<LEQ>(mkMPZ(0, m_efac), it->left());
-            alts.insert(normalize(e, vars[0]));
-          }
-          else
-          {
-            alts.insert(reBuildCmp(fla, it->left(), it->right()));
-          }
-        }
-        dc[srcRel] = alts;
+        linCombIneq(srcRel, forms);
 
         for (auto &it : dc[srcRel])
         {
           if (debug > 0)
-            outs() << "Data candidate: " << normalize(it, vars[0]) << "\n";
+            outs() << "Data candidate: " << simplifyArithm(it) << "\n";
         }
       }
 

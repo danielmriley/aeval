@@ -234,20 +234,10 @@ namespace ufo {
         Expr conj;
         for (auto &t : conjs)
         {
-          if (debug >= 4) {
-            outs() << "    t: " << t << "\n";
-            outs() << "    arity: " << t->left()->arity() << "\n";
-          }
           if (t->left()->arity() == 1)
           {
-            outs() << "arity 1\n";
             toChange = t->right();
             conj = t;
-            if (debug >= 4)
-            {
-              outs() << "    toChange: " << toChange << "\n";
-              outs() << "    conj: " << conj << "\n";
-            }
             filter(t, IsConst(), inserter(vars, vars.begin()));
           }
         }
@@ -255,39 +245,34 @@ namespace ufo {
         {
           if (!vars.empty() && t->left()->arity() > 1 && contains(t, vars[0]))
           {
-            if (debug >= 4)
-              outs() << "    t2: " << t << "\n";
             ExprSet tmp;
             getConj(t, tmp);
             for (auto &tt : tmp)
             {
               if (contains(tt, vars[0]))
               {
-                outs() << "    var: " << vars[0] << "\n";
                 Expr ttt = tt;
                 ttt = simplifyArithm(replaceAll(ttt, vars[0], toChange));
                 ttt = ineqReverter(ttt);
-                if (debug >= 4)
-                  outs() << "      ttt: " << ttt << "\n";
                 temp.push_back(normalize(mk<AND>(ttt, conj)));
               }
             }
           }
         }
       }
-      BigPhi = temp;
+      if(!temp.empty()) BigPhi = temp;
     }
 
     ExprSet inferWithData(ExprVector BigPhi)
     {
       if(debug >= 3) outs() << "\n\nInfer With Data\n==============\n";
-      // filterBigPhi(BigPhi);
+      filterBigPhi(BigPhi);
       if (debug >= 4)
       {
-        outs() << "  BigPhi size: " << BigPhi.size() << "\n";
+        outs() << "  Filtered BigPhi size: " << BigPhi.size() << "\n";
         for (auto &c : BigPhi)
         {
-          outs() << "  From BigPhi: " << c << "\n";
+          outs() << "  Filtered From BigPhi: " << c << "\n";
         }
       }
       DataLearner2 dl2(ruleManager, z3, debug);
@@ -303,7 +288,7 @@ namespace ufo {
           outs() << "  cands: " << *c << "\n";
         if (!u.isSat(*c, tr->body))
         {
-          outs() << "  Removed: " << *c << "\n";
+          if(debug >= 2) outs() << "  Removed: " << *c << "\n";
           c = cands.erase(c);
         }
         else
@@ -332,26 +317,27 @@ namespace ufo {
       if(BigPhi1.empty()) return inferredRet;
       removeCommonExpr(BigPhi1, BigPhi, common);
 
-      // Here perform data learning on BigPhi.
+      // Do data learning on BigPhi.
       ExprSet inferredFromData;
       inferredFromData = inferWithData(BigPhi); // infer2
       
       // filter BigPhi with what's been learned from data.
-      ExprVector smallphi = BigPhi;
-      Expr fromData = conjoin(inferredFromData, m_efac);
-      for(auto it = smallphi.begin(); it != smallphi.end(); )
-      {
-        if(!u.isSat(*it, fromData))
-        {
-          it = smallphi.erase(it);
-        }
-        else
-        {
-          ++it;
-        }
-      }
+      // ExprVector smallphi = BigPhi;
+      // Expr fromData = conjoin(inferredFromData, m_efac);
+      // for(auto it = smallphi.begin(); it != smallphi.end(); )
+      // {
+      //   if(!u.isSat(*it, fromData))
+      //   {
+      //     if(debug >= 3) outs() << "  Removed: " << *it << "\n";
+      //     it = smallphi.erase(it);
+      //   }
+      //   else
+      //   {
+      //     ++it;
+      //   }
+      // }
 
-      BigPhi = smallphi;
+      // BigPhi = smallphi;
 
       splitExprs(BigPhi, infMap);
 
@@ -398,6 +384,7 @@ namespace ufo {
           {
             outs() << "Current inferred:\n";
             pprint(inferred, 2);
+            outs() << "\n";
           }
           
         }
@@ -408,7 +395,11 @@ namespace ufo {
       {
         for (auto &i : inferredRet)
         {
-          outs() << "\nInferred: " << i << "\n";
+          outs() << "Inferred: " << i << "\n";
+        }
+        for(auto& i: inferredFromData)
+        {
+          outs() << "Inferred from data: " << i << "\n";
         }
         outs() << "Common: " << common << "\n";
       }
@@ -668,9 +659,9 @@ namespace ufo {
           // {
             if (debug >= 3)
             {
-              outs() << "  ADDED TO BIGPHI: " << p << "\n";
+              outs() << "  ADDED TO BIGPHI: " << normalize(p) << "\n";
             }
-            BigPhi.push_back(p);
+            BigPhi.push_back(normalize(p));
           // }
         }
 
@@ -683,7 +674,6 @@ namespace ufo {
         // } 
         // BigPhi.push_back(elim);
       }
-      // Introduce "weakenAndSplit(BigPhi)".
       Expr c = weakenAndSplit(BigPhi, preCond);
 
       return c;
@@ -692,18 +682,6 @@ namespace ufo {
     Expr constructPhi(Expr& p)
     {
       p = mk<TRUE>(m_efac);
-      // for (auto &b : bounds)
-      // {
-      //   Expr psi = b.first;
-      //   ExprSet tmp;
-      //   getConj(psi, tmp);
-      //   psi = mk<TRUE>(m_efac);
-      //   for(auto& t: tmp)
-      //   {
-      //     psi = mk<AND>(psi, mkNeg(t));
-      //   }
-      //   p = mk<AND>(p, psi);
-      // }
       for (auto &b : bounds)
       {
         Expr psi = b.first;
@@ -711,6 +689,8 @@ namespace ufo {
         
         p = mk<AND>(p, psi);
       }
+
+      p = simplifyArithm(p);
 
       Expr phi = mk<AND>(p, replaceAll(fc_nogh.body, invVarsPr, invVars), tr_nogh.body);        
 
@@ -773,10 +753,11 @@ namespace ufo {
           vector<int> trace;
           BndExpl bnd(ruleManager, (debug > 0));
 
-          buildTrace(trace, i, true);
+          buildTrace(trace, i+1, true);
 
           Expr ssa;
           ssa = mk<AND>(p, bnd.toExpr(trace));
+          ssa = replaceAll(ssa, fc->srcVars, invVars);
           if(debug >= 4) {
             outs() << "SSA: ";
             pprint(ssa, 2);
@@ -786,7 +767,7 @@ namespace ufo {
             m.push_back(i);
             // update to use models for data learning.
             model = u.getModel();
-            // if (debug >= 3) outs() << "  Model: " << model << "\n";
+            if (debug >= 3) outs() << "  Model: " << model << "\n";
             // if(i > 5) break;
           }
           else if(debug >= 4) { outs() << "  ====  SSA is UNSAT\n"; }
@@ -797,6 +778,7 @@ namespace ufo {
           ExprSet f;
           f.insert(mk<EQ>(ghostVars[0], mkMPZ(-1, m_efac)));
           forms[invDecl] = f;
+          bounds[p] = *f.begin();
         }
         else
         {
@@ -826,7 +808,7 @@ namespace ufo {
 
           for (auto &f : formsVec)
           {
-            if(debug >= 3) outs() << "f: " << f << "\n";
+            if(debug >= 3) outs() << "Trying next bound: " << f << "\n";
             bool toContinue = false;
             for(auto& b: bounds)
             {
@@ -859,6 +841,7 @@ namespace ufo {
           if(debug >= 2) outs() << "  UNKNOWN\n";
           if(debug >= 3) outs() << "  n: " << n << "\n";
         }
+        m.clear();
       }
     }
 
@@ -900,7 +883,7 @@ namespace ufo {
     BoundSolverV2 bs(ruleManager, inv, dg, data2, doPhases, limit, debug);
     bs.removeQuery();
     bs.setUpQueryAndSpec(mk<TRUE>(m_efac), mk<TRUE>(m_efac));
-    bs.collectPhaseGuards();
+    // bs.collectPhaseGuards();
 
     bs.solve();
     // Print the results.

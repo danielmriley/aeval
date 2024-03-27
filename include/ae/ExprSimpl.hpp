@@ -3767,6 +3767,7 @@ namespace ufo
       // }
 
       bool nullvar = false;
+      bool isEqOp = isOpX<EQ>(fla);
 
       if(lhsVar == 0) {
         nullvar = true;
@@ -3822,17 +3823,20 @@ namespace ufo
       if(g > 1) simplifyVec(coefs,g);
       int w = 0;
       for(auto& e: allMap) {
-        e.second = coefs[w];
-        w++;
+        e.second = coefs[w++];
       }
 
+      bool flip = false;
       if(allMap[lhsVar] > 0 && !nullvar) {
+        flip = true;
         for(auto& e : allMap) {
           e.second = e.second * -1;
         }
       }
+
       ExprVector newRhs, newLhs;
-      for(auto& e: allMap) {
+      for (auto &e : allMap)
+      {
         if(e.first == lhsVar && !nullvar) {
           if(e.second == 0) { // LHS needs to have an Expr so set it to zero.
             newLhs.push_back(mkMPZ(0,fla->getFactory()));
@@ -3863,7 +3867,9 @@ namespace ufo
       Expr r = (newRhs.size() == 1) ? *newRhs.begin(): mknary<PLUS>(newRhs);
       Expr l = (newLhs.size() == 1) ? *newLhs.begin(): mknary<PLUS>(newLhs);
 
+
       if(nullvar) return reBuildCmp(fla,additiveInverse(r),additiveInverse(l));
+      if(flip && !isEqOp) return reBuildCmpSym(fla,r,l);
       else return reBuildCmp(fla,l,r);
     }
     return fla;
