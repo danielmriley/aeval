@@ -80,7 +80,8 @@ namespace ufo {
       fcWithPrecond->isFact = true;
       fcWithPrecond->srcRelation = mk<TRUE>(m_efac);
       Expr fcPreCond = replaceAll(elim, tr->srcVars, fc->srcVars);
-      fcWithPrecond->body = replaceAll(mk<AND>(fcPreCond, normalize(preCond)), fcWithPrecond->srcVars, tr->dstVars);
+      if(debug >= 3) outs() << "Original fcBody: " << fcWithPrecond->body << "\n";
+      fcWithPrecond->body = replaceAll(mk<AND>(fcPreCond, normalize(preCond), fcWithPrecond->body), fcWithPrecond->srcVars, tr->dstVars);
       fcWithPrecond->srcVars.clear();
 
       ExprVector qrBody;
@@ -200,23 +201,64 @@ namespace ufo {
       cm = conjoin(comm, m_efac);
     }
 
-    void splitExprs(ExprVector& BigPhi, map<Expr,ExprVector>& infMap)
+    void splitExprs(ExprVector& BigPhi, map<int,ExprVector>& infMap)
     {
-      for (auto &v : invVars)
+      if(debug >= 5) outs() << "\nSplit Exprs\n===========\n";
+
+      for(auto& cc: BigPhi)
       {
-        for(auto& c: BigPhi)
+        Expr c = normalize(cc);
+        if(debug >= 5) outs() << "Splitting: " << c << "\n";
+        ExprVector lhs;
+        getConj(c, lhs);
+        for(int i = 0; i < lhs.size(); i++)
         {
-          ExprSet tmp;
-          getConj(c, tmp);
-          for(auto& t: tmp)
+          bool toAdd = true;
+          for(int j = 0; j < infMap[i].size(); j++)
           {
-            if (contains(t, v))
+            if(infMap[i][j]->left() != lhs[i]->left() || infMap[i][j] == lhs[i]) 
             {
-              infMap[v].push_back(t);
+              toAdd = false;
             }
           }
+          if(toAdd) infMap[i].push_back(lhs[i]);
         }
       }
+
+      // ExprSet exprLhs;
+      // for(auto& c: BigPhi)
+      // {
+      //   ExprSet tmp;
+      //   getConj(c, tmp);
+      //   for (auto &t : tmp)
+      //   {
+      //     exprLhs.insert(t->left());
+      //   }
+      // }
+      // for (auto &v : exprLhs)
+      // {
+      //   for (auto &c : BigPhi)
+      //   {
+      //     ExprSet tmp;
+      //     getConj(c, tmp);
+      //     for (auto &t : tmp)
+      //     {
+      //       if (contains(t, v))
+      //       {
+      //         if(!infMap[v].empty())
+      //         {
+      //           Expr e = infMap[v][0];
+      //           if(e->op() == t->op())
+      //           {
+      //             infMap[v].push_back(t);
+      //           }
+      //         }
+      //         else
+      //           infMap[v].push_back(t);
+      //       }
+      //     }
+      //   }
+      // }
     }
 
     void filterBigPhi(ExprVector& BigPhi)
@@ -310,7 +352,7 @@ namespace ufo {
       // Check that the previous expr is an overapproximation.
       // Process them in order, run simplifyArithm on each one.
       ExprSet inferredRet;
-      map<Expr, ExprVector> infMap;
+      map<int, ExprVector> infMap;
       ExprVector BigPhi;
 
       Expr common; // Sometimes common will be needed. For ABC_ex01 it is not.
@@ -340,10 +382,22 @@ namespace ufo {
       // BigPhi = smallphi;
 
       splitExprs(BigPhi, infMap);
+      if (debug >= 4)
+      {
+        for(auto& m: infMap)
+        {
+          for(auto& mm : m.second)
+          {
+            outs() << "  From infMap: " << mm << "\n";
+          }
+          outs() << "\n";
+        }
+      }
 
       for(auto ev: infMap)
       {
         ExprSet inferred;
+        if(debug >= 4) outs() << "Inferring...\n";
         for(int i = 0; i < ev.second.size(); i++)
         {
           Expr c = ev.second[i];
@@ -372,8 +426,10 @@ namespace ufo {
               bool toBreak = false;
               if(!u.implies(c, *itr) || u.implies(*itr, c))
               {
+                if(debug >= 4) outs() << "  Erasing: " << *itr << "\n";
                 itr = inferred.erase(itr);
                 toBreak = true;
+                if(inferred.empty()) inferred.insert(c);
               }
               if(toBreak) break;
               itr++;              
@@ -659,20 +715,13 @@ namespace ufo {
           // {
             if (debug >= 3)
             {
-              outs() << "  ADDED TO BIGPHI: " << normalize(p) << "\n";
+              outs() << "  ADDED TO BIGPHI: " << simplifyArithm(normalize(p, true)) << "\n";
             }
-            BigPhi.push_back(normalize(p));
-          // }
+            BigPhi.push_back(p);
+            // }
         }
 
         if(debug >= 5) outs() << "  Ghost Value: " << ghostValue << "\n";
-        // if(debug >= 3)
-        // {
-        //   outs() << "  ADDED TO BIGPHI: "; 
-        //   pprint(elim, 2);
-
-        // } 
-        // BigPhi.push_back(elim);
       }
       Expr c = weakenAndSplit(BigPhi, preCond);
 
@@ -738,7 +787,9 @@ namespace ufo {
         if (!u.isSat(phi))
         {
           if(debug >= 3) outs() << "  phi is UNSAT\n";
-          bounds[simplifyArithm(p)] = mkMPZ(0, m_efac);
+          p = simplifyArithm(p);
+          if (p != mk<FALSE>(m_efac))
+            bounds[p] = mkMPZ(0, m_efac);
           return;
         }
         if(debug >= 4) outs() << "  phi is SAT\n";
@@ -764,10 +815,16 @@ namespace ufo {
           }
           if(u.isSat(ssa))
           {
-            m.push_back(i);
+            m.push_back(i+1);
             // update to use models for data learning.
             model = u.getModel();
-            if (debug >= 3) outs() << "  Model: " << model << "\n";
+            if (debug >= 3)
+            {
+              outs() << "  i: " << m.back() << "\n";
+              outs() << "  Model: ";
+              pprint(model, 2);
+            } 
+
             // if(i > 5) break;
           }
           else if(debug >= 4) { outs() << "  ====  SSA is UNSAT\n"; }
@@ -784,6 +841,12 @@ namespace ufo {
         {
           // get forms from data.
           // TODO: Make parametric so that different algorithms can be called.
+          if(debug >= 4)
+          {
+            outs() << "  m: ";
+            for(auto& i: m) outs() << i << " ";
+            outs() << "\n";
+          }
           res = invFromData(fc->body, qr->body, p, forms, m.back());
         }
 
@@ -822,7 +885,7 @@ namespace ufo {
 
             psi = getPre(p, f, m.back());
             psi = simplifyArithm(psi);
-            if(psi != mk<TRUE>(m_efac))
+            if(psi != mk<TRUE>(m_efac) && psi != mk<FALSE>(m_efac))
             {
               if(debug >= 2) {
                 outs() << "\n---->  Adding bound:\n";
@@ -849,22 +912,31 @@ namespace ufo {
     {
       if(!bounds.empty()) outs() << "\nSuccess! Found bounds:\n";
       int i = 0;
-      for (auto &b : bounds)
+      for (auto b = bounds.begin(); b != bounds.end(); b++)
       {
-        if(!u.isSat(mkNeg(b.first), replaceAll(fc_nogh.body, invVarsPr, invVars)))
+        if(!u.isSat(mkNeg(b->first), replaceAll(fc_nogh.body, invVarsPr, invVars)))
         {
-          outs() << b.second << "\n";
+          outs() << b->second;
           return;
         }
         else
         {
-          if(i < bounds.size() - 1)
-            outs() << "  ite " << b.first << ", " << b.second;
+          if(b != bounds.begin())
+          {
+            outs() << ", ";
+          }
+          if(b == --bounds.end())
+          {
+            outs() << b->second;
+          }
           else
-            outs() << ", " << b.second << "\n";
+          {
+            outs() << "  ite " << b->first << ", " << b->second;
+          }
         }
         i++;
       }
+      outs() << "\n";
     }
   }; // End class BoundSolverV2
 
