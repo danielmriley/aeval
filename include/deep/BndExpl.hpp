@@ -635,6 +635,204 @@ namespace ufo
       return true;
     }
 
+    bool unrollAndExecuteGhost(
+        Expr src, Expr dst,
+        Expr srcRel,
+        ExprVector &invVars,
+        vector<vector<double>> &models,
+        Expr phaseGuard, Expr invs, bool fwd, ExprSet &constr, int k = 3)
+    {
+      assert(phaseGuard != NULL);
+
+      // helper var
+      string str = to_string(numeric_limits<double>::max());
+      str = str.substr(0, str.find('.'));
+      cpp_int max_double = lexical_cast<cpp_int>(str);
+
+      for (auto &c : ruleManager.cycles)
+      {
+        Expr invRel = c.first;
+        for (int cyc = 0; cyc < ruleManager.cycles[invRel].size(); cyc++)
+        {
+          vector<int> mainInds;
+          auto &loop = ruleManager.cycles[invRel][cyc];
+          ExprVector &srcVars = ruleManager.chcs[loop[0]].srcVars;
+          if (srcRel != ruleManager.chcs[loop[0]].srcRelation)
+            continue;
+          if (models.size() > 0)
+            continue;
+
+          ExprVector vars, varsMask;
+          for (int i = 0; i < srcVars.size(); i++)
+          {
+            Expr t = typeOf(srcVars[i]);
+            if (isOpX<INT_TY>(t))
+            {
+              mainInds.push_back(i);
+              vars.push_back(srcVars[i]);
+              varsMask.push_back(srcVars[i]);
+            }
+            else if (isOpX<ARRAY_TY>(t) && ruleManager.hasArrays[srcRel])
+            {
+              Expr v = findSelect(loop[0], i);
+              if (v != NULL)
+              {
+                vars.push_back(v);
+                mainInds.push_back(-i - 1); // to be on the negative side
+                varsMask.push_back(srcVars[i]);
+              }
+            }
+          }
+
+          if (vars.size() < 2 && cyc == ruleManager.cycles[invRel].size() - 1)
+            continue; // does not make much sense to run with only one var when it is the last cycle
+          invVars = vars;
+
+          auto &prefix = ruleManager.prefixes[invRel][cyc];
+          vector<int> trace;
+          int l = 0; // starting index (before the loop)
+          if (ruleManager.hasArrays[srcRel])
+            l++; // first iter is usually useless
+
+          for (int j = 0; j < k; j++)
+            for (int m = 0; m < loop.size(); m++)
+              trace.push_back(loop[m]);
+
+          ExprVector ssa;
+          getSSA(trace, ssa);
+          if (fwd)
+          {
+            ssa.push_back(src);
+            ssa.push_back(invs);
+            ssa.push_back(replaceAll(phaseGuard, srcVars, bindVars[loop.size() - 1]));
+            ssa.push_back(replaceAll(dst, srcVars, bindVars[bindVars.size() - 1]));
+          }
+          else
+          {
+            ssa.push_back(src);
+            ssa.push_back(phaseGuard);
+            ssa.push_back(replaceAll(invs, srcVars, bindVars[loop.size() - 1]));
+            ssa.push_back(replaceAll(dst, srcVars, bindVars[bindVars.size() - 1]));
+          }
+          bindVars.pop_back();
+
+          // compute vars for opt constraint
+          vector<ExprVector> versVars;
+          ExprSet allVars;
+          ExprVector diseqs;
+          fillVars(srcRel, srcVars, vars, l, loop.size(), mainInds, versVars, allVars);
+          getOptimConstr(versVars, vars.size(), srcVars, constr, phaseGuard, diseqs);
+
+          Expr cntvar = bind::intConst(mkTerm<string>("_FH_cnt", m_efac));
+          allVars.insert(cntvar);
+          allVars.insert(bindVars.back().begin(), bindVars.back().end());
+          ssa.push_back(mk<EQ>(cntvar, mkplus(diseqs, m_efac)));
+
+          auto res = u.isSat(ssa);
+          if (indeterminate(res) || !res)
+          {
+            if (debug)
+              outs() << "Unable to solve the BMC formula for " << srcRel << " and phase guard " << phaseGuard << "\n";
+            continue;
+          }
+          ExprMap allModels;
+          u.getOptModel<GT>(allVars, allModels, cntvar);
+
+          ExprSet phaseGuardVars;
+          set<int> phaseGuardVarsIndex; // Get phaseGuard vars here
+          filter(phaseGuard, bind::IsConst(), inserter(phaseGuardVars, phaseGuardVars.begin()));
+          for (auto &a : phaseGuardVars)
+          {
+            int i = getVarIndex(a, varsMask);
+            assert(i >= 0);
+            phaseGuardVarsIndex.insert(i);
+          }
+
+          if (debug)
+            outs() << "\nUnroll and execute the cycle for " << srcRel << " and phase guard " << phaseGuard << "\n";
+
+          for (int j = 0; j < versVars.size(); j++)
+          {
+            vector<double> model;
+            if (debug)
+              outs() << "  model for " << j << ": [";
+            bool toSkip = false;
+            SMTUtils u2(m_efac);
+            ExprSet equalities;
+
+            for (auto i : phaseGuardVarsIndex)
+            {
+              Expr srcVar = varsMask[i];
+              Expr bvar = versVars[j][i];
+              if (isOpX<SELECT>(bvar))
+                bvar = bvar->left();
+              Expr m = allModels[bvar];
+              if (m == NULL)
+              {
+                toSkip = true;
+                break;
+              }
+              equalities.insert(mk<EQ>(srcVar, m));
+            }
+            if (toSkip)
+              continue;
+            equalities.insert(phaseGuard);
+
+            if (u2.isSat(equalities)) // exclude models that don't satisfy phaseGuard
+            {
+              vector<double> model;
+
+              for (int i = 0; i < vars.size(); i++)
+              {
+                Expr bvar = versVars[j][i];
+                Expr m = allModels[bvar];
+                double value;
+                if (m != NULL && isOpX<MPZ>(m))
+                {
+                  if (lexical_cast<cpp_int>(m) > max_double ||
+                      lexical_cast<cpp_int>(m) < -max_double)
+                  {
+                    toSkip = true;
+                    break;
+                  }
+                  value = lexical_cast<double>(m);
+                }
+                else
+                {
+                  toSkip = true;
+                  break;
+                }
+                model.push_back(value);
+                if (debug)
+                  outs() << *bvar << " = " << *m << ", ";
+                if (j == 0)
+                {
+                  Expr arr = bvar;
+                  while (isOpX<SELECT>(arr) || isOpX<STORE>(arr))
+                    arr = arr->left();
+                  if (arr != bvar)
+                    concrInvs[srcRel].insert(mk<EQ>(vars[i]->left(), allModels[arr]));
+                  else
+                    concrInvs[srcRel].insert(mk<EQ>(vars[i], m));
+                }
+              }
+              if (!toSkip)
+                models.push_back(model);
+            }
+            else
+            {
+              if (debug)
+                outs() << "   <  skipping  >      ";
+            }
+            if (debug)
+              outs() << "\b\b]\n";
+          }
+        }
+      }
+
+      return true;
+    }
+
     boost::tribool unrollAndExecuteTermPhase(
           Expr src, Expr dst,
           Expr srcRel,
@@ -707,8 +905,8 @@ namespace ufo
 
           // if(isOpX<TRUE>(gh_cond)) trace.push_back(0);
           for (int j = 0; j < k; j++)
-          for (int m = 0; m < loop.size(); m++)
-          trace.push_back(loop[m]);
+            for (int m = 0; m < loop.size(); m++)
+              trace.push_back(loop[m]);
 
           ExprVector ssa;
           ssa.push_back(src);

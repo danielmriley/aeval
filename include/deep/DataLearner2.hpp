@@ -352,6 +352,25 @@ namespace ufo
         return res;
       }
 
+      boost::tribool computeDataGhost(Expr src, Expr dst, Expr srcRel, Expr splitter, 
+                            Expr invs, bool fwd, ExprSet &constr, int k = 3)
+      {
+        invVars.clear();
+        boost::tribool res = bnd.unrollAndExecuteGhost(src, dst, srcRel, invVars[srcRel], models[srcRel], splitter, invs, fwd, constr, k);
+        if(debug > 0 && res) {
+          outs() << "RES IS TRUE\n";
+        }
+        else if(debug > 0 && !res) {
+          outs() << "RES IS FALSE\n";
+        }
+
+        if(res) {
+          createCandsFromData(srcRel);
+        }
+
+        return res;
+      }
+
       void makeModel(Expr srcRel, ExprVector& forms1)
       {
         ExprVector vars;

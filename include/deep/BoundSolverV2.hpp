@@ -493,6 +493,8 @@ namespace ufo {
       if(debug >= 3) ruleManager.print(true);
 
       // Replace this to reuse the SSA that is built previously.
+      ExprSet constr;
+      // res = dl2.computeDataGhost(src, dst, invDecl, block, invs, true, constr, n);
       res = dl2.connectPhase(src, dst, n, invDecl, block, invs, loopGuard);
       if (res == true)
       {
@@ -711,14 +713,14 @@ namespace ufo {
         {
           if(debug >= 5) outs() << "  Projection: " << p << "\n";
           // if(debug >= 4) outs() << "  isSat? " << p << " && " << branchPreCond << "\n";
-          // if(u.isSat(p, branchPreCond))
-          // {
+          if(u.isSat(p, branchPreCond))
+          {
             if (debug >= 3)
             {
               outs() << "  ADDED TO BIGPHI: " << simplifyArithm(normalize(p, true)) << "\n";
             }
             BigPhi.push_back(p);
-            // }
+          }
         }
 
         if(debug >= 5) outs() << "  Ghost Value: " << ghostValue << "\n";
@@ -917,7 +919,7 @@ namespace ufo {
         if(!u.isSat(mkNeg(b->first), replaceAll(fc_nogh.body, invVarsPr, invVars)))
         {
           outs() << b->second;
-          return;
+          break;
         }
         else
         {
