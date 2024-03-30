@@ -305,6 +305,235 @@ namespace ufo {
       if(!temp.empty()) BigPhi = temp;
     }
 
+    Expr getLinComb(Expr eq, Expr inEq, double eqConst, double inEqConst)
+    {
+      if (debug >= 5)
+      {
+        outs() << "Processing linear combination\n";
+        outs() << "eq: " << *eq << "\n";
+        outs() << "inEq: " << *inEq << "\n";
+        outs() << "eqConst: " << eqConst << "\n";
+        outs() << "inEqConst: " << inEqConst << "\n";
+      }
+
+      Expr e = mk<TRUE>(m_efac);
+      if ((isOpX<GEQ>(inEq) || isOpX<GT>(inEq)) && inEqConst > eqConst)
+      {
+        e = mk<GT>(inEq->left(), eq->left());
+        e = normalize(e);
+        if (debug >= 5)
+          outs() << "Adding: " << *e << "\n";
+      }
+      else if ((isOpX<LEQ>(inEq) || isOpX<LT>(inEq)) && inEqConst < eqConst)
+      {
+        e = mk<LT>(inEq->left(), eq->left());
+        e = normalize(e);
+        if (debug >= 5)
+          outs() << "Adding: " << *e << "\n";
+      }
+      else if ((isOpX<GEQ>(inEq) || isOpX<GT>(inEq)) && inEqConst < eqConst)
+      {
+        e = mk<GEQ>(inEq->left(), eq->left());
+        e = normalize(e);
+        if (debug >= 5)
+          outs() << "Adding: " << *e << "\n";
+      }
+      else if ((isOpX<LEQ>(inEq) || isOpX<LT>(inEq)) && inEqConst > eqConst)
+      {
+        e = mk<LEQ>(inEq->left(), eq->left());
+        e = normalize(e);
+        if (debug >= 5)
+          outs() << "Adding: " << *e << "\n";
+      }
+      else if ((isOpX<GEQ>(inEq) || isOpX<GT>(inEq)) && inEqConst >= eqConst)
+      {
+        e = mk<GEQ>(inEq->left(), eq->left());
+        e = normalize(e);
+        if (debug >= 5)
+          outs() << "Adding: " << *e << "\n";
+      }
+      else if ((isOpX<LEQ>(inEq) || isOpX<LT>(inEq)) && inEqConst <= eqConst)
+      {
+        e = mk<LEQ>(inEq->left(), eq->left());
+        e = normalize(e);
+        if (debug >= 5)
+          outs() << "Adding: " << *e << "\n";
+      }
+      else if ((isOpX<GEQ>(inEq) || isOpX<GT>(inEq)) && inEqConst <= eqConst)
+      {
+        e = mk<GT>(inEq->left(), eq->left());
+        e = normalize(e);
+        if (debug >= 5)
+          outs() << "Adding: " << *e << "\n";
+      }
+      else if ((isOpX<LEQ>(inEq) || isOpX<LT>(inEq)) && inEqConst >= eqConst)
+      {
+        e = mk<LT>(inEq->left(), eq->left());
+        e = normalize(e);
+        if (debug >= 5)
+          outs() << "Adding: " << *e << "\n";
+      }
+      else if (isOpX<EQ>(inEq) && inEqConst == eqConst)
+      {
+        e = mk<EQ>(inEq->left(), eq->left());
+        e = normalize(e);
+        if (debug >= 5)
+          outs() << "Adding: " << *e << "\n";
+      }
+      return e;
+    }
+
+    void linCombIneq(Expr srcRel, ExprVector &forms, map<Expr, ExprSet>& dc)
+    {
+      if (debug >= 5)
+        outs() << "Processing linear combination of inequalities\n";
+      ExprSet res;
+      for (auto &f : forms)
+      {
+        Expr const1;
+        ExprVector conjs;
+        getConj(f, conjs);
+        if (conjs.size() < 2)
+          continue;
+        Expr eq = mk<TRUE>(m_efac);
+        Expr inEq = mk<TRUE>(m_efac);
+        for (auto &c : conjs)
+        {
+          // get the value of the constant.
+          if (debug >= 5)
+            outs() << "Processing inEq/Eq: " << *c << "\n";
+          if (isOpX<EQ>(c))
+          {
+            if (eq != mk<TRUE>(m_efac))
+              inEq = c;
+            else
+              eq = c;
+          }
+          else if (!isOpX<NEQ>(c)) // Not handling NEQs for now.
+          {
+            if (inEq != mk<TRUE>(m_efac))
+              eq = c;
+            else
+              inEq = c;
+          }
+        }
+        if (debug >= 5)
+        {
+          outs() << "eq: " << *eq << "\n";
+          outs() << "inEq: " << *inEq << "\n";
+        }
+        double eqConst = lexical_cast<double>(eq->right());
+        double inEqConst = lexical_cast<double>(inEq->right());
+
+        if (eq->left() == inEq->left())
+        {
+          if (res.empty())
+            res.insert(inEq);
+          else
+          {
+            Expr e = *res.rbegin();
+            if (u.implies(e, inEq))
+            {
+              res.erase(e);
+              res.insert(inEq);
+            }
+          }
+        }
+        else
+        {
+          res.insert(getLinComb(eq, inEq, eqConst, inEqConst));
+        }
+      }
+      if (debug >= 5)
+      {
+        outs() << "Adding to data candidates\n";
+        for (auto &r : res)
+        {
+          outs() << "  " << *r << "\n";
+        }
+      }
+      dc[srcRel].insert(res.begin(), res.end());
+    }
+
+    bool trySimplifying(ExprVector &conjs)
+    {
+      ExprSet similar;
+      bool eraseE = false;
+      bool simplified = false;
+      for (auto itr = conjs.begin(); itr != conjs.end();)
+      {
+        Expr e = (*itr)->left();
+        for (auto jtr = conjs.begin(); jtr != conjs.end();)
+        {
+          if (itr == jtr)
+          {
+            jtr++;
+            continue;
+          }
+          if (e == (*jtr)->left())
+          {
+            eraseE = true;
+            simplified = true;
+            jtr = conjs.erase(jtr);
+          }
+          else
+            jtr++;
+        }
+        if (eraseE)
+        {
+          eraseE = false;
+          itr = conjs.erase(itr);
+        }
+        else
+          itr++;
+      }
+
+      if (debug > 4)
+      {
+        outs() << "\nSimplified:\n";
+        for (auto &c : conjs)
+        {
+          outs() << "  " << *c << "\n";
+        }
+      }
+
+      return simplified;
+    }
+
+    void makeModel(Expr srcRel, ExprVector &forms1, map<Expr, ExprSet>& dc)
+    {
+      ExprVector vars;
+      filter(forms1[0], IsConst(), inserter(vars, vars.begin()));
+      // Expects normalized exprs.
+
+      ExprVector forms;
+      for (auto it = forms1.begin(); it != forms1.end(); it++)
+      {
+        if (debug > 0)
+          outs() << "Processing: " << *it << "\n";
+        ExprVector conjs;
+        getConj(*it, conjs);
+        if (conjs.size() != 2)
+        {
+          bool keepGoing = trySimplifying(conjs);
+          if (!keepGoing)
+            return;
+          if (debug > 4)
+            outs() << "Keep going after simplifying: " << *it << "\n";
+        }
+
+        forms.push_back(conjoin(conjs, m_efac));
+      }
+
+      linCombIneq(srcRel, forms, dc);
+
+      for (auto &it : dc[srcRel])
+      {
+        if (debug > 0)
+          outs() << "Data candidate: " << simplifyArithm(it) << "\n";
+      }
+    }
+
     ExprSet inferWithData(ExprVector BigPhi)
     {
       if(debug >= 3) outs() << "\n\nInfer With Data\n==============\n";
@@ -317,21 +546,18 @@ namespace ufo {
           outs() << "  Filtered From BigPhi: " << c << "\n";
         }
       }
-      DataLearner2 dl2(ruleManager, z3, debug);
+      map<Expr, ExprSet> dc;
 
-      dl2.makeModel(invDecl, BigPhi);
-      if(debug >= 3) dl2.printModel(invDecl);
-      ExprSet cands;
-      dl2.getDataCands(cands, invDecl);
+      makeModel(invDecl, BigPhi, dc);
 
-      for (auto c = cands.begin(); c != cands.end();)
+      for (auto c = dc[invDecl].begin(); c != dc[invDecl].end();)
       {
         if (debug >= 4)
           outs() << "  cands: " << *c << "\n";
         if (!u.isSat(*c, tr->body))
         {
           if(debug >= 2) outs() << "  Removed: " << *c << "\n";
-          c = cands.erase(c);
+          c = dc[invDecl].erase(c);
         }
         else
         {
@@ -339,7 +565,7 @@ namespace ufo {
         }
       }
 
-      return cands;
+      return dc[invDecl];
     }
 
     ExprSet infer(ExprVector &BigPhi1)
