@@ -578,9 +578,6 @@ namespace ufo
       // Now make cands from the reduced matrix.
       basis[srcRel] = bf.findKernelBasis();
       candsFromBasis(srcRel);
-      if (debug >= 1)
-        for (auto &c : dataCands[srcRel])
-          outs() << "Cand from data: " << c << "\n";
     }
 
   public:

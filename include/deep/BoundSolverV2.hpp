@@ -73,6 +73,11 @@ namespace ufo {
       if(debug >= 4) rm.print(true);
     }
 
+    Expr setGhostGuard(Expr value)
+    {
+      return mk<EQ>(ghostVars[0],value);
+    }
+
     void prepareRulesWithPrecond(Expr elim, Expr preCond, CHCs& rm)
     {
       HornRuleExt* fcWithPrecond = new HornRuleExt();
@@ -91,6 +96,7 @@ namespace ufo {
         if (contains(*c, ghostVars[0])) c = qrBody.erase(c);
         else ++c;
       }
+      
       qrBody.push_back(mkNeg(ghostGuard));
       HornRuleExt* qrForFH = new HornRuleExt();
       copyRule(qrForFH, qr);
@@ -513,7 +519,7 @@ namespace ufo {
           outs() << "Processing: " << *it << "\n";
         ExprVector conjs;
         getConj(*it, conjs);
-        if (conjs.size() != 2)
+        if (conjs.size() > 2)
         {
           bool keepGoing = trySimplifying(conjs);
           if (!keepGoing)
@@ -718,9 +724,6 @@ namespace ufo {
 
       if(debug >= 3) ruleManager.print(true);
 
-      // Replace this to reuse the SSA that is built previously.
-      ExprSet constr;
-      // res = dl2.computeDataGhost(src, dst, invDecl, block, invs, true, constr, n);
       res = dl2.connectPhase(src, dst, n, invDecl, block, invs, loopGuard);
       if (res == true)
       {
@@ -939,14 +942,14 @@ namespace ufo {
         {
           if(debug >= 5) outs() << "  Projection: " << p << "\n";
           // if(debug >= 4) outs() << "  isSat? " << p << " && " << branchPreCond << "\n";
-          if(u.isSat(p, branchPreCond))
-          {
+          // if(u.isSat(p, branchPreCond))
+          // {
             if (debug >= 3)
             {
               outs() << "  ADDED TO BIGPHI: " << simplifyArithm(normalize(p, true)) << "\n";
             }
             BigPhi.push_back(p);
-          }
+          // }
         }
 
         if(debug >= 5) outs() << "  Ghost Value: " << ghostValue << "\n";
@@ -1058,15 +1061,23 @@ namespace ufo {
           else if(debug >= 4) { outs() << "  ====  SSA is UNSAT\n"; }
         }
 
+        ghostGuard = setGhostGuard(mkMPZ(0, m_efac));
+        qr->body = mk<AND>(mkNeg(loopGuard), ghostGuard);
+
+        bool nonterm = false;
         if(m.empty()) // this is a check to see if we have a nonterminating case.
         {
-          ExprSet f;
-          f.insert(mk<EQ>(ghostVars[0], mkMPZ(-1, m_efac)));
-          forms[invDecl] = f;
-          bounds[p] = *f.begin();
+          // ExprSet f;
+          // f.insert(mk<EQ>(ghostVars[0], mkMPZ(-1, m_efac)));
+          // forms[invDecl] = f;
+          // bounds[p] = *f.begin();
+          ghostGuard = setGhostGuard(mkMPZ(-1,m_efac));
+          qr->body = mk<AND>(loopGuard, ghostGuard);
+          m.push_back(1);
+          nonterm = true;
         }
-        else
-        {
+        // else
+        // {
           // get forms from data.
           // TODO: Make parametric so that different algorithms can be called.
           if(debug >= 4)
@@ -1076,55 +1087,60 @@ namespace ufo {
             outs() << "\n";
           }
           res = invFromData(fc->body, qr->body, p, forms, m.back());
-        }
+          // if(nonterm) exit(0);
+          // }
 
-        if(res == true)
-        {
-          ExprSet invs;
-          Expr psi;
-
-          ExprVector formsVec;
-          for(auto& s: forms[invDecl])
+          if (res == true)
           {
-            formsVec.push_back(s);
-          }
+            ExprSet invs;
+            Expr psi;
 
-          sortBounds(formsVec);
-
-          if(debug >= 3)
-          {
-            outs() << "  ==> Sorted invs from data:\n";
-            pprint(formsVec, 4);
-          }
-
-          for (auto &f : formsVec)
-          {
-            if(debug >= 3) outs() << "Trying next bound: " << f << "\n";
-            bool toContinue = false;
-            for(auto& b: bounds)
+            ExprVector formsVec;
+            for (auto &s : forms[invDecl])
             {
-              if(b.second == f)
+              formsVec.push_back(s);
+            }
+
+            sortBounds(formsVec);
+
+            if (debug >= 3)
+            {
+              outs() << "  ==> Sorted invs from data:\n";
+              pprint(formsVec, 4);
+            }
+
+            for (auto &f : formsVec)
+            {
+              if (debug >= 3)
+                outs() << "Trying next bound: " << f << "\n";
+              bool toContinue = false;
+              for (auto &b : bounds)
               {
-                if(debug >= 4) outs() << "  Bound already found\n";
-                toContinue = true;
+                if (b.second == f)
+                {
+                  if (debug >= 4)
+                    outs() << "  Bound already found\n";
+                  toContinue = true;
+                }
               }
-            }
-            if(toContinue) continue;
+              if (toContinue)
+                continue;
 
-            psi = getPre(p, f, m.back());
-            psi = simplifyArithm(psi);
-            if(psi != mk<TRUE>(m_efac) && psi != mk<FALSE>(m_efac))
-            {
-              if(debug >= 2) {
-                outs() << "\n---->  Adding bound:\n";
-                pprint(psi);
-                outs() << " => ";
-                outs() << normalize(f, ghostVars[0]) << " 😎\n\n";
+              psi = getPre(p, f, m.back());
+              psi = simplifyArithm(psi);
+              if (psi != mk<TRUE>(m_efac) && psi != mk<FALSE>(m_efac))
+              {
+                if (debug >= 2)
+                {
+                  outs() << "\n---->  Adding bound:\n";
+                  pprint(psi);
+                  outs() << " => ";
+                  outs() << normalize(f, ghostVars[0]) << " 😎\n\n";
+                }
+                bounds[psi] = normalize(f, ghostVars[0]);
+                break;
               }
-              bounds[psi] = normalize(f, ghostVars[0]);
-              break;
             }
-          }
         }
         else
         {
