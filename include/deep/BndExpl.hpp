@@ -912,6 +912,10 @@ namespace ufo
           ssa.push_back(src);
           ssa.push_back(gh_cond);
           getSSA(trace, ssa);
+          // for(int i = 0; i < bindVars.size() ; i++)
+          // {
+          //   ssa.push_back(replaceAll(gh_cond, srcVars, bindVars[i]));
+          // }
           ssa.push_back(replaceAll(dst, srcVars, bindVars[bindVars.size() - 1]));
           if(debug) {
             outs() << "SSA BND: ";
@@ -938,15 +942,15 @@ namespace ufo
 
           ExprMap allModels;
           u.getModel(allVars, allModels);
-          pprint(u.getModel());
-          vector<double> _model;
-          for(int d = 0; d < srcVars.size(); d++)
-          {
+          // pprint(u.getModel());
+          // vector<double> _model;
+          // for(int d = 0; d < srcVars.size(); d++)
+          // {
             
-            _model.push_back(lexical_cast<double>(u.getModel(srcVars[d])));
-            outs() << "Model value: " << srcVars[d] << " = " << _model.back() << "\n";
-          }
-          models.push_back(_model);
+          //   _model.push_back(lexical_cast<double>(u.getModel(srcVars[d])));
+          //   outs() << "Model value: " << srcVars[d] << " = " << _model.back() << "\n";
+          // }
+          // models.push_back(_model);
 
           // ExprSet gh_condVars;
           // set<int> gh_condVarsIndex; // Get gh_cond vars here

@@ -68,6 +68,8 @@ int main (int argc, char ** argv)
   int str = getIntValue("--stren", 5, argc, argv);
   int debug = getIntValue("--debug", 0, argc, argv);
   bool useDataGrds = !getBoolValue("--data-guards", false, argc, argv);
+  bool gj = getBoolValue("--gj", false, argc, argv);
+  bool dc = getBoolValue("--dc", false, argc, argv);
   bool data2 = getBoolValue("--data2", false, argc, argv);
   bool doPhases = getBoolValue("--phase-data", false, argc, argv);
 
@@ -81,7 +83,7 @@ int main (int argc, char ** argv)
   if(learn == 1) 
     learnBounds(string(argv[argc-1]), cex, str, useDataGrds, data2, doPhases, debug);
   else
-    learnBoundsV2(string(argv[argc-1]), cex, str, useDataGrds, data2, doPhases, limit, debug);
+    learnBoundsV2(string(argv[argc-1]), cex, str, useDataGrds, data2, doPhases, limit, gj, dc, debug);
     
   return 0;
 }

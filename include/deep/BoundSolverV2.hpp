@@ -27,10 +27,13 @@ namespace ufo {
     bool dRec = false;
     bool dGenerous = false;
 
+    bool doGJ = false;
+    bool doConnect = false;
+
   public:
     // Constructor
-    BoundSolverV2(CHCs &r, int _b, bool _dg, bool d2, bool _dp, int _limit, int dbg)
-        : BoundSolver(r,_b,_dg,d2,_dp,dbg), limit(_limit), n(_limit)
+    BoundSolverV2(CHCs &r, int _b, bool _dg, bool d2, bool _dp, int _limit, bool gj, bool dc, int dbg)
+        : BoundSolver(r,_b,_dg,d2,_dp,dbg), limit(_limit), n(_limit), doGJ(gj), doConnect(dc)
     {
       // TODO: Initialize any additional member variables specific to BoundSolverV2
       for(auto& chc: r.chcs) 
@@ -85,8 +88,12 @@ namespace ufo {
       fcWithPrecond->isFact = true;
       fcWithPrecond->srcRelation = mk<TRUE>(m_efac);
       Expr fcPreCond = replaceAll(elim, tr->srcVars, fc->srcVars);
-      if(debug >= 3) outs() << "Original fcBody: " << fcWithPrecond->body << "\n";
-      fcWithPrecond->body = replaceAll(mk<AND>(fcPreCond, normalize(preCond), fcWithPrecond->body), fcWithPrecond->srcVars, tr->dstVars);
+      Expr body = replaceAll(fcWithPrecond->body, fcWithPrecond->srcVars, tr->dstVars);
+      body = u.removeRedundantConjuncts(body);
+      fcPreCond = replaceAll(mk<AND>(fcPreCond, normalize(preCond), body), fcWithPrecond->srcVars, tr->dstVars);
+      // fcPreCond = u.removeRedundantConjuncts(fcPreCond);
+      if (debug >= 3) outs() << "Original fcBody: " << fcWithPrecond->body << "\n";
+      fcWithPrecond->body = fcPreCond;
       fcWithPrecond->srcVars.clear();
 
       ExprVector qrBody;
@@ -207,64 +214,23 @@ namespace ufo {
       cm = conjoin(comm, m_efac);
     }
 
-    void splitExprs(ExprVector& BigPhi, map<int,ExprVector>& infMap)
+    void splitExprs(ExprVector& BigPhi, map<Expr,ExprVector>& infMap)
     {
+      // TODO: Come up with a more error proof map. One that considers operators too.
       if(debug >= 5) outs() << "\nSplit Exprs\n===========\n";
 
       for(auto& cc: BigPhi)
       {
-        Expr c = normalize(cc);
-        if(debug >= 5) outs() << "Splitting: " << c << "\n";
+        Expr c = normalize(cc, true);
+        if(debug >= 4) outs() << "Splitting: " << c << "\n";
         ExprVector lhs;
         getConj(c, lhs);
         for(int i = 0; i < lhs.size(); i++)
         {
-          bool toAdd = true;
-          for(int j = 0; j < infMap[i].size(); j++)
-          {
-            if(infMap[i][j]->left() != lhs[i]->left() || infMap[i][j] == lhs[i]) 
-            {
-              toAdd = false;
-            }
-          }
-          if(toAdd) infMap[i].push_back(lhs[i]);
+          Expr lhsi = lhs[i]->left();
+          infMap[lhsi].push_back(lhs[i]);
         }
       }
-
-      // ExprSet exprLhs;
-      // for(auto& c: BigPhi)
-      // {
-      //   ExprSet tmp;
-      //   getConj(c, tmp);
-      //   for (auto &t : tmp)
-      //   {
-      //     exprLhs.insert(t->left());
-      //   }
-      // }
-      // for (auto &v : exprLhs)
-      // {
-      //   for (auto &c : BigPhi)
-      //   {
-      //     ExprSet tmp;
-      //     getConj(c, tmp);
-      //     for (auto &t : tmp)
-      //     {
-      //       if (contains(t, v))
-      //       {
-      //         if(!infMap[v].empty())
-      //         {
-      //           Expr e = infMap[v][0];
-      //           if(e->op() == t->op())
-      //           {
-      //             infMap[v].push_back(t);
-      //           }
-      //         }
-      //         else
-      //           infMap[v].push_back(t);
-      //       }
-      //     }
-      //   }
-      // }
     }
 
     void filterBigPhi(ExprVector& BigPhi)
@@ -428,6 +394,8 @@ namespace ufo {
           outs() << "eq: " << *eq << "\n";
           outs() << "inEq: " << *inEq << "\n";
         }
+
+        if(eq == mk<TRUE>(m_efac) || inEq == mk<TRUE>(m_efac)) continue;
         double eqConst = lexical_cast<double>(eq->right());
         double inEqConst = lexical_cast<double>(inEq->right());
 
@@ -574,6 +542,61 @@ namespace ufo {
       return dc[invDecl];
     }
 
+    void infer(ExprVector& ev, ExprSet& inferred)
+    {
+      if (debug >= 4)
+        outs() << "...Inferring...\n";
+      for (int i = 0; i < ev.size(); i++)
+      {
+        Expr c = ev[i];
+        c = simplifyArithm(c);
+        c = u.removeRedundantConjuncts(c);
+        if (debug >= 4)
+          outs() << "  c: " << c << "\n";
+        ExprVector inferSeeds;
+        if (isOpX<EQ>(c))
+        {
+          inferSeeds = {mk<GEQ>(c->left(), c->right()),
+                        mk<LEQ>(c->left(), c->right())};
+        }
+        else
+        {
+          inferSeeds = {c};
+        }
+
+        if (i == 0)
+        {
+          inferred.insert(inferSeeds.begin(), inferSeeds.end());
+        }
+        else
+        {
+          for (auto itr = inferred.begin(); itr != inferred.end();)
+          {
+            bool toBreak = false;
+            if (!u.implies(c, *itr) || u.implies(*itr, c))
+            {
+              if (debug >= 4)
+                outs() << "  Erasing: " << *itr << "\n";
+              itr = inferred.erase(itr);
+              toBreak = true;
+              if (inferred.empty())
+                inferred.insert(c);
+            }
+            if (toBreak)
+              break;
+            itr++;
+          }
+        }
+
+        if (debug >= 4)
+        {
+          outs() << "Current inferred:\n";
+          pprint(inferred, 2);
+          outs() << "\n";
+        }
+      }
+    }
+
     ExprSet infer(ExprVector &BigPhi1)
     {
       // for >3 vars then do case analysis.
@@ -584,7 +607,7 @@ namespace ufo {
       // Check that the previous expr is an overapproximation.
       // Process them in order, run simplifyArithm on each one.
       ExprSet inferredRet;
-      map<int, ExprVector> infMap;
+      map<Expr, ExprVector> infMap;
       ExprVector BigPhi;
 
       Expr common; // Sometimes common will be needed. For ABC_ex01 it is not.
@@ -594,24 +617,6 @@ namespace ufo {
       // Do data learning on BigPhi.
       ExprSet inferredFromData;
       inferredFromData = inferWithData(BigPhi); // infer2
-      
-      // filter BigPhi with what's been learned from data.
-      // ExprVector smallphi = BigPhi;
-      // Expr fromData = conjoin(inferredFromData, m_efac);
-      // for(auto it = smallphi.begin(); it != smallphi.end(); )
-      // {
-      //   if(!u.isSat(*it, fromData))
-      //   {
-      //     if(debug >= 3) outs() << "  Removed: " << *it << "\n";
-      //     it = smallphi.erase(it);
-      //   }
-      //   else
-      //   {
-      //     ++it;
-      //   }
-      // }
-
-      // BigPhi = smallphi;
 
       splitExprs(BigPhi, infMap);
       if (debug >= 4)
@@ -629,53 +634,8 @@ namespace ufo {
       for(auto ev: infMap)
       {
         ExprSet inferred;
-        if(debug >= 4) outs() << "Inferring...\n";
-        for(int i = 0; i < ev.second.size(); i++)
-        {
-          Expr c = ev.second[i];
-          c = simplifyArithm(c);
-          c = u.removeRedundantConjuncts(c);
-          if(debug >= 4) outs() << "  c: " << c << "\n";
-          ExprVector inferSeeds;
-          if(isOpX<EQ>(c))
-          {
-            inferSeeds = {mk<GEQ>(c->left(), c->right()), 
-                          mk<LEQ>(c->left(), c->right())};
-          }
-          else
-          {
-            inferSeeds = {c};
-          }
-
-          if(i == 0)
-          {
-            inferred.insert(inferSeeds.begin(), inferSeeds.end());
-          }
-          else
-          {
-            for(auto itr = inferred.begin(); itr != inferred.end(); )
-            {
-              bool toBreak = false;
-              if(!u.implies(c, *itr) || u.implies(*itr, c))
-              {
-                if(debug >= 4) outs() << "  Erasing: " << *itr << "\n";
-                itr = inferred.erase(itr);
-                toBreak = true;
-                if(inferred.empty()) inferred.insert(c);
-              }
-              if(toBreak) break;
-              itr++;              
-            }
-          }
-
-          if(debug >= 4)
-          {
-            outs() << "Current inferred:\n";
-            pprint(inferred, 2);
-            outs() << "\n";
-          }
-          
-        }
+        infer(ev.second, inferred);
+        
         inferredRet.insert(inferred.begin(), inferred.end());
       }
 
@@ -724,7 +684,7 @@ namespace ufo {
 
       if(debug >= 3) ruleManager.print(true);
 
-      res = dl2.connectPhase(src, dst, n, invDecl, block, invs, loopGuard);
+      res = dl2.connectPhase(src, dst, n, invDecl, block, invs, loopGuard, doGJ, doConnect);
       if (res == true)
       {
         dl2.getDataCands(candMap[invDecl], invDecl);
@@ -741,6 +701,24 @@ namespace ufo {
         }
       }
 
+      ExprVector rowsExpr = dl2.exprForRows(invDecl);
+
+      for(auto& r: rowsExpr)
+      {
+        if(debug >= 3) outs() << "  rowsExpr: " << r << "\n";
+        for(auto itr = candMap[invDecl].begin(); itr != candMap[invDecl].end();)
+        {
+          if(!u.isSat(r, *itr))
+          {
+            if(debug >= 3) outs() << "  Removed: " << *itr << "\n";
+            itr = candMap[invDecl].erase(itr);
+          }
+          else
+          {
+            ++itr;
+          }
+        }
+      }
       branchPreCond = conjoin(dataGrds, m_efac);
       branchPreCond = simplifyArithm(branchPreCond);
       if (debug >= 3)
@@ -758,7 +736,7 @@ namespace ufo {
       return res;
     }
 
-    Expr weakenAndSplit(ExprVector& BigPhi, Expr preCond) 
+    Expr weakenAndSplit(ExprVector& BigPhi, Expr bound) 
     {
       // Break equalities into inequalities.
       // Find weakest.
@@ -770,23 +748,25 @@ namespace ufo {
         outs() << "  BigPhi size: " << BigPhi.size() << "\n";
         for(auto& c: BigPhi)
         {
-          outs() << "  From BigPhi: " << c << "\n";
+          outs() << "  From BigPhi: " << c << std::endl;;
         }
       }
+
       ExprSet inferred = infer(BigPhi);
-      // Expr c = conjoin(inferred, m_efac);
-      Expr c = mk<TRUE>(m_efac);
-      for(auto& i: inferred) {
-        c = mk<AND>(c, i);
-        if(debug >= 4) outs() << "  c: " << c << "\n";
-        boost::tribool safe = checkSafety(c, preCond);
-        if(debug >= 4) 
-        {
-          if(!safe) outs() << "\n\n********\n*UNSAFE*\n********\n\n";
-        }
-        if(safe) return c;
+      // u.removeRedundantConjuncts(inferred);
+      Expr c = conjoin(inferred, m_efac);
+      if(debug >= 4) outs() << "  c: " << c << "\n";
+      boost::tribool safe = checkSafety(c, bound);
+
+      if(debug >= 4) 
+      {
+        if(!safe) outs() << "\n\n********\n*UNSAFE*\n********\n\n";
+        else outs() << "\n\n******\n*SAFE*\n******\n\n";
       }
-      return mk<TRUE>(m_efac);
+
+      if(!safe) return mk<TRUE>(m_efac);
+      if(debug >= 4) outs() << "  Result from checkSafety: " << c << " => " << replaceAll(bound, fc->srcVars, tr->srcVars) << "\n";
+      return c;
     }
 
     Expr abduction(Expr& phi, Expr& f, Expr& preCond, 
@@ -827,9 +807,10 @@ namespace ufo {
         fg = replaceAll(fg, vars[vars.size() - i - 1], vars[vars.size() - i]);
       }
       fg = replaceAll(fg, rm.invVars[invDecl], vars[vars.size() - 1]);
+      Expr lg = replaceAll(loopGuard, rm.invVars[invDecl], vars[vars.size() - 1]);
       if(debug >= 5) outs() << "  gh value (vars replaced): " << fg << "\n";
 
-      phi = mk<AND>(phi, fg);
+      phi = mk<AND>(phi, mk<AND>(fg,mkNeg(lg)));
       if(debug >= 4)
       {
         outs() << "  phi: ";
@@ -861,6 +842,34 @@ namespace ufo {
       return e;
     }
 
+    boost::tribool toKeep(Expr p)
+    {
+      ExprVector vars;
+      filter(p, IsConst(), inserter(vars, vars.begin()));
+      ExprVector conjs;
+      getConj(p, conjs);
+      u.isSat(p);
+      Expr model = u.getModel();
+      outs() << "Model: " << model << "\n";
+      ExprSet models;
+      getConj(model, models);
+      ExprSet negModels;
+      for(auto m = models.begin(); m != models.end(); m++)
+      {
+        negModels.insert(mkNeg(*m));
+        outs() << "Model: " << *m << "\n";
+      }
+      Expr m = mk<AND>(conjoin(negModels, m_efac), p);
+      outs() << "Model: " << m << "\n"; 
+      boost::tribool res = u.isSat(m);
+      if(res) outs() << "SAT\n";
+      else outs() << "UNSAT\n";
+
+      return  res;
+    }
+
+    vector<ExprVector> abds;
+    vector<ExprVector> allCombs;
     Expr getPre(Expr p, Expr f, int n)
     {
       // p holds the conjunction of the negated previous preconditions.
@@ -869,6 +878,15 @@ namespace ufo {
       // returns the precondition for the next iteration.
 
       if(debug >= 2) outs() << "\n\nGet Pre\n=======\n";
+
+      if(debug >= 5)
+      {
+        outs() << "  p: ";
+        pprint(p, 2);
+        outs() << "  f: ";
+        pprint(f, 2);
+        outs() << "  n: " << n << "\n";
+      }
 
       ExprSet Phi;
       CHCs rm(m_efac, z3, debug);
@@ -879,20 +897,23 @@ namespace ufo {
       rules.push_back(&qr_nogh);
       prepareRuleManager(rm, rules);
 
-      for(auto& hr: rm.chcs)
-      {
-        if(hr.isFact)
-        {
-          hr.body = mk<AND>(hr.body, replaceAll(p, invVars, invVarsPr));
-          if(debug >= 4) outs() << "  hr.body: " << hr.body << "\n";
-        }
-      }
+      // for(auto& hr: rm.chcs)
+      // {
+      //   if(hr.isFact)
+      //   {
+      //     hr.body = mk<AND>(hr.body, replaceAll(p, invVars, invVarsPr));
+      //     if(debug >= 4) outs() << "  hr.body: " << hr.body << "\n";
+      //   }
+      // }
 
       BndExpl bnd(rm, (debug > 0));
       ExprVector BigPhi;
-      Expr preCond;
+      Expr bound;
 
-      for(int k = 1; k <= n; k++) {
+      abds.clear();
+      allCombs.clear();
+      for(int k = 1; k <= n; k++) 
+      {
         vector<int> trace;
         buildTrace(trace, k);
 
@@ -906,16 +927,16 @@ namespace ufo {
         }
 
         vector<ExprVector> vars;
-        Expr elim = simplifyArithm(abduction(phi, f, preCond, k, vars, trace, bnd, rm));
+        Expr elim = simplifyArithm(abduction(phi, f, bound, k, vars, trace, bnd, rm));
 
         // value of y = 1, y = 2, y = 4... make an example like this.
         // needs to handle many variables.
 
-        if (debug >= 4)
-        {
-          outs() << "  phi: ";
-          pprint(phi, 2);
-        }
+        // if (debug >= 4)
+        // {
+        //   outs() << "  phi: ";
+        //   pprint(phi, 2);
+        // }
         if (debug >= 3)
         {
           outs() << "  Result from Abduction: ";
@@ -933,30 +954,145 @@ namespace ufo {
         ExprVector prjcts, prjcts2;
         u.flatten(elim, prjcts2, false, invVars, keepQuantifiersRepl);
 
+        // filter the projections somehow. We only want ones relevant to the current search.
+
         for(auto& p: prjcts2)
         {
-          prjcts.push_back(simplifyArithm(p));
+          if(debug >= 4) outs() << "  Checking Projection: " << simplifyArithm(p) << "\n";
+          // TODO: Filter using models.
+          if(!toKeep(p))
+            prjcts.push_back(simplifyArithm(p));
         }
 
-        for(auto p: prjcts)
-        {
-          if(debug >= 5) outs() << "  Projection: " << p << "\n";
-          // if(debug >= 4) outs() << "  isSat? " << p << " && " << branchPreCond << "\n";
-          // if(u.isSat(p, branchPreCond))
-          // {
-            if (debug >= 3)
-            {
-              outs() << "  ADDED TO BIGPHI: " << simplifyArithm(normalize(p, true)) << "\n";
-            }
-            BigPhi.push_back(p);
-          // }
-        }
+        abds.push_back(prjcts);
 
-        if(debug >= 5) outs() << "  Ghost Value: " << ghostValue << "\n";
+        // for(int i = 0; i < abds.size(); i++)
+        // {
+        //   for(int j = 0; j < abds[i].size(); j++)
+        //   {
+        //     if(debug >= 4) outs() << "  Abduction " << i << ": " << abds[i][j] << "\n\n";
+        //   }
+        // }
+
+        // for(auto p: prjcts)
+        // {
+        //   if(debug >= 5) outs() << "  Projection: " << p << "\n";
+        //   // TODO: Check the projections iteratively as combinations.
+        //   // Run through the rest of
+        //   if (debug >= 3)
+        //   {
+        //     outs() << "  ADDED TO BIGPHI: " << simplifyArithm(normalize(p, true)) << "\n";
+        //   }
+        //   BigPhi.push_back(p);
+        // }
+
+        // if(debug >= 5) outs() << "  Ghost Value: " << ghostValue << "\n";
       }
-      Expr c = weakenAndSplit(BigPhi, preCond);
+
+      if(abds.size() < 1) return mk<TRUE>(m_efac);
+      // abds.erase(abds.begin());
+
+      for(int i = 0; i < abds.size(); i++)
+      {
+        for(int j = 0; j < abds[i].size(); j++)
+        {
+          if(debug >= 4) outs() << "  AAbduction " << i << ": " << abds[i][j] << "\n";
+        }
+      }
+      getAllCombs(allCombs, abds, 0);
+      if(debug >= 4)
+      {
+        outs() << "  All Combs size: " << allCombs.size() << "\n";
+        int i = 0;
+        for(auto& c: allCombs)
+        {
+          for(auto& cc: c)
+          {
+            outs() << "Comb " << i << ": " << cc << "\n";
+          }
+          i++;
+        }
+      }
+      Expr c = mk<TRUE>(m_efac);
+
+      for(int i = 0; i < allCombs.size(); i++)
+      {
+        ExprVector current;
+        for(int j = 0; j < allCombs[i].size(); j++)
+        {
+          current.push_back(allCombs[i][j]);
+        }
+
+        if(debug >= 3) 
+        {
+          outs() << "  current projs:\n";
+          pprint(current);
+          outs() << "\n\n";
+        }
+        Expr c = weakenAndSplit(current, bound);
+        if(debug >= 3) outs() << "  Result from W&S: " << c << "\n";
+        if(c != mk<TRUE>(m_efac)) return c;
+
+      }
 
       return c;
+    }
+
+    void getAllCombs(vector<ExprVector>& allCombs, vector<ExprVector>& abds, int i)
+    {
+      if(abds.empty()) return;  
+      if(debug >= 4)
+      {
+        outs() << "  All Combs size: " << allCombs.size() << "\n";
+        int i = 0;
+        for(auto& c: allCombs)
+        {
+          for(auto& cc: c)
+          {
+            outs() << "Comb " << i << ": " << cc << "\n";
+          }
+          i++;
+        }
+      }      
+
+      outs() << "i: " << i;
+      int j = abds[i].size();
+      outs() << "  j: " << j << "\n";
+
+      if(i == 0)
+      {
+        for(int d = 0; d < j; d++)
+          allCombs.push_back({abds[i][d]});
+        outs() << "allCombs.size() 0 " << allCombs.size() << "\n";
+      }
+      else
+      {
+        vector<ExprVector> temp;
+
+        for(int l = 0; l < j; l++)
+        {
+          for(int k = 0; k < allCombs.size(); k++)
+          {
+            temp.push_back(allCombs[k]);
+          }
+        }
+
+        int jPrev = abds[i-1].size();
+        int k = 0;
+        for(int l = 0; l < temp.size(); l++)
+        {
+          outs() << "j: " << j << "  jPrev: " << jPrev << "  l: " << l << "  k: " << k << "\n";
+          if(l != 0 && l % jPrev == 0) k++;
+          if(k >= abds[i].size()) break;
+          temp[l].push_back(abds[i][k]);
+        }
+        
+        allCombs = temp;
+      } 
+
+
+      if(i + 1 >= abds.size()) return;
+      getAllCombs(allCombs, abds, i + 1);
     }
 
     Expr constructPhi(Expr& p)
@@ -1012,7 +1148,6 @@ namespace ufo {
         {
           outs() << "  phi: ";
           pprint(phi, 2);
-
         }
 
         if (!u.isSat(phi))
@@ -1049,7 +1184,7 @@ namespace ufo {
             m.push_back(i+1);
             // update to use models for data learning.
             model = u.getModel();
-            if (debug >= 3)
+            if (debug >= 5)
             {
               outs() << "  i: " << m.back() << "\n";
               outs() << "  Model: ";
@@ -1128,6 +1263,7 @@ namespace ufo {
 
               psi = getPre(p, f, m.back());
               psi = simplifyArithm(psi);
+              if(debug >= 4) outs() << "  psi after getPre: " << psi << "\n";
               if (psi != mk<TRUE>(m_efac) && psi != mk<FALSE>(m_efac))
               {
                 if (debug >= 2)
@@ -1188,7 +1324,7 @@ namespace ufo {
   // TODO: Test implementation over more benchmarks.
 
   inline void learnBoundsV2(string smt, int inv, int stren, bool dg,
-                                  bool data2, bool doPhases, int limit, int debug)
+                                  bool data2, bool doPhases, int limit, bool gj, bool dc, int debug)
   {
     ExprFactory m_efac;
     EZ3 z3(m_efac);
@@ -1196,7 +1332,9 @@ namespace ufo {
 
     ruleManager.parse(smt, false);
 
-    BoundSolverV2 bs(ruleManager, inv, dg, data2, doPhases, limit, debug);
+    // TODO: Add preprocessing to replace constants with variables.
+
+    BoundSolverV2 bs(ruleManager, inv, dg, data2, doPhases, limit, gj, dc, debug);
     bs.removeQuery();
     bs.setUpQueryAndSpec(mk<TRUE>(m_efac), mk<TRUE>(m_efac));
     // bs.collectPhaseGuards();

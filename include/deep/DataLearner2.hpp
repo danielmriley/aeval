@@ -35,24 +35,6 @@ namespace ufo
     vector<bool> freeVars;
     int debug;
 
-    void printMatrix(matrix &A)
-    {
-      // cout << "==  MATRIX  ==\n";
-      int n = A.size();
-      int m = A[0].size();
-      for (int i = 0; i < n; i++)
-      {
-        for (int j = 0; j < m; j++)
-        {
-          if (j > 0)
-            cout << " ";
-          cout << A[i][j];
-        }
-        cout << "\n";
-      }
-      //  cout << "\n";
-    }
-
     RATIONAL rmod(RATIONAL x, RATIONAL y)
     { // Modulus for rationals
       RATIONAL res;
@@ -354,7 +336,7 @@ namespace ufo
   public:
     basisFinder(matrix &_A, int dbg = 0) : A(_A), debug(dbg)
     {
-      if (!A.empty())
+      if (A.empty())
       {
         numVars = 0;
         numRows = 0;
@@ -363,6 +345,24 @@ namespace ufo
 
       numVars = A[0].size();
       numRows = A.size();
+    }
+
+    void printMatrix(matrix &A)
+    {
+      outs() << "==  MATRIX  ==\n";
+      int n = A.size();
+      int m = A[0].size();
+      for (int i = 0; i < n; i++)
+      {
+        for (int j = 0; j < m; j++)
+        {
+          if (j > 0)
+            cout << " ";
+          cout << A[i][j];
+        }
+        cout << "\n";
+      }
+      //  cout << "\n";
     }
 
     matrix findKernelBasis()
@@ -413,12 +413,19 @@ namespace ufo
     void connectCands(Expr srcRel)
     {
       // dataCands.clear();
+      if(debug >= 3) 
+      {
+        matrix A = doubleToRational(models[srcRel]);
+        basisFinder bf(A, debug);
+        bf.printMatrix(A);
+      }
+
       if (models[srcRel].size() < 2)
       {
         return;
       }
 
-      auto ritr = models[srcRel].rbegin();
+      auto ritr = models[srcRel].begin();
       vector<double> e1 = *ritr;
       ritr++;
       vector<double> e2 = *ritr;
@@ -487,7 +494,7 @@ namespace ufo
           l = normalize(l);
           dataCands[srcRel].insert(l);
           if (debug >= 1)
-            outs() << "  CONNECT: " << l << "\n";
+            outs() << "  CONNECT(-): " << l << "\n";
 
           r = mk<PLUS>(ev[i]->right(), ev[j]->right());
           l = mk<PLUS>(ev[i]->left(), ev[j]->left());
@@ -495,30 +502,41 @@ namespace ufo
           l = normalize(l);
           dataCands[srcRel].insert(l);
           if (debug >= 1)
-            outs() << "  CONNECT: " << l << "\n";
+            outs() << "  CONNECT(+): " << l << "\n";
         }
       }
     }
 
-    void dotProd(Expr srcRel, vector<RATIONAL> firstRow)
+    Expr dotProduct(Expr srcRel, vector<RATIONAL> row, bool addToDataCands = true)
     {
       ExprVector terms;
+      ExprSet cands;
       int n = 0;
-      for (int i = 1; i < invVars[srcRel].size(); i++)
+      for (int i = 0; i < invVars[srcRel].size(); i++)
       {
         terms.clear();
-        terms.push_back(invVars[srcRel][i - 1]);
-        terms.push_back(mkMPZ(-numerator(firstRow[i]), srcRel->getFactory()));
-        dataCands[srcRel].insert(simplifyArithm(mk<EQ>(mkplus(terms, srcRel->getFactory()), mkMPZ(0, srcRel->getFactory()))));
+        terms.push_back(invVars[srcRel][i]);
+        terms.push_back(mkMPZ(-numerator(row[i+1]), srcRel->getFactory()));
+        cands.insert(simplifyArithm(mk<EQ>(mkplus(terms, srcRel->getFactory()), mkMPZ(0, srcRel->getFactory()))));
         n++;
       }
-      if (debug >= 1)
-        outs() << "CANDS FROM DOTPROD: " << n << "\n";
+      if (debug >= 3)
+      {
+        outs() << "CANDS FROM dotProduct: " << n << "\n";
+        for(auto &c : cands) {
+          outs() << "  " << *c << "\n";
+        }
+      }
+
+      if (addToDataCands) dataCands[srcRel].insert(cands.begin(), cands.end());
+
+      return conjoin(cands, srcRel->getFactory());
     }
 
     void candsFromBasis(Expr srcRel)
     {
       ExprVector terms;
+      ExprSet cands;
       if (basis[srcRel].empty())
       {
         if (debug >= 1)
@@ -538,11 +556,17 @@ namespace ufo
         cnt++;
         Expr cnst = mkMPZ(-numerator(v[0]), srcRel->getFactory());
         Expr datcand = mk<EQ>(mkplus(terms, srcRel->getFactory()), cnst);
-        dataCands[srcRel].insert(datcand);
+        cands.insert(normalize(datcand));
         // dataCands[srcRel].insert(mk<EQ>(mkplus(terms, srcRel->getFactory()), mkMPZ(0, srcRel->getFactory())));
       }
       if (debug >= 1)
         outs() << "CANDS FROM BASIS: " << cnt << "\n";
+      if(debug >= 2) {
+        for(auto &c : cands) {
+          outs() << "  " << *c << "\n";
+        }
+      }
+      dataCands[srcRel].insert(cands.begin(), cands.end());
     }
 
     matrix doubleToRational(vector<vector<double>> models)
@@ -570,11 +594,12 @@ namespace ufo
       basisFinder bf(A, debug);
 
       firstRow = *A.begin();
+      auto row = firstRow;
 
-      if (firstRow.empty())
+      if (row.empty())
         return;
-      // dotProd(srcRel, firstRow);
 
+      // dotProduct(srcRel, row);
       // Now make cands from the reduced matrix.
       basis[srcRel] = bf.findKernelBasis();
       candsFromBasis(srcRel);
@@ -585,7 +610,7 @@ namespace ufo
 
     boost::tribool connectPhase(Expr src, Expr dst, int k = 1,
                     Expr srcRel = NULL, Expr block = NULL, Expr invs = NULL,
-                    Expr preCond = NULL)
+                    Expr preCond = NULL, bool doGJ = false, bool doConnect = false)
       {
         // Get data matrix.
         // Refactor so that the matrix isn't built over and over.
@@ -604,9 +629,24 @@ namespace ufo
       if (models[srcRel].empty())
         return false;
       // firstRow = models[srcRel][0];
-      connectCands(srcRel);
-      computeData(srcRel);
+      if(doConnect) connectCands(srcRel);
+      if(doGJ) computeData(srcRel); // Gauss Jordan Elimination method.
       return res;
+    }
+
+    ExprVector exprForRows(Expr srcRel)
+    {
+      if(models[srcRel].empty()) return ExprVector();
+
+      matrix A = doubleToRational(models[srcRel]);
+
+      ExprVector rowsExpr;
+      for(auto &row : A) 
+      {
+        rowsExpr.push_back(dotProduct(srcRel, row, false));
+      }
+
+      return rowsExpr;
     }
 
     boost::tribool computeData(Expr srcRel, map<Expr, ExprVector> &arrRanges, map<Expr, ExprSet> &constr)
