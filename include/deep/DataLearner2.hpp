@@ -425,7 +425,7 @@ namespace ufo
         return;
       }
 
-      auto ritr = models[srcRel].begin();
+      auto ritr = models[srcRel].rbegin();
       vector<double> e1 = *ritr;
       ritr++;
       vector<double> e2 = *ritr;
@@ -626,11 +626,12 @@ namespace ufo
         return res;
       }
 
-      if (models[srcRel].empty())
-        return false;
+      if (models[srcRel].empty()) return false;
+
       // firstRow = models[srcRel][0];
       if(doConnect) connectCands(srcRel);
       if(doGJ) computeData(srcRel); // Gauss Jordan Elimination method.
+
       return res;
     }
 

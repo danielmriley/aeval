@@ -93,6 +93,7 @@ namespace ufo
         if (a.isInductive) tr = &a;
         else if (a.isQuery) qr = &a;
         else fc = &a;
+        
       tr_orig = *tr;
 
       fc_nogh = *fc;

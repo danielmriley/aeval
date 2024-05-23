@@ -1,10 +1,10 @@
 #ifndef BOUND_SOLVER_V2_HPP
 #define BOUND_SOLVER_V2_HPP
 
-#include "BoundSolver.hpp" // Include BoundSolver.hpp
+#include "BoundSolver.hpp" 
 
 namespace ufo {
-  class BoundSolverV2 : public BoundSolver { // Inherit from BoundSolver
+  class BoundSolverV2 : public BoundSolver {
   private:
     ExprMap bounds;
     Expr fcBodyOrig;
@@ -29,13 +29,17 @@ namespace ufo {
 
     bool doGJ = false;
     bool doConnect = false;
+    bool absConsts = false;
+
+    ExprMap abstrVars;
+    string abdstrName = "_AB_";
 
   public:
     // Constructor
-    BoundSolverV2(CHCs &r, int _b, bool _dg, bool d2, bool _dp, int _limit, bool gj, bool dc, int dbg)
-        : BoundSolver(r,_b,_dg,d2,_dp,dbg), limit(_limit), n(_limit), doGJ(gj), doConnect(dc)
+    BoundSolverV2(CHCs &r, int _b, bool _dg, bool d2, bool _dp, int _limit, bool gj, bool dc, bool abConsts, int dbg)
+        : BoundSolver(r,_b,_dg,d2,_dp,dbg), limit(_limit), n(_limit), doGJ(gj), doConnect(dc), absConsts(abConsts)
     {
-      // TODO: Initialize any additional member variables specific to BoundSolverV2
+      if(absConsts) abstractConsts();
       for(auto& chc: r.chcs) 
       {
         if(chc.isFact)
@@ -44,6 +48,183 @@ namespace ufo {
           if(debug >= 6) outs() << "fcBodyOrig: " << fcBodyOrig << "\n";
         }
       }
+      for (auto & a : ruleManager.chcs)
+        if (a.isInductive) tr = &a;
+        else if (a.isQuery) qr = &a;
+        else fc = &a;
+        
+      tr_orig = *tr;
+
+      fc_nogh = *fc;
+      tr_nogh = *tr;
+      qr_nogh = *qr;
+      removeQuery();
+    }
+
+    void abstractConst(Expr e, HornRuleExt& hr)
+    {
+      outs() << "Abstract a constant: ";
+      outs() << "e: " << e << "\n";
+      outs() << "e->arg(i)" << e->arg(1) << "\n";
+      int val = lexical_cast<int>(e);
+      if(val <= limit) return;
+
+      Expr var;
+      Expr varPr;
+      Expr type = e->arg(1);
+      for(auto& av: abstrVars)
+      {
+        if(av.second == e)
+        {
+          var = fapp(constDecl(av.first, type));
+          varPr = mkTerm<string>(lexical_cast<string>(av.first) + "'", e->getFactory());
+          varPr = fapp(constDecl(varPr, type));
+          if(debug >= 4) outs() << "Constant already abstracted: " << var << "\n";
+          hr.body = replaceAll(hr.body, e, var);
+          // hr.body = mk<AND>(hr.body, mk<EQ>(av.first, av.second));
+          return;
+        }
+
+        cpp_int eVal = lexical_cast<cpp_int>(e);
+        cpp_int avVal = lexical_cast<cpp_int>(av.second);
+        if(avVal % eVal == 0)
+        {
+          cpp_int div = avVal / eVal;
+          var = mk<MULT>(mkMPZ(div, av.first->getFactory()), av.first);
+          var = fapp(constDecl(var, type));
+          varPr = mkTerm<string>(lexical_cast<string>(av.first) + "'", e->getFactory());
+          varPr = fapp(constDecl(varPr, type));
+          if (debug >= 4)
+            outs() << "Constant already abstracted: " << var << "\n";
+          hr.body = replaceAll(hr.body, e, var);
+          return;
+        }
+      }
+      var = mkTerm<string>("_AB_" + lexical_cast<string>(abstrVars.size()), e->getFactory());
+      var = fapp(constDecl(var, type));
+      varPr = mkTerm<string>("_AB_" + lexical_cast<string>(abstrVars.size()) + "'", e->getFactory());
+      varPr = fapp(constDecl(varPr, type));
+      abstrVars[var] = e;
+      if (debug >= 4)
+        outs() << "var: " << var << "\n";
+      hr.body = replaceAll(hr.body, e, var);
+      // hr.body = mk<AND>(hr.body, mk<EQ>(var, e));
+      if (debug >= 4)
+        outs() << "hr.body: " << hr.body << "\n";
+    }
+
+    void findIte(Expr& rhs, HornRuleExt& hr)
+    {
+      if(isOpX<ITE>(rhs))
+      {
+        Expr cond = rhs->left();
+        Expr then = rhs->arg(1);
+        Expr els = rhs->arg(2);
+        if (debug >= 4)
+          outs() << "rhs: " << rhs << "\n";
+        if (debug >= 4)
+          outs() << "cond: " << cond << "\n";
+        if (debug >= 4)
+          outs() << "then: " << then << "\n";
+        if (debug >= 4)
+          outs() << "els: " << els << "\n";
+
+        if(isOpX<ITE>(then))
+        {
+          findIte(then, hr);
+        }
+        if(isOpX<ITE>(els))
+        {
+          findIte(els, hr);
+        }
+
+        if(isNumericConst(cond->right()))
+        {
+          abstractConst(cond->right(), hr);
+        }
+      }
+      else if(containsOp<ITE>(rhs))
+      {
+        Expr lhs = rhs->left();
+        Expr rhs2 = rhs->right();
+        if(debug >= 4) outs() << "lhs: " << lhs << "\n";
+        if(debug >= 4) outs() << "rhs2: " << rhs2 << "\n";
+        if(lhs != NULL && containsOp<ITE>(lhs)) findIte(lhs, hr);
+        if(rhs2 != NULL && containsOp<ITE>(rhs2)) findIte(rhs2, hr);
+      }
+    }
+
+    void abstractConsts() // Look for large numerical values and abstract them to a variable.
+    {
+      // Find values.
+      for(auto& hr: ruleManager.chcs)
+      {
+        // if(hr.isInductive || hr.isFact)
+        // {
+          ExprVector conjs;
+          // ExprSet consts;
+          getConj(hr.body, conjs);
+          for(auto& c: conjs)
+          {
+            if(debug >= 4) outs() << "conj: " << c << "\n";
+            ExprVector vars;
+            filter(c, IsConst(), inserter(vars, vars.begin()));
+            // if(emptyIntersect(vars, ruleManager.invVarsPrime[hr.srcRelation]))
+            // {
+              Expr rhs = c->right();
+              if(isNumericConst(rhs))
+              {
+                abstractConst(rhs, hr);
+              }
+              if(containsOp<ITE>(rhs))
+              {
+                if(debug >= 4) outs() << "HAS ITE\n";
+                if(debug >= 4) outs() << "rhsITE: " << rhs << "\n";
+                findIte(rhs, hr);
+              }
+              // TODO: Test other cases.
+            // }
+          }
+        // }
+      }
+      for(auto& hr: ruleManager.chcs)
+      {
+        for(auto& av: abstrVars)
+        {
+          if(hr.srcRelation != mk<TRUE>(m_efac))
+          {
+            if(debug >= 4) outs() << "av1: " << av.first << "\n";
+            if(debug >= 4) outs() << "av2: " << av.second << "\n";
+            hr.srcVars.push_back(av.first);
+          }
+          Expr dstVar = mkTerm<string>(lexical_cast<string>(av.first) + "'", av.first->getFactory());
+          dstVar = fapp(constDecl(dstVar, av.second->arg(1)));
+          if(!hr.isQuery) hr.dstVars.push_back(dstVar);
+
+          // if(hr.isFact)
+          // {
+          //   hr.body = mk<AND>(hr.body, mk<GT>(dstVar, mpzZero));
+          // }
+
+          if(hr.isInductive)
+          {
+            hr.body = mk<AND>(hr.body, mk<EQ>(av.first, dstVar));
+          }
+        }
+        if (debug >= 4)
+        {
+          outs() << "Vars for " << hr.srcRelation << ": ";
+          for(auto& v: hr.srcVars)
+          {
+            outs() << v << " ";
+          }
+          outs() << "\n";
+        }
+      }
+
+      if(debug >= 4) outs() << "** NEW CHCS **\n";
+      ruleManager.print(true);
+      // exit(0);
     }
 
     void copyRule(HornRuleExt* dst, HornRuleExt* src)
@@ -597,6 +778,44 @@ namespace ufo {
       }
     }
 
+    vector<ExprVector> separateOps(ExprVector ev)
+    {
+      // separate the expressions based on the operators.
+      vector<ExprVector> ret;
+      map<Expr, ExprVector> opMap;
+      while(!ev.empty())
+      {
+        auto it = ev.begin();
+        opMap[*it].push_back(*it);
+        it = ev.erase(it);
+        for(auto m = opMap.begin(); m != opMap.end(); m++)
+        {
+          while(it != ev.end())
+          {
+            if(m->first->op() == (*it)->op())
+            {
+              m->second.push_back(*it);
+              it = ev.erase(it);
+            }
+            else { it++; }
+            
+          }
+          it = ev.begin();
+        }
+      }
+
+      for(auto& m: opMap)
+      {
+        outs() << "  OP: " << m.first->op() << "\n";
+        ret.push_back(m.second);
+        for(auto& mm: m.second)
+        {
+          outs() << "  From opMap: " << mm << "\n";
+        }
+      }
+      return ret;
+    }
+
     ExprSet infer(ExprVector &BigPhi1)
     {
       // for >3 vars then do case analysis.
@@ -616,7 +835,8 @@ namespace ufo {
 
       // Do data learning on BigPhi.
       ExprSet inferredFromData;
-      inferredFromData = inferWithData(BigPhi); // infer2
+      // TODO: make this a flag....
+      // inferredFromData = inferWithData(BigPhi); // infer2
 
       splitExprs(BigPhi, infMap);
       if (debug >= 4)
@@ -631,13 +851,22 @@ namespace ufo {
         }
       }
 
-      for(auto ev: infMap)
+      for (auto ev : infMap)
       {
-        ExprSet inferred;
-        infer(ev.second, inferred);
+        vector<ExprVector> vec = separateOps(ev.second);
+        for(auto& v : vec)
+        {
+          ExprSet inferred;
+          infer(v, inferred);
+          inferredRet.insert(inferred.begin(), inferred.end());        
+        } 
         
-        inferredRet.insert(inferred.begin(), inferred.end());
       }
+
+      ExprVector reRun;
+      reRun.insert(reRun.end(), inferredRet.begin(), inferredRet.end());
+      inferredRet.clear();
+      infer(reRun, inferredRet);
 
       if(debug >= 2)
       {
@@ -1134,6 +1363,7 @@ namespace ufo {
       // Implements Alg 1 and Alg 2 from the paper "Exact Loop Bound Analysis"
       
       if(debug) outs() << "\n\nSolve\n=====\n\n";
+      if(debug >= 3) ruleManager.print(true);
 
       Expr prevPsi;
       // use exprset including fc->body and tr->body 
@@ -1324,7 +1554,7 @@ namespace ufo {
   // TODO: Test implementation over more benchmarks.
 
   inline void learnBoundsV2(string smt, int inv, int stren, bool dg,
-                                  bool data2, bool doPhases, int limit, bool gj, bool dc, int debug)
+                                  bool data2, bool doPhases, int limit, bool gj, bool dc, bool ac, int debug)
   {
     ExprFactory m_efac;
     EZ3 z3(m_efac);
@@ -1334,8 +1564,9 @@ namespace ufo {
 
     // TODO: Add preprocessing to replace constants with variables.
 
-    BoundSolverV2 bs(ruleManager, inv, dg, data2, doPhases, limit, gj, dc, debug);
-    bs.removeQuery();
+    BoundSolverV2 bs(ruleManager, inv, dg, data2, doPhases, limit, gj, dc, ac, debug);
+    // bs.removeQuery();
+    // bs.abstractConsts();
     bs.setUpQueryAndSpec(mk<TRUE>(m_efac), mk<TRUE>(m_efac));
     // bs.collectPhaseGuards();
 

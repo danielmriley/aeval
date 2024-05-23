@@ -21,6 +21,9 @@ namespace ufo {
     int strenBound;
     int debug = 0;
 
+    bool dc = false;
+    bool gj = false;
+
     vector<pair<Expr, Expr>> graphPairs;
     map<Expr, CHCs *> rms; // One map to rule(Manager) them all.
     map<Expr, bool> nestedLoops;
@@ -456,7 +459,7 @@ namespace ufo {
             lastLoophead = *l;
 
             bool ranOnceAlready = false;
-            elbas[*l] = new BoundSolverV2(*rms[*l], stren, dg, data2, doPhases, limit, debug);
+            elbas[*l] = new BoundSolverV2(*rms[*l], stren, dg, data2, doPhases, limit, gj, dc, debug);
             int counter = 0;
             // From here hide the preprocessing.
             for (auto &bnd : prevBounds)
