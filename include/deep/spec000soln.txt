@@ -1,3 +1,0 @@
-Success after 1 iterations (+ rnd)
-(define-fun inv ((_FH_0 Int)(_gh_0 Int)) Bool
-  (> (+ _FH_0 (* (- 1) _gh_0)) 0))

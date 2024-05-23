@@ -30,14 +30,17 @@ namespace ufo {
     bool doGJ = false;
     bool doConnect = false;
     bool absConsts = false;
+    bool dataInfer = false;
 
     ExprMap abstrVars;
     string abdstrName = "_AB_";
 
   public:
     // Constructor
-    BoundSolverV2(CHCs &r, int _b, bool _dg, bool d2, bool _dp, int _limit, bool gj, bool dc, bool abConsts, int dbg)
-        : BoundSolver(r,_b,_dg,d2,_dp,dbg), limit(_limit), n(_limit), doGJ(gj), doConnect(dc), absConsts(abConsts)
+    BoundSolverV2(CHCs &r, int _b, bool _dg, bool d2, bool _dp, int _limit, bool gj,
+                  bool dc, bool abConsts, bool iwd, int dbg)
+        : BoundSolver(r, _b, _dg, d2, _dp, dbg), limit(_limit), n(_limit), doGJ(gj),
+          doConnect(dc), absConsts(abConsts), dataInfer(iwd)
     {
       if(absConsts) abstractConsts();
       for(auto& chc: r.chcs) 
@@ -159,34 +162,32 @@ namespace ufo {
       // Find values.
       for(auto& hr: ruleManager.chcs)
       {
-        // if(hr.isInductive || hr.isFact)
-        // {
-          ExprVector conjs;
-          // ExprSet consts;
-          getConj(hr.body, conjs);
-          for(auto& c: conjs)
-          {
-            if(debug >= 4) outs() << "conj: " << c << "\n";
-            ExprVector vars;
-            filter(c, IsConst(), inserter(vars, vars.begin()));
-            // if(emptyIntersect(vars, ruleManager.invVarsPrime[hr.srcRelation]))
-            // {
-              Expr rhs = c->right();
-              if(isNumericConst(rhs))
-              {
-                abstractConst(rhs, hr);
-              }
-              if(containsOp<ITE>(rhs))
-              {
-                if(debug >= 4) outs() << "HAS ITE\n";
-                if(debug >= 4) outs() << "rhsITE: " << rhs << "\n";
-                findIte(rhs, hr);
-              }
-              // TODO: Test other cases.
-            // }
-          }
-        // }
+        ExprVector conjs;
+        // ExprSet consts;
+        getConj(hr.body, conjs);
+        for(auto& c: conjs)
+        {
+          if(debug >= 4) outs() << "conj: " << c << "\n";
+          ExprVector vars;
+          filter(c, IsConst(), inserter(vars, vars.begin()));
+          // if(emptyIntersect(vars, ruleManager.invVarsPrime[hr.srcRelation]))
+          // {
+            Expr rhs = c->right();
+            if(isNumericConst(rhs))
+            {
+              abstractConst(rhs, hr);
+            }
+            if(containsOp<ITE>(rhs))
+            {
+              if(debug >= 4) outs() << "HAS ITE\n";
+              if(debug >= 4) outs() << "rhsITE: " << rhs << "\n";
+              findIte(rhs, hr);
+            }
+            // TODO: Test other cases.
+          
+        }
       }
+      
       for(auto& hr: ruleManager.chcs)
       {
         for(auto& av: abstrVars)
@@ -200,11 +201,6 @@ namespace ufo {
           Expr dstVar = mkTerm<string>(lexical_cast<string>(av.first) + "'", av.first->getFactory());
           dstVar = fapp(constDecl(dstVar, av.second->arg(1)));
           if(!hr.isQuery) hr.dstVars.push_back(dstVar);
-
-          // if(hr.isFact)
-          // {
-          //   hr.body = mk<AND>(hr.body, mk<GT>(dstVar, mpzZero));
-          // }
 
           if(hr.isInductive)
           {
@@ -397,7 +393,6 @@ namespace ufo {
 
     void splitExprs(ExprVector& BigPhi, map<Expr,ExprVector>& infMap)
     {
-      // TODO: Come up with a more error proof map. One that considers operators too.
       if(debug >= 5) outs() << "\nSplit Exprs\n===========\n";
 
       for(auto& cc: BigPhi)
@@ -806,12 +801,13 @@ namespace ufo {
 
       for(auto& m: opMap)
       {
-        outs() << "  OP: " << m.first->op() << "\n";
         ret.push_back(m.second);
-        for(auto& mm: m.second)
+        if(debug >= 4) 
         {
-          outs() << "  From opMap: " << mm << "\n";
-        }
+          outs() << "  OP: " << m.first->op() << "\n";
+          for(auto& mm: m.second)
+            outs() << "  From opMap: " << mm << "\n";
+        } 
       }
       return ret;
     }
@@ -835,8 +831,7 @@ namespace ufo {
 
       // Do data learning on BigPhi.
       ExprSet inferredFromData;
-      // TODO: make this a flag....
-      // inferredFromData = inferWithData(BigPhi); // infer2
+      if(dataInfer) inferredFromData = inferWithData(BigPhi); // infer2
 
       splitExprs(BigPhi, infMap);
       if (debug >= 4)
@@ -851,6 +846,8 @@ namespace ufo {
         }
       }
 
+      // Sometimes expressions with the same lhs but different ops are grouped together.
+      // This method identifies them and separates them.
       for (auto ev : infMap)
       {
         vector<ExprVector> vec = separateOps(ev.second);
@@ -863,10 +860,13 @@ namespace ufo {
         
       }
 
-      ExprVector reRun;
-      reRun.insert(reRun.end(), inferredRet.begin(), inferredRet.end());
-      inferredRet.clear();
-      infer(reRun, inferredRet);
+      if(absConsts)
+      {
+        ExprVector reRun;
+        reRun.insert(reRun.end(), inferredRet.begin(), inferredRet.end());
+        inferredRet.clear();
+        infer(reRun, inferredRet);
+      }
 
       if(debug >= 2)
       {
@@ -982,7 +982,6 @@ namespace ufo {
       }
 
       ExprSet inferred = infer(BigPhi);
-      // u.removeRedundantConjuncts(inferred);
       Expr c = conjoin(inferred, m_efac);
       if(debug >= 4) outs() << "  c: " << c << "\n";
       boost::tribool safe = checkSafety(c, bound);
@@ -1126,15 +1125,6 @@ namespace ufo {
       rules.push_back(&qr_nogh);
       prepareRuleManager(rm, rules);
 
-      // for(auto& hr: rm.chcs)
-      // {
-      //   if(hr.isFact)
-      //   {
-      //     hr.body = mk<AND>(hr.body, replaceAll(p, invVars, invVarsPr));
-      //     if(debug >= 4) outs() << "  hr.body: " << hr.body << "\n";
-      //   }
-      // }
-
       BndExpl bnd(rm, (debug > 0));
       ExprVector BigPhi;
       Expr bound;
@@ -1159,13 +1149,7 @@ namespace ufo {
         Expr elim = simplifyArithm(abduction(phi, f, bound, k, vars, trace, bnd, rm));
 
         // value of y = 1, y = 2, y = 4... make an example like this.
-        // needs to handle many variables.
-
-        // if (debug >= 4)
-        // {
-        //   outs() << "  phi: ";
-        //   pprint(phi, 2);
-        // }
+        
         if (debug >= 3)
         {
           outs() << "  Result from Abduction: ";
@@ -1195,31 +1179,9 @@ namespace ufo {
 
         abds.push_back(prjcts);
 
-        // for(int i = 0; i < abds.size(); i++)
-        // {
-        //   for(int j = 0; j < abds[i].size(); j++)
-        //   {
-        //     if(debug >= 4) outs() << "  Abduction " << i << ": " << abds[i][j] << "\n\n";
-        //   }
-        // }
-
-        // for(auto p: prjcts)
-        // {
-        //   if(debug >= 5) outs() << "  Projection: " << p << "\n";
-        //   // TODO: Check the projections iteratively as combinations.
-        //   // Run through the rest of
-        //   if (debug >= 3)
-        //   {
-        //     outs() << "  ADDED TO BIGPHI: " << simplifyArithm(normalize(p, true)) << "\n";
-        //   }
-        //   BigPhi.push_back(p);
-        // }
-
-        // if(debug >= 5) outs() << "  Ghost Value: " << ghostValue << "\n";
       }
 
       if(abds.size() < 1) return mk<TRUE>(m_efac);
-      // abds.erase(abds.begin());
 
       for(int i = 0; i < abds.size(); i++)
       {
@@ -1366,8 +1328,7 @@ namespace ufo {
       if(debug >= 3) ruleManager.print(true);
 
       Expr prevPsi;
-      // use exprset including fc->body and tr->body 
-      // and the negation of the bound guard
+
       while (true)
       {
         if(n > 100 * limit) return;
@@ -1444,7 +1405,6 @@ namespace ufo {
         // else
         // {
           // get forms from data.
-          // TODO: Make parametric so that different algorithms can be called.
           if(debug >= 4)
           {
             outs() << "  m: ";
@@ -1550,11 +1510,11 @@ namespace ufo {
     }
   }; // End class BoundSolverV2
 
-  // TODO: Rewrite the infer function according to the notes above.
   // TODO: Test implementation over more benchmarks.
 
   inline void learnBoundsV2(string smt, int inv, int stren, bool dg,
-                                  bool data2, bool doPhases, int limit, bool gj, bool dc, bool ac, int debug)
+                                  bool data2, bool doPhases, int limit, 
+                                  bool gj, bool dc, bool ac, bool iwd, int debug)
   {
     ExprFactory m_efac;
     EZ3 z3(m_efac);
@@ -1562,9 +1522,7 @@ namespace ufo {
 
     ruleManager.parse(smt, false);
 
-    // TODO: Add preprocessing to replace constants with variables.
-
-    BoundSolverV2 bs(ruleManager, inv, dg, data2, doPhases, limit, gj, dc, ac, debug);
+    BoundSolverV2 bs(ruleManager, inv, dg, data2, doPhases, limit, gj, dc, ac, iwd, debug);
     // bs.removeQuery();
     // bs.abstractConsts();
     bs.setUpQueryAndSpec(mk<TRUE>(m_efac), mk<TRUE>(m_efac));
