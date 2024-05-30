@@ -31,6 +31,8 @@ namespace ufo {
     bool doConnect = false;
     bool absConsts = false;
     bool dataInfer = false;
+    bool reAdd = false;
+    bool imp = false;
 
     ExprMap abstrVars;
     string abdstrName = "_AB_";
@@ -38,11 +40,14 @@ namespace ufo {
   public:
     // Constructor
     BoundSolverV2(CHCs &r, int _b, bool _dg, bool d2, bool _dp, int _limit, bool gj,
-                  bool dc, bool abConsts, bool iwd, int dbg)
+                  bool dc, bool abConsts, bool iwd, bool _reAdd, bool _imp, int dbg)
         : BoundSolver(r, _b, _dg, d2, _dp, dbg), limit(_limit), n(_limit), doGJ(gj),
-          doConnect(dc), absConsts(abConsts), dataInfer(iwd)
+          doConnect(dc), absConsts(abConsts), dataInfer(iwd), reAdd(_reAdd), imp(_imp)
     {
-      if(absConsts) abstractConsts();
+      if(absConsts) abstractConsts(); // Does this help freqhorn in general?
+      // Instead of changing the original system and forgetting about it,
+      // copy the RM and check it when an "abstracted" bound is found.
+      // Check the bound again with freqhorn.
       for(auto& chc: r.chcs) 
       {
         if(chc.isFact)
@@ -72,6 +77,9 @@ namespace ufo {
       int val = lexical_cast<int>(e);
       if(val <= limit) return;
 
+      // Check each set of pairs to see if they can be related.
+      // ex. 10000, 5000, 2000. 
+
       Expr var;
       Expr varPr;
       Expr type = e->arg(1);
@@ -99,8 +107,14 @@ namespace ufo {
           varPr = fapp(constDecl(varPr, type));
           if (debug >= 4)
             outs() << "Constant already abstracted: " << var << "\n";
-          hr.body = replaceAll(hr.body, e, var);
+          hr.body = replaceAll(hr.body, av.first, var);
+          hr.body = replaceAll(hr.body, e, av.first);
+          av.second = e;
           return;
+        }
+        else
+        {
+          outs() << "Unable to find relationships between " << eVal << " and " << avVal << "\n";
         }
       }
       var = mkTerm<string>("_AB_" + lexical_cast<string>(abstrVars.size()), e->getFactory());
@@ -218,9 +232,8 @@ namespace ufo {
         }
       }
 
-      if(debug >= 4) outs() << "** NEW CHCS **\n";
+      if(debug >= 4) outs() << "\n** NEW CHCS **\n";
       ruleManager.print(true);
-      // exit(0);
     }
 
     void copyRule(HornRuleExt* dst, HornRuleExt* src)
@@ -718,6 +731,8 @@ namespace ufo {
       return dc[invDecl];
     }
 
+    // Elements in the inferred set should approximate each of the elements in ev.
+    // ex. ev = { x = 1, x = 2} then infer might result in { x >= 1 }
     void infer(ExprVector& ev, ExprSet& inferred)
     {
       if (debug >= 4)
@@ -730,6 +745,9 @@ namespace ufo {
         if (debug >= 4)
           outs() << "  c: " << c << "\n";
         ExprVector inferSeeds;
+        // Count how often this message shows up and in how many benchmarks.
+        // Add a column in the spreadsheet for this.
+        if(isOpX<AND>(c)) outs() << "conjunctive infer " << c << "\n";
         if (isOpX<EQ>(c))
         {
           inferSeeds = {mk<GEQ>(c->left(), c->right()),
@@ -746,16 +764,17 @@ namespace ufo {
         }
         else
         {
-          for (auto itr = inferred.begin(); itr != inferred.end();)
+          for (auto itr = inferred.begin(); itr != inferred.end(); )
           {
             bool toBreak = false;
-            if (!u.implies(c, *itr) || u.implies(*itr, c))
+            if (!u.implies(c, *itr) || (imp && u.implies(*itr, c))) // experiment without the second disjunct
             {
               if (debug >= 4)
                 outs() << "  Erasing: " << *itr << "\n";
               itr = inferred.erase(itr);
               toBreak = true;
-              if (inferred.empty())
+              // Run experiments with and without this enabled.
+              if (reAdd && inferred.empty())
                 inferred.insert(c);
             }
             if (toBreak)
@@ -775,6 +794,9 @@ namespace ufo {
 
     vector<ExprVector> separateOps(ExprVector ev)
     {
+      // Sometimes expressions with the same lhs
+      // but different ops are grouped together.
+      // This method identifies them and separates them.
       // separate the expressions based on the operators.
       vector<ExprVector> ret;
       map<Expr, ExprVector> opMap;
@@ -846,8 +868,6 @@ namespace ufo {
         }
       }
 
-      // Sometimes expressions with the same lhs but different ops are grouped together.
-      // This method identifies them and separates them.
       for (auto ev : infMap)
       {
         vector<ExprVector> vec = separateOps(ev.second);
@@ -857,7 +877,6 @@ namespace ufo {
           infer(v, inferred);
           inferredRet.insert(inferred.begin(), inferred.end());        
         } 
-        
       }
 
       if(absConsts)
@@ -1005,9 +1024,9 @@ namespace ufo {
 
       if(debug >= 4) outs() << "\nAbduction\n=========\n";
 
-      ExprVector ssa;
-      bnd.getSSA(trace, ssa);
-      phi = conjoin(ssa, m_efac);
+      // ExprVector ssa;
+      phi = bnd.toExpr(trace);
+      // phi = conjoin(ssa, m_efac);
       vars = bnd.getBindVars();
       for (auto v = vars.begin(); v != vars.end(); )
       {
@@ -1150,12 +1169,6 @@ namespace ufo {
 
         // value of y = 1, y = 2, y = 4... make an example like this.
         
-        if (debug >= 3)
-        {
-          outs() << "  Result from Abduction: ";
-          pprint(elim, 2);
-        }
-        
         if (u.implies(elim, phi))
         {
           if(debug >= 4) outs() << "  ERROR with abduction\n";
@@ -1164,16 +1177,19 @@ namespace ufo {
 
         elim = simplifyArithm(makePretty(elim, k, vars, rm));
 
+        if (debug >= 3)
+        {
+          outs() << "  Result from Abduction: ";
+          pprint(elim, 2);
+        }
+
         ExprVector prjcts, prjcts2;
         u.flatten(elim, prjcts2, false, invVars, keepQuantifiersRepl);
-
-        // filter the projections somehow. We only want ones relevant to the current search.
 
         for(auto& p: prjcts2)
         {
           if(debug >= 4) outs() << "  Checking Projection: " << simplifyArithm(p) << "\n";
-          // TODO: Filter using models.
-          if(!toKeep(p))
+          // if(!toKeep(p))
             prjcts.push_back(simplifyArithm(p));
         }
 
@@ -1187,7 +1203,7 @@ namespace ufo {
       {
         for(int j = 0; j < abds[i].size(); j++)
         {
-          if(debug >= 4) outs() << "  AAbduction " << i << ": " << abds[i][j] << "\n";
+          if(debug >= 4) outs() << "  Final from Abduction " << i << ": " << abds[i][j] << "\n";
         }
       }
       getAllCombs(allCombs, abds, 0);
@@ -1246,15 +1262,12 @@ namespace ufo {
         }
       }      
 
-      outs() << "i: " << i;
       int j = abds[i].size();
-      outs() << "  j: " << j << "\n";
 
       if(i == 0)
       {
         for(int d = 0; d < j; d++)
           allCombs.push_back({abds[i][d]});
-        outs() << "allCombs.size() 0 " << allCombs.size() << "\n";
       }
       else
       {
@@ -1272,7 +1285,7 @@ namespace ufo {
         int k = 0;
         for(int l = 0; l < temp.size(); l++)
         {
-          outs() << "j: " << j << "  jPrev: " << jPrev << "  l: " << l << "  k: " << k << "\n";
+          // outs() << "j: " << j << "  jPrev: " << jPrev << "  l: " << l << "  k: " << k << "\n";
           if(l != 0 && l % jPrev == 0) k++;
           if(k >= abds[i].size()) break;
           temp[l].push_back(abds[i][k]);
@@ -1363,11 +1376,22 @@ namespace ufo {
 
           buildTrace(trace, i+1, true);
 
-          Expr ssa;
-          ssa = mk<AND>(p, bnd.toExpr(trace));
+          Expr ssa = bnd.toExpr(trace);
+          // ExprVector ssa1;
+          // bnd.getSSA(trace, ssa1);
+          // outs() << "ssa.size: " << ssa1.size() << "\n";
+          // pprint(ssa1, 2);
+          // if(u.isSat(ssa1)) outs() << "SSA IS SAT TEST:\n";
+          // else outs() << "SSA IS UNSAT TEST:\n";
+          if (debug >= 4)
+          {
+            outs() << "SSA: ";
+            pprint(ssa, 2);
+          }
+          ssa = mk<AND>(p, ssa);
           ssa = replaceAll(ssa, fc->srcVars, invVars);
           if(debug >= 4) {
-            outs() << "SSA: ";
+            outs() << "SSA after: ";
             pprint(ssa, 2);
           }
           if(u.isSat(ssa))
@@ -1514,7 +1538,8 @@ namespace ufo {
 
   inline void learnBoundsV2(string smt, int inv, int stren, bool dg,
                                   bool data2, bool doPhases, int limit, 
-                                  bool gj, bool dc, bool ac, bool iwd, int debug)
+                                  bool gj, bool dc, bool ac, bool iwd, 
+                                  bool ra, bool imp, int debug)
   {
     ExprFactory m_efac;
     EZ3 z3(m_efac);
@@ -1522,9 +1547,9 @@ namespace ufo {
 
     ruleManager.parse(smt, false);
 
-    BoundSolverV2 bs(ruleManager, inv, dg, data2, doPhases, limit, gj, dc, ac, iwd, debug);
+    BoundSolverV2 bs(ruleManager, inv, dg, data2, doPhases, limit, gj,
+                     dc, ac, iwd, ra, imp, debug);
     // bs.removeQuery();
-    // bs.abstractConsts();
     bs.setUpQueryAndSpec(mk<TRUE>(m_efac), mk<TRUE>(m_efac));
     // bs.collectPhaseGuards();
 

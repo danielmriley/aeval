@@ -1275,6 +1275,8 @@ namespace ufo
     Expr getPrecondition (HornRuleExt* hr)
     {
       Expr tmp = keepQuantifiers(hr->body, hr->srcVars);
+      // for(auto& v: hr->srcVars) outs() << "srcVars: " << v << "\n";
+      // outs() << "Precondition: " << tmp << "\n";
       return weakenForHardVars(tmp, hr->srcVars);
     }
 

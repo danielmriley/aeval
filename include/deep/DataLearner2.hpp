@@ -432,7 +432,7 @@ namespace ufo
       ExprVector ev;
 
       int n = invVars[srcRel].size();
-      outs() << "n: " << n << "\n";
+      // outs() << "n: " << n << "\n";
       // make Exprs.
       /*
       for(int i = 0; i < n-1; i++) {
@@ -452,7 +452,7 @@ namespace ufo
         {
           Expr r1, r2, l1, l2, l, r;
           r1 = mkMPZ(cpp_int(e2[j] - e1[j]), m_efac);
-          outs() << "r1: " << r1 << "\n";
+          // outs() << "r1: " << r1 << "\n";
           r2 = mk<MINUS>(invVars[srcRel][i], mkMPZ(cpp_int(e1[i]), m_efac));
           l1 = mkMPZ(cpp_int(e2[i] - e1[i]), m_efac);
           l2 = mk<MINUS>(invVars[srcRel][j], mkMPZ(cpp_int(e1[j]), m_efac));

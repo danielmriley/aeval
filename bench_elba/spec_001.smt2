@@ -9,7 +9,7 @@
 (rule (=>
     (and
         (inv x)
-        (> x 5)
+        (> x 500)
         (= x1 (- x 1))
     )
     (inv x1)

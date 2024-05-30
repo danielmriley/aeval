@@ -302,7 +302,16 @@ namespace ufo
         outs() << "INIT is missing\n";
         exit(0);
       }
+
+      if(debug >= 4) 
+      {
+        outs() << "invVars: ";
+        for (auto & v : invVars) outs() << v << " ";
+        outs() << std::endl;
+      }
+      // outs() << "TR BODY: " << tr->body << std::endl;
       loopGuard = ruleManager.getPrecondition(tr);
+      if(debug >= 4) outs() << "LOOP GUARD: " << loopGuard << std::endl;
       loopGuardPr = replaceAll(loopGuard, invVars, invVarsPr);
       ruleManager.decls.clear();
 

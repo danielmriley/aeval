@@ -802,6 +802,8 @@ namespace ufo
   {
     ExprSet varsSet;
     filter (fla, bind::IsConst (), inserter(varsSet, varsSet.begin()));
+    // for(auto& v: varsSet) outs() << "keepQuant: " << *v << " ";
+    // outs() << "\n";
     minusSets(varsSet, vars);
     return eliminateQuantifiers(fla, varsSet);
   }
