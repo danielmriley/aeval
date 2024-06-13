@@ -459,7 +459,7 @@ namespace ufo {
             lastLoophead = *l;
 
             bool ranOnceAlready = false;
-            elbas[*l] = new BoundSolverV2(*rms[*l], stren, dg, data2, doPhases, limit, gj, dc, debug);
+            // elbas[*l] = new BoundSolverV2(*rms[*l], stren, dg, data2, doPhases, limit, gj, dc, debug);
             int counter = 0;
             // From here hide the preprocessing.
             for (auto &bnd : prevBounds)

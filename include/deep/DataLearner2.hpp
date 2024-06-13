@@ -692,6 +692,7 @@ namespace ufo
     }
 
     void getDataCands(ExprSet& cands, Expr rel) { cands = dataCands[rel]; }
+
   }; // End class DataLearner2
 
 }

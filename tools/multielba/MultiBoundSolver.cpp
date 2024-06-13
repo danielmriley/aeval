@@ -57,6 +57,9 @@ vector<string> getCommaSepStrValues(const char * opt, vector<string> defValue, i
 
 int main (int argc, char ** argv)
 {
+  outs() << "SOON..\n";
+  return 0;
+
   if (getBoolValue("--help", false, argc, argv) || argc == 1){
     outs () <<   "TODO                                \n";
     return 0;

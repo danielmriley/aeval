@@ -3201,7 +3201,7 @@ namespace ufo
               if (keep_redundand)
                 newCnjs.insert(mk<LEQ>(lin_com, mkMPZ (cur_min_le, efac)));
               it = all_diseqs.erase(it);
-            } else if (*it > cur_min_le) { // remove redundand, e.g., (x != 7 /\ x <= 5)
+            } else if (*it > cur_min_le) { // remove redundant, e.g., (x != 7 /\ x <= 5)
               if (keep_redundand)
                 newCnjs.insert(mk<LEQ>(lin_com, mkMPZ (*it, efac)));
               it = all_diseqs.erase(it);
@@ -3220,7 +3220,7 @@ namespace ufo
               if (keep_redundand)
                 newCnjs.insert(mk<LT>(lin_com, mkMPZ (cur_min_lt, efac)));
               it = all_diseqs.erase(it);
-            } else if (*it >= cur_min_lt) {  // remove redundand, e.g., (x != 5 /\ x < 5)
+            } else if (*it >= cur_min_lt) {  // remove redundant, e.g., (x != 5 /\ x < 5)
               if (keep_redundand)
                 newCnjs.insert(mk<LT>(lin_com, mkMPZ (*it, efac)));
               it = all_diseqs.erase(it);
@@ -3239,7 +3239,7 @@ namespace ufo
               if (keep_redundand)
                 newCnjs.insert(mk<GEQ>(lin_com, mkMPZ (cur_max_ge, efac)));
               it = all_diseqs.erase(it);
-            } else if (*it < cur_max_ge) { // remove redundand, e.g., (x != 4 /\ x >= 5)
+            } else if (*it < cur_max_ge) { // remove redundant, e.g., (x != 4 /\ x >= 5)
               if (keep_redundand)
                 newCnjs.insert(mk<GEQ>(lin_com, mkMPZ (*it, efac)));
               it = all_diseqs.erase(it);
@@ -3258,7 +3258,7 @@ namespace ufo
               if (keep_redundand)
                 newCnjs.insert(mk<GT>(lin_com, mkMPZ (cur_max_gt, efac)));
               it = all_diseqs.erase(it);
-            } else if (*it <= cur_max_gt) { // remove redundand, e.g., (x != 5 /\ x > 5)
+            } else if (*it <= cur_max_gt) { // remove redundant, e.g., (x != 5 /\ x > 5)
               if (keep_redundand)
                 newCnjs.insert(mk<GT>(lin_com, mkMPZ (*it, efac)));
               it = all_diseqs.erase(it);
@@ -3441,7 +3441,7 @@ namespace ufo
               if (keep_redundand)
                 newDsjs.insert(mk<LEQ>(lin_com, mkMPZ (cur_max_le, efac)));
               it = all_eqs.erase(it);
-            } else if (*it <= cur_max_le) { // remove redundand, e.g., (x = 3 \/ x <= 5)
+            } else if (*it <= cur_max_le) { // remove redundant, e.g., (x = 3 \/ x <= 5)
               if (keep_redundand)
                 newDsjs.insert(mk<LEQ>(lin_com, mkMPZ (*it, efac)));
               it = all_eqs.erase(it);
@@ -3460,7 +3460,7 @@ namespace ufo
               if (keep_redundand)
                 newDsjs.insert(mk<LT>(lin_com, mkMPZ (cur_max_lt, efac)));
               it = all_eqs.erase(it);
-            } else if (*it < cur_max_lt) {  // remove redundand, e.g., (x = 4 \/ x < 5)
+            } else if (*it < cur_max_lt) {  // remove redundant, e.g., (x = 4 \/ x < 5)
               if (keep_redundand)
                 newDsjs.insert(mk<LT>(lin_com, mkMPZ (*it, efac)));
               it = all_eqs.erase(it);
@@ -3479,7 +3479,7 @@ namespace ufo
               if (keep_redundand)
                 newDsjs.insert(mk<GEQ>(lin_com, mkMPZ (cur_min_ge, efac)));
               it = all_eqs.erase(it);
-            } else if (*it >= cur_min_ge) { // remove redundand, e.g., (x = 9 \/ x >= 5)
+            } else if (*it >= cur_min_ge) { // remove redundant, e.g., (x = 9 \/ x >= 5)
               if (keep_redundand)
                 newDsjs.insert(mk<GEQ>(lin_com, mkMPZ (*it, efac)));
               it = all_eqs.erase(it);
@@ -3498,7 +3498,7 @@ namespace ufo
               if (keep_redundand)
                 newDsjs.insert(mk<GT>(lin_com, mkMPZ (cur_min_gt, efac)));
               it = all_eqs.erase(it);
-            } else if (*it > cur_min_gt) { // remove redundand, e.g., (x = 6 \/ x > 5)
+            } else if (*it > cur_min_gt) { // remove redundant, e.g., (x = 6 \/ x > 5)
               if (keep_redundand)
                 newDsjs.insert(mk<GT>(lin_com, mkMPZ (*it, efac)));
               it = all_eqs.erase(it);

@@ -309,9 +309,9 @@ namespace ufo
         for (auto & v : invVars) outs() << v << " ";
         outs() << std::endl;
       }
-      // outs() << "TR BODY: " << tr->body << std::endl;
+      if(debug >= 4) outs() << "\n---> TR BODY: " << tr->body << std::endl;
       loopGuard = ruleManager.getPrecondition(tr);
-      if(debug >= 4) outs() << "LOOP GUARD: " << loopGuard << std::endl;
+      if(debug >= 4) outs() << "---> LOOP GUARD: " << loopGuard << "\n\n";
       loopGuardPr = replaceAll(loopGuard, invVars, invVarsPr);
       ruleManager.decls.clear();
 

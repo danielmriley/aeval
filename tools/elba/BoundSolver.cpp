@@ -74,6 +74,7 @@ int main (int argc, char ** argv)
   bool iwd = getBoolValue("--data-inference", false, argc, argv);
   bool ra = getBoolValue("--readd-infer", false, argc, argv);
   bool imp = getBoolValue("--extra-implies", false, argc, argv);
+  bool mi = getBoolValue("--mutate-inferred", false, argc, argv);
   bool data2 = getBoolValue("--data2", false, argc, argv);
   bool doPhases = getBoolValue("--phase-data", false, argc, argv);
 
@@ -84,11 +85,13 @@ int main (int argc, char ** argv)
     return 0;
   }
 
+  if(!dc && !gj) dc = true;
+
   if(learn == 1) 
     learnBounds(string(argv[argc-1]), cex, str, useDataGrds, data2, doPhases, debug);
   else
     learnBoundsV2(string(argv[argc-1]), cex, str, useDataGrds, data2, doPhases, limit,
-                  gj, dc, abstractConsts, iwd, ra, imp, debug);
+                  gj, dc, abstractConsts, iwd, ra, imp, mi, debug);
     
   return 0;
 }

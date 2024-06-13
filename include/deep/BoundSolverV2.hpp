@@ -33,6 +33,7 @@ namespace ufo {
     bool dataInfer = false;
     bool reAdd = false;
     bool imp = false;
+    bool mutateInferred = false;
 
     ExprMap abstrVars;
     string abdstrName = "_AB_";
@@ -40,11 +41,15 @@ namespace ufo {
   public:
     // Constructor
     BoundSolverV2(CHCs &r, int _b, bool _dg, bool d2, bool _dp, int _limit, bool gj,
-                  bool dc, bool abConsts, bool iwd, bool _reAdd, bool _imp, int dbg)
+                  bool dc, bool abConsts, bool iwd, bool _reAdd, bool _imp,
+                  bool mi, int dbg)
         : BoundSolver(r, _b, _dg, d2, _dp, dbg), limit(_limit), n(_limit), doGJ(gj),
-          doConnect(dc), absConsts(abConsts), dataInfer(iwd), reAdd(_reAdd), imp(_imp)
+          doConnect(dc), absConsts(abConsts), dataInfer(iwd), reAdd(_reAdd), imp(_imp),
+          mutateInferred(mi)
     {
-      if(absConsts) abstractConsts(); // Does this help freqhorn in general?
+      if(absConsts) abstractConsts(); 
+      // TODO:
+      // Does this help freqhorn in general?
       // Instead of changing the original system and forgetting about it,
       // copy the RM and check it when an "abstracted" bound is found.
       // Check the bound again with freqhorn.
@@ -88,11 +93,10 @@ namespace ufo {
         if(av.second == e)
         {
           var = fapp(constDecl(av.first, type));
-          varPr = mkTerm<string>(lexical_cast<string>(av.first) + "'", e->getFactory());
+          varPr = mkTerm<string>(lexical_cast<string>(av.first) + "'", m_efac);
           varPr = fapp(constDecl(varPr, type));
           if(debug >= 4) outs() << "Constant already abstracted: " << var << "\n";
           hr.body = replaceAll(hr.body, e, var);
-          // hr.body = mk<AND>(hr.body, mk<EQ>(av.first, av.second));
           return;
         }
 
@@ -101,9 +105,8 @@ namespace ufo {
         if(avVal % eVal == 0)
         {
           cpp_int div = avVal / eVal;
-          var = mk<MULT>(mkMPZ(div, av.first->getFactory()), av.first);
-          var = fapp(constDecl(var, type));
-          varPr = mkTerm<string>(lexical_cast<string>(av.first) + "'", e->getFactory());
+          var = mk<MULT>(mkMPZ(div, m_efac), av.first);
+          varPr = mkTerm<string>(lexical_cast<string>(av.first) + "'", m_efac);
           varPr = fapp(constDecl(varPr, type));
           if (debug >= 4)
             outs() << "Constant already abstracted: " << var << "\n";
@@ -117,9 +120,9 @@ namespace ufo {
           outs() << "Unable to find relationships between " << eVal << " and " << avVal << "\n";
         }
       }
-      var = mkTerm<string>("_AB_" + lexical_cast<string>(abstrVars.size()), e->getFactory());
+      var = mkTerm<string>("_AB_" + lexical_cast<string>(abstrVars.size()), m_efac);
       var = fapp(constDecl(var, type));
-      varPr = mkTerm<string>("_AB_" + lexical_cast<string>(abstrVars.size()) + "'", e->getFactory());
+      varPr = mkTerm<string>("_AB_" + lexical_cast<string>(abstrVars.size()) + "'", m_efac);
       varPr = fapp(constDecl(varPr, type));
       abstrVars[var] = e;
       if (debug >= 4)
@@ -184,21 +187,18 @@ namespace ufo {
           if(debug >= 4) outs() << "conj: " << c << "\n";
           ExprVector vars;
           filter(c, IsConst(), inserter(vars, vars.begin()));
-          // if(emptyIntersect(vars, ruleManager.invVarsPrime[hr.srcRelation]))
-          // {
-            Expr rhs = c->right();
-            if(isNumericConst(rhs))
-            {
-              abstractConst(rhs, hr);
-            }
-            if(containsOp<ITE>(rhs))
-            {
-              if(debug >= 4) outs() << "HAS ITE\n";
-              if(debug >= 4) outs() << "rhsITE: " << rhs << "\n";
-              findIte(rhs, hr);
-            }
-            // TODO: Test other cases.
-          
+          Expr rhs = c->right();
+          if(isNumericConst(rhs))
+          {
+            abstractConst(rhs, hr);
+          }
+          if(containsOp<ITE>(rhs))
+          {
+            if(debug >= 4) outs() << "HAS ITE\n";
+            if(debug >= 4) outs() << "rhsITE: " << rhs << "\n";
+            findIte(rhs, hr);
+          }
+          // TODO: Test other cases.          
         }
       }
       
@@ -212,7 +212,7 @@ namespace ufo {
             if(debug >= 4) outs() << "av2: " << av.second << "\n";
             hr.srcVars.push_back(av.first);
           }
-          Expr dstVar = mkTerm<string>(lexical_cast<string>(av.first) + "'", av.first->getFactory());
+          Expr dstVar = mkTerm<string>(lexical_cast<string>(av.first) + "'", m_efac);
           dstVar = fapp(constDecl(dstVar, av.second->arg(1)));
           if(!hr.isQuery) hr.dstVars.push_back(dstVar);
 
@@ -281,7 +281,6 @@ namespace ufo {
       Expr body = replaceAll(fcWithPrecond->body, fcWithPrecond->srcVars, tr->dstVars);
       body = u.removeRedundantConjuncts(body);
       fcPreCond = replaceAll(mk<AND>(fcPreCond, normalize(preCond), body), fcWithPrecond->srcVars, tr->dstVars);
-      // fcPreCond = u.removeRedundantConjuncts(fcPreCond);
       if (debug >= 3) outs() << "Original fcBody: " << fcWithPrecond->body << "\n";
       fcWithPrecond->body = fcPreCond;
       fcWithPrecond->srcVars.clear();
@@ -401,6 +400,7 @@ namespace ufo {
         toDisj.push_back(normalize(conjoin(a, m_efac)));
       }
       
+      u.removeRedundantConjuncts(comm);
       cm = conjoin(comm, m_efac);
     }
 
@@ -753,6 +753,11 @@ namespace ufo {
           inferSeeds = {mk<GEQ>(c->left(), c->right()),
                         mk<LEQ>(c->left(), c->right())};
         }
+        else if (isOpX<NEQ>(c))
+        {
+          inferSeeds = {mk<GT>(c->left(), c->right()),
+                        mk<LT>(c->left(), c->right())};
+        }
         else
         {
           inferSeeds = {c};
@@ -773,9 +778,6 @@ namespace ufo {
                 outs() << "  Erasing: " << *itr << "\n";
               itr = inferred.erase(itr);
               toBreak = true;
-              // Run experiments with and without this enabled.
-              if (reAdd && inferred.empty())
-                inferred.insert(c);
             }
             if (toBreak)
               break;
@@ -904,10 +906,20 @@ namespace ufo {
 
       // inferredRet.insert(conjoin(dataGrds, m_efac));
       inferredRet.insert(inferredFromData.begin(), inferredFromData.end());
+
+      u.removeRedundantConjuncts(inferredRet);
+
+      if(debug >= 4) 
+      {
+        outs() << "INFERRED REMOVE REDUNDANT: ";
+        outs() << conjoin(inferredRet, m_efac) << "\n";
+      }
+
       return inferredRet;
     }
 
     Expr branchPreCond = mk<TRUE>(m_efac);
+    Expr firstRowExpr = mk<TRUE>(m_efac);
     // Public member functions
     boost::tribool invFromData(Expr src, Expr dst, Expr block, 
                                map<Expr, ExprSet>& candMap, int n) {
@@ -950,6 +962,7 @@ namespace ufo {
       }
 
       ExprVector rowsExpr = dl2.exprForRows(invDecl);
+      if(rowsExpr.size() > 0) firstRowExpr = rowsExpr[0];
 
       for(auto& r: rowsExpr)
       {
@@ -984,6 +997,21 @@ namespace ufo {
       return res;
     }
 
+    Expr mutateInfer(Expr a, Expr b, bool first)
+    {
+      Expr opExpr = first ? a : b;
+      Expr res = mk<TRUE>(m_efac);
+      if(isOpX<GT>(opExpr)) res = mk<GT>(a->left(), b->left());
+      if(isOpX<LT>(opExpr)) res = mk<LT>(a->left(), b->left());
+      if(isOpX<GEQ>(opExpr)) res = mk<GEQ>(a->left(), b->left());
+      if(isOpX<LEQ>(opExpr)) res = mk<LEQ>(a->left(), b->left());
+      if(isOpX<EQ>(opExpr)) res = mk<EQ>(a->left(), b->left());
+      if(isOpX<NEQ>(opExpr)) res = mk<NEQ>(a->left(), b->left());
+
+      if(u.isSat(res, firstRowExpr)) return res; 
+      return mk<TRUE>(m_efac);
+    }
+
     Expr weakenAndSplit(ExprVector& BigPhi, Expr bound) 
     {
       // Break equalities into inequalities.
@@ -1001,9 +1029,56 @@ namespace ufo {
       }
 
       ExprSet inferred = infer(BigPhi);
-      Expr c = conjoin(inferred, m_efac);
-      if(debug >= 4) outs() << "  c: " << c << "\n";
-      boost::tribool safe = checkSafety(c, bound);
+
+      ExprSet mutatedInferred;
+      if(mutateInferred)
+      {
+        for(auto& i: inferred)
+        {
+          for(auto& ii: inferred)
+          {
+            if(i == ii) continue;
+            mutatedInferred.insert(mutateInfer(i, ii, true));
+            mutatedInferred.insert(mutateInfer(i, ii, false));
+            mutatedInferred.insert(mutateInfer(ii, i, true));
+            mutatedInferred.insert(mutateInfer(ii, i, false));
+          }
+        }
+
+        if(debug >= 4)
+        {
+          outs() << "  Mutated inferred:\n";
+          for(auto& i: mutatedInferred)
+          {
+            outs() << "  " << i << "\n";
+          }
+        }
+      }
+
+      Expr c;
+      boost::tribool safe; 
+      if (mutatedInferred.size() > 0)
+      {
+        for(auto& m: mutatedInferred)
+        {
+          if(m == mk<TRUE>(m_efac)) continue;
+          c = conjoin(inferred, m_efac);
+          c = mk<AND>(c, m);
+          if(debug >= 4) outs() << "  c with mutated Expr: " << c << "\n";
+          safe = checkSafety(c, bound);
+          if(safe) break;
+          else if(debug >= 4)
+            outs() << "\n\n********\n*UNSAFE*\n********\n\n";
+        }
+
+        if(!safe) safe = checkSafety(conjoin(inferred, m_efac), bound);
+      }
+      else
+      {
+        c = conjoin(inferred, m_efac);
+        if(debug >= 4) outs() << "  From infrerred:\n---> " << c << "\n";
+        safe = checkSafety(c, bound);
+      }
 
       if(debug >= 4) 
       {
@@ -1312,7 +1387,16 @@ namespace ufo {
 
       p = simplifyArithm(p);
 
-      Expr phi = mk<AND>(p, replaceAll(fc_nogh.body, invVarsPr, invVars), tr_nogh.body);        
+      Expr phi = mk<AND>(p, replaceAll(fc_nogh.body, invVarsPr, invVars), loopGuard);
+
+      if (absConsts)
+      {
+        // add the constant values to phi to check with phi.
+        for (auto ac : abstrVars)
+        {
+          phi = mk<AND>(phi, mk<EQ>(ac.first, ac.second));
+        }
+      }
 
       return phi;
     }
@@ -1358,8 +1442,12 @@ namespace ufo {
         {
           if(debug >= 3) outs() << "  phi is UNSAT\n";
           p = simplifyArithm(p);
-          if (p != mk<FALSE>(m_efac))
-            bounds[p] = mkMPZ(0, m_efac);
+          if(debug >= 4) outs() << "  Final p: " << p << "\n";
+          // if (u.isFalse(p))
+          // {
+            if(debug >= 2) outs() << "  Adding zero bound.\n";
+            bounds[p] = mk<EQ>(ghostVars[0], mkMPZ(0, m_efac));
+          // }
           return;
         }
         if(debug >= 4) outs() << "  phi is SAT\n";
@@ -1508,27 +1596,29 @@ namespace ufo {
       int i = 0;
       for (auto b = bounds.begin(); b != bounds.end(); b++)
       {
-        if(!u.isSat(mkNeg(b->first), replaceAll(fc_nogh.body, invVarsPr, invVars)))
-        {
-          outs() << b->second;
-          break;
-        }
-        else
-        {
-          if(b != bounds.begin())
-          {
-            outs() << ", ";
-          }
-          if(b == --bounds.end())
-          {
-            outs() << b->second;
-          }
-          else
-          {
-            outs() << "  ite " << b->first << ", " << b->second;
-          }
-        }
-        i++;
+        outs() << b->first << " --> " << b->second;
+        outs() << "\n";
+        // if(!u.isSat(mkNeg(b->first), replaceAll(fc_nogh.body, invVarsPr, invVars)))
+        // {
+        //   outs() << b->second;
+        //   break;
+        // }
+        // else
+        // {
+        //   if(b != bounds.begin())
+        //   {
+        //     outs() << ", ";
+        //   }
+        //   if(b == --bounds.end())
+        //   {
+        //     outs() << b->second;
+        //   }
+        //   else
+        //   {
+        //     outs() << "  ite " << b->first << ", " << b->second;
+        //   }
+        // }
+        // i++;
       }
       outs() << "\n";
     }
@@ -1539,7 +1629,7 @@ namespace ufo {
   inline void learnBoundsV2(string smt, int inv, int stren, bool dg,
                                   bool data2, bool doPhases, int limit, 
                                   bool gj, bool dc, bool ac, bool iwd, 
-                                  bool ra, bool imp, int debug)
+                                  bool ra, bool imp, bool mi, int debug)
   {
     ExprFactory m_efac;
     EZ3 z3(m_efac);
@@ -1548,7 +1638,7 @@ namespace ufo {
     ruleManager.parse(smt, false);
 
     BoundSolverV2 bs(ruleManager, inv, dg, data2, doPhases, limit, gj,
-                     dc, ac, iwd, ra, imp, debug);
+                     dc, ac, iwd, ra, imp, mi, debug);
     // bs.removeQuery();
     bs.setUpQueryAndSpec(mk<TRUE>(m_efac), mk<TRUE>(m_efac));
     // bs.collectPhaseGuards();

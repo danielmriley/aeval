@@ -756,14 +756,16 @@ namespace ufo
       for (auto & d : dsjs) newDsjs.insert(eliminateQuantifiers(d, qVars));
       return disjoin(newDsjs, fla->getFactory());
     }
-
+  // Print all of these steps 
     ExprSet hardVars;
     filter (fla, bind::IsConst (), inserter(hardVars, hardVars.begin()));
     minusSets(hardVars, qVars);
     ExprSet cnjs;
     getConj(fla, cnjs);
+    // try with these disabled.
     constantPropagation(hardVars, cnjs, doArithm);
     Expr tmp = simpEquivClasses(hardVars, cnjs, fla->getFactory());
+    // print cnjs
     tmp = simpleQE(tmp, qVars);
     if (doCore)
       return coreQE(tmp, qVars);
@@ -802,8 +804,8 @@ namespace ufo
   {
     ExprSet varsSet;
     filter (fla, bind::IsConst (), inserter(varsSet, varsSet.begin()));
-    // for(auto& v: varsSet) outs() << "keepQuant: " << *v << " ";
-    // outs() << "\n";
+    for(auto& v: varsSet) outs() << "keepQuant: " << *v << " ";
+    outs() << "\n";
     minusSets(varsSet, vars);
     return eliminateQuantifiers(fla, varsSet);
   }
