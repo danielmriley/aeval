@@ -76,11 +76,17 @@ namespace ufo {
 
     void abstractConst(Expr e, HornRuleExt& hr)
     {
-      outs() << "Abstract a constant: ";
-      outs() << "e: " << e << "\n";
-      outs() << "e->arg(i)" << e->arg(1) << "\n";
       int val = lexical_cast<int>(e);
+      if(debug >= 5) outs() << val << " <= " << limit << "?\n";
       if(val <= limit) return;
+
+      if(debug >= 5)
+      {
+        outs() << "Abstract a constant: ";
+        outs() << "e: " << e << "\n";
+        outs() << "e->arg(i)" << e->arg(1) << "\n";
+        outs() << std::endl;
+      }
 
       // Check each set of pairs to see if they can be related.
       // ex. 10000, 5000, 2000. 
@@ -314,6 +320,11 @@ namespace ufo {
         outs() << "  elim: " << elim << "\n";
         outs() << "  preCond: " << preCond << "\n";
       }
+      if(!u.isSat(elim))
+      {
+        if(debug >= 3) outs() << "  elim is unsat.\n";
+        return false;
+      }
       // add precondition to be checked to the ruleManager.
       CHCs rm(m_efac, z3, debug);
 
@@ -481,66 +492,50 @@ namespace ufo {
       if ((isOpX<GEQ>(inEq) || isOpX<GT>(inEq)) && inEqConst > eqConst)
       {
         e = mk<GT>(inEq->left(), eq->left());
-        e = normalize(e);
-        if (debug >= 5)
-          outs() << "Adding: " << *e << "\n";
       }
       else if ((isOpX<LEQ>(inEq) || isOpX<LT>(inEq)) && inEqConst < eqConst)
       {
         e = mk<LT>(inEq->left(), eq->left());
-        e = normalize(e);
-        if (debug >= 5)
-          outs() << "Adding: " << *e << "\n";
       }
       else if ((isOpX<GEQ>(inEq) || isOpX<GT>(inEq)) && inEqConst < eqConst)
       {
         e = mk<GEQ>(inEq->left(), eq->left());
-        e = normalize(e);
-        if (debug >= 5)
-          outs() << "Adding: " << *e << "\n";
       }
       else if ((isOpX<LEQ>(inEq) || isOpX<LT>(inEq)) && inEqConst > eqConst)
       {
         e = mk<LEQ>(inEq->left(), eq->left());
-        e = normalize(e);
-        if (debug >= 5)
-          outs() << "Adding: " << *e << "\n";
       }
       else if ((isOpX<GEQ>(inEq) || isOpX<GT>(inEq)) && inEqConst >= eqConst)
       {
         e = mk<GEQ>(inEq->left(), eq->left());
-        e = normalize(e);
-        if (debug >= 5)
-          outs() << "Adding: " << *e << "\n";
       }
       else if ((isOpX<LEQ>(inEq) || isOpX<LT>(inEq)) && inEqConst <= eqConst)
       {
         e = mk<LEQ>(inEq->left(), eq->left());
-        e = normalize(e);
-        if (debug >= 5)
-          outs() << "Adding: " << *e << "\n";
       }
       else if ((isOpX<GEQ>(inEq) || isOpX<GT>(inEq)) && inEqConst <= eqConst)
       {
         e = mk<GT>(inEq->left(), eq->left());
-        e = normalize(e);
-        if (debug >= 5)
-          outs() << "Adding: " << *e << "\n";
       }
       else if ((isOpX<LEQ>(inEq) || isOpX<LT>(inEq)) && inEqConst >= eqConst)
       {
         e = mk<LT>(inEq->left(), eq->left());
-        e = normalize(e);
-        if (debug >= 5)
-          outs() << "Adding: " << *e << "\n";
       }
       else if (isOpX<EQ>(inEq) && inEqConst == eqConst)
       {
         e = mk<EQ>(inEq->left(), eq->left());
-        e = normalize(e);
-        if (debug >= 5)
-          outs() << "Adding: " << *e << "\n";
       }
+      else if (isOpX<NEQ>(inEq) && inEqConst != eqConst)
+      {
+        e = mk<NEQ>(inEq->left(), eq->left());
+      }
+      else
+      {
+        if(debug >= 5) outs() << "Unhandled case\n";
+      }
+      e = normalize(e);
+      if (debug >= 5)
+        outs() << "Adding: " << *e << "\n";
       return e;
     }
 
@@ -870,11 +865,19 @@ namespace ufo {
         }
       }
 
+      // for(auto ev : infMap)
+      // {
+      //   ExprSet inferred;
+      //   infer(ev.second, inferred);
+      //   inferredRet.insert(inferred.begin(), inferred.end());
+      // }
+
       for (auto ev : infMap)
       {
         vector<ExprVector> vec = separateOps(ev.second);
         for(auto& v : vec)
         {
+          if(v.size() <= 1) continue;
           ExprSet inferred;
           infer(v, inferred);
           inferredRet.insert(inferred.begin(), inferred.end());        
@@ -901,26 +904,50 @@ namespace ufo {
         }
         outs() << "Common: " << common << "\n";
       }
-      if (common != mk<TRUE>(m_efac))
-        inferredRet.insert(common);
 
-      // inferredRet.insert(conjoin(dataGrds, m_efac));
+      if (common != mk<TRUE>(m_efac))
+      {
+        ExprSet commonSet;
+        getConj(common, commonSet);
+        inferredRet.insert(commonSet.begin(), commonSet.end());
+      }
+
       inferredRet.insert(inferredFromData.begin(), inferredFromData.end());
 
       u.removeRedundantConjuncts(inferredRet);
 
       if(debug >= 4) 
       {
-        outs() << "INFERRED REMOVE REDUNDANT: ";
+        outs() << "Inferred after removeRedundant: ";
         outs() << conjoin(inferredRet, m_efac) << "\n";
       }
 
       return inferredRet;
     }
 
-    Expr branchPreCond = mk<TRUE>(m_efac);
+    void filterCandMap(map<Expr, ExprSet> &candMap, ExprVector& rowsExpr)
+    {
+      for (auto &r : rowsExpr)
+      {
+        if (debug >= 3)
+          outs() << "  rowsExpr: " << r << "\n";
+        for (auto itr = candMap[invDecl].begin(); itr != candMap[invDecl].end();)
+        {
+          if (!u.isSat(r, *itr))
+          {
+            if (debug >= 3)
+              outs() << "  Removed: " << *itr << "\n";
+            itr = candMap[invDecl].erase(itr);
+          }
+          else
+          {
+            ++itr;
+          }
+        }
+      }
+    }
+
     Expr firstRowExpr = mk<TRUE>(m_efac);
-    // Public member functions
     boost::tribool invFromData(Expr src, Expr dst, Expr block, 
                                map<Expr, ExprSet>& candMap, int n) {
       
@@ -949,44 +976,21 @@ namespace ufo {
       {
         dl2.getDataCands(candMap[invDecl], invDecl);
       }
+
       dataGrds.clear();
       filterNonGhExp(candMap[invDecl]);
       u.removeRedundantConjuncts(dataGrds);
-      if(debug >= 3) 
+      if (debug >= 3) 
       {
         outs() << "dataGuards: \n";
-        for (auto &d : dataGrds)
-        {
-          outs() << d << "\n";
-        }
+        for (auto &d : dataGrds) outs() << d << "\n";
       }
 
       ExprVector rowsExpr = dl2.exprForRows(invDecl);
       if(rowsExpr.size() > 0) firstRowExpr = rowsExpr[0];
 
-      for(auto& r: rowsExpr)
-      {
-        if(debug >= 3) outs() << "  rowsExpr: " << r << "\n";
-        for(auto itr = candMap[invDecl].begin(); itr != candMap[invDecl].end();)
-        {
-          if(!u.isSat(r, *itr))
-          {
-            if(debug >= 3) outs() << "  Removed: " << *itr << "\n";
-            itr = candMap[invDecl].erase(itr);
-          }
-          else
-          {
-            ++itr;
-          }
-        }
-      }
-      branchPreCond = conjoin(dataGrds, m_efac);
-      branchPreCond = simplifyArithm(branchPreCond);
-      if (debug >= 3)
-      {
-        outs() << "  branchPreCond: " << branchPreCond << "\n";
-      }
-      // block = branchPreCond;
+      filterCandMap(candMap, rowsExpr);
+
       if (debug >= 2)
       {
         for (auto &e : candMap[invDecl])
@@ -997,7 +1001,7 @@ namespace ufo {
       return res;
     }
 
-    Expr mutateInfer(Expr a, Expr b, bool first)
+    Expr mutateInfer(Expr a, Expr b, bool first, ExprVector& BigPhi)
     {
       Expr opExpr = first ? a : b;
       Expr res = mk<TRUE>(m_efac);
@@ -1008,86 +1012,115 @@ namespace ufo {
       if(isOpX<EQ>(opExpr)) res = mk<EQ>(a->left(), b->left());
       if(isOpX<NEQ>(opExpr)) res = mk<NEQ>(a->left(), b->left());
 
-      if(u.isSat(res, firstRowExpr)) return res; 
+      if(!u.isTrue(res) && u.isSat(res, firstRowExpr) && checkSanity(res, BigPhi)) return res; 
       return mk<TRUE>(m_efac);
     }
 
+    bool checkSanity(Expr inferred, ExprVector& BigPhi)
+    {
+      ExprSet inf;
+      inf.insert(inferred);
+      return checkSanity(inf, BigPhi);
+    }
+
+    bool checkSanity(ExprSet& inferred, ExprVector& BigPhi)
+    {
+      for (auto &c : BigPhi)
+      {
+        if (u.implies(c, conjoin(inferred, m_efac)))
+        {
+          if(debug >= 3) outs() << "SANE\n";
+        }
+        else
+        {
+          outs() << "INSANE\n";
+          return false;
+        }
+      }
+      return true;
+    }
+
+    void printBigPhi(ExprVector& BigPhi)
+    {
+      outs() << "  BigPhi size: " << BigPhi.size() << "\n";
+      for (auto &c : BigPhi)
+      {
+        outs() << "  From BigPhi: " << c << std::endl;
+        ;
+      }
+    }
+
+    void mutateHeuristicInf(ExprSet& mutatedInferred, ExprSet& inferred, ExprVector& BigPhi)
+    {
+      for (auto &i : inferred)
+      {
+        for (auto &ii : inferred)
+        {
+          if (i == ii)
+            continue;
+          mutatedInferred.insert(mutateInfer(i, ii, true, BigPhi));
+          mutatedInferred.insert(mutateInfer(i, ii, false, BigPhi));
+          mutatedInferred.insert(mutateInfer(ii, i, true, BigPhi));
+          mutatedInferred.insert(mutateInfer(ii, i, false, BigPhi));
+        }
+      }
+
+      if (debug >= 4)
+      {
+        outs() << "  Mutated inferred:\n";
+        for (auto &i : mutatedInferred)
+        {
+          outs() << "  " << i << "\n";
+        }
+      }
+    }
+
+    // Break equalities into inequalities.
+    // Find weakest.
+    // Check that the previous expr is an overapproximation.
+    // Process them in order, run simplifyArithm on each one.
     Expr weakenAndSplit(ExprVector& BigPhi, Expr bound) 
     {
-      // Break equalities into inequalities.
-      // Find weakest.
-      // Check that the previous expr is an overapproximation.
-      // Process them in order, run simplifyArithm on each one.
       if(debug >= 2) outs() << "\n\nWeaken & Split\n==============\n";
-      if(debug >= 4)
-      {
-        outs() << "  BigPhi size: " << BigPhi.size() << "\n";
-        for(auto& c: BigPhi)
-        {
-          outs() << "  From BigPhi: " << c << std::endl;;
-        }
-      }
+      if(debug >= 4) printBigPhi(BigPhi);
 
       ExprSet inferred = infer(BigPhi);
-
+      if(!checkSanity(inferred, BigPhi)) return mk<FALSE>(m_efac);
+      
+      // TODO: Move to its own method. Add sanity check.
       ExprSet mutatedInferred;
-      if(mutateInferred)
-      {
-        for(auto& i: inferred)
-        {
-          for(auto& ii: inferred)
-          {
-            if(i == ii) continue;
-            mutatedInferred.insert(mutateInfer(i, ii, true));
-            mutatedInferred.insert(mutateInfer(i, ii, false));
-            mutatedInferred.insert(mutateInfer(ii, i, true));
-            mutatedInferred.insert(mutateInfer(ii, i, false));
-          }
-        }
-
-        if(debug >= 4)
-        {
-          outs() << "  Mutated inferred:\n";
-          for(auto& i: mutatedInferred)
-          {
-            outs() << "  " << i << "\n";
-          }
-        }
-      }
+      if(mutateInferred) mutateHeuristicInf(mutatedInferred, inferred, BigPhi);
 
       Expr c;
-      boost::tribool safe; 
-      if (mutatedInferred.size() > 0)
+      boost::tribool safe = false; 
+      for(auto& m: mutatedInferred)
       {
-        for(auto& m: mutatedInferred)
-        {
-          if(m == mk<TRUE>(m_efac)) continue;
-          c = conjoin(inferred, m_efac);
-          c = mk<AND>(c, m);
-          if(debug >= 4) outs() << "  c with mutated Expr: " << c << "\n";
-          safe = checkSafety(c, bound);
-          if(safe) break;
-          else if(debug >= 4)
-            outs() << "\n\n********\n*UNSAFE*\n********\n\n";
-        }
-
-        if(!safe) safe = checkSafety(conjoin(inferred, m_efac), bound);
-      }
-      else
-      {
+        if(isOpX<TRUE>(m)) continue;
         c = conjoin(inferred, m_efac);
-        if(debug >= 4) outs() << "  From infrerred:\n---> " << c << "\n";
+        c = mk<AND>(c, m);
+        if(debug >= 4) outs() << "  c with mutated Expr: " << c << "\n";
+
         safe = checkSafety(c, bound);
+
+        if(safe) break;
+        else if(debug >= 3) 
+          outs() << "\n\n********\n*MUTATE*\n*UNSAFE*\n********\n\n";
       }
 
-      if(debug >= 4) 
+      if(!safe) {
+        c = conjoin(inferred, m_efac);
+        safe = checkSafety(c, bound);
+      } 
+
+      if(debug >= 3) 
       {
         if(!safe) outs() << "\n\n********\n*UNSAFE*\n********\n\n";
         else outs() << "\n\n******\n*SAFE*\n******\n\n";
       }
 
-      if(!safe) return mk<TRUE>(m_efac);
-      if(debug >= 4) outs() << "  Result from checkSafety: " << c << " => " << replaceAll(bound, fc->srcVars, tr->srcVars) << "\n";
+      if(!safe) return mk<FALSE>(m_efac);
+      if(debug >= 3) outs() << "  Result from checkSafety: " << c << " => " << replaceAll(bound, fc->srcVars, tr->srcVars) << "\n";
+
       return c;
     }
 
@@ -1116,19 +1149,20 @@ namespace ufo {
       }
 
       Expr ff = normalize(f, ghostVars[0]);
+      Expr fg = mk<EQ>(ff->right(), ghostValue);
+
       if (debug >= 3)
       {
         outs() << "  ff: ";
         pprint(ff, 2);
+        outs() << "  gh value: " << fg << "\n";
       }
-      Expr fg = mk<EQ>(ff->right(), ghostValue);
-      if(debug >= 3) outs() << "  gh value: " << fg << "\n";
       
       for (int i = 1; i < k; i++)
-      {
         fg = replaceAll(fg, vars[vars.size() - i - 1], vars[vars.size() - i]);
-      }
+      
       fg = replaceAll(fg, rm.invVars[invDecl], vars[vars.size() - 1]);
+
       Expr lg = replaceAll(loopGuard, rm.invVars[invDecl], vars[vars.size() - 1]);
       if(debug >= 5) outs() << "  gh value (vars replaced): " << fg << "\n";
 
@@ -1264,7 +1298,7 @@ namespace ufo {
         for(auto& p: prjcts2)
         {
           if(debug >= 4) outs() << "  Checking Projection: " << simplifyArithm(p) << "\n";
-          // if(!toKeep(p))
+          // if(!toKeep(p)) // TODO: make this a flag.
             prjcts.push_back(simplifyArithm(p));
         }
 
@@ -1295,7 +1329,7 @@ namespace ufo {
           i++;
         }
       }
-      Expr c = mk<TRUE>(m_efac);
+      Expr c = mk<FALSE>(m_efac);
 
       for(int i = 0; i < allCombs.size(); i++)
       {
@@ -1311,10 +1345,9 @@ namespace ufo {
           pprint(current);
           outs() << "\n\n";
         }
-        Expr c = weakenAndSplit(current, bound);
+        c = weakenAndSplit(current, bound);
         if(debug >= 3) outs() << "  Result from W&S: " << c << "\n";
-        if(c != mk<TRUE>(m_efac)) return c;
-
+        if(!isOpX<FALSE>(c)) return c;
       }
 
       return c;
@@ -1566,7 +1599,7 @@ namespace ufo {
               psi = getPre(p, f, m.back());
               psi = simplifyArithm(psi);
               if(debug >= 4) outs() << "  psi after getPre: " << psi << "\n";
-              if (psi != mk<TRUE>(m_efac) && psi != mk<FALSE>(m_efac))
+              if (!isOpX<FALSE>(psi))
               {
                 if (debug >= 2)
                 {
@@ -1590,10 +1623,11 @@ namespace ufo {
       }
     }
 
-    void printResults()
+    void printResults(bool success = true)
     {
-      if(!bounds.empty()) outs() << "\nSuccess! Found bounds:\n";
-      int i = 0;
+      if(!bounds.empty() && success) outs() << "\nSuccess! Found bounds:\n";
+      else if(!success) outs() << "\nBounds so far:\n";
+      // int i = 0;
       for (auto b = bounds.begin(); b != bounds.end(); b++)
       {
         outs() << b->first << " --> " << b->second;

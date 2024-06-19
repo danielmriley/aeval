@@ -499,8 +499,8 @@ namespace ufo
     else if (isOpX<ITE>(e)){
       return mk<ITE>(e->left(), additiveInverse(e->right()), additiveInverse(e->last()));
     }
-//    return mk<MULT>(mkMPZ ((-1), e->getFactory()), e);
-    return mk<UN_MINUS>(e);
+    return mk<MULT>(mkMPZ ((-1), e->getFactory()), e);
+    // return mk<UN_MINUS>(e);
   }
 
   /**
@@ -3741,8 +3741,13 @@ namespace ufo
       if (success)
       {
         Expr pl = (newlhs.size() == 1) ? *newlhs.begin(): mknary<PLUS>(newlhs);
+        if(newlhs.size() > 1 && -intconst < 0) {
+          pl = additiveInverse(pl);
+          Expr c = mkMPZ (intconst, fla->getFactory());
+          return reBuildCmpSym(fla, c, pl);
+        }
+
         Expr c = mkMPZ (-intconst, fla->getFactory());
-        if(isOpX<EQ>(fla) && c == mkMPZ(0,fla->getFactory())) pl = additiveInverse(pl);
         return reBuildCmp(fla, pl, c);
       }
     }
