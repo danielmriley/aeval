@@ -31,9 +31,9 @@ namespace ufo {
     bool doConnect = false;
     bool absConsts = false;
     bool dataInfer = false;
-    bool reAdd = false;
     bool imp = false;
     bool mutateInferred = false;
+    bool sepOps = false;
 
     ExprMap abstrVars;
     string abdstrName = "_AB_";
@@ -41,11 +41,11 @@ namespace ufo {
   public:
     // Constructor
     BoundSolverV2(CHCs &r, int _b, bool _dg, bool d2, bool _dp, int _limit, bool gj,
-                  bool dc, bool abConsts, bool iwd, bool _reAdd, bool _imp,
-                  bool mi, int dbg)
+                  bool dc, bool abConsts, bool iwd, bool _imp, bool mi, bool _sepOps,
+                  int dbg)
         : BoundSolver(r, _b, _dg, d2, _dp, dbg), limit(_limit), n(_limit), doGJ(gj),
-          doConnect(dc), absConsts(abConsts), dataInfer(iwd), reAdd(_reAdd), imp(_imp),
-          mutateInferred(mi)
+          doConnect(dc), absConsts(abConsts), dataInfer(iwd), imp(_imp),
+          mutateInferred(mi), sepOps(_sepOps)
     {
       if(absConsts) abstractConsts(); 
       // TODO:
@@ -424,7 +424,7 @@ namespace ufo {
         Expr c = normalize(cc, true);
         if(debug >= 4) outs() << "Splitting: " << c << "\n";
         ExprVector lhs;
-        getConj(c, lhs);
+        getConj(c, lhs); // handle Disjuncts.
         for(int i = 0; i < lhs.size(); i++)
         {
           Expr lhsi = lhs[i]->left();
@@ -742,20 +742,29 @@ namespace ufo {
         ExprVector inferSeeds;
         // Count how often this message shows up and in how many benchmarks.
         // Add a column in the spreadsheet for this.
-        if(isOpX<AND>(c)) outs() << "conjunctive infer " << c << "\n";
-        if (isOpX<EQ>(c))
+        if(debug >= 3 && isOpX<AND>(c))
         {
-          inferSeeds = {mk<GEQ>(c->left(), c->right()),
-                        mk<LEQ>(c->left(), c->right())};
+          outs() << "conjunctive infer " << c << "\n";
         }
-        else if (isOpX<NEQ>(c))
+        
+        ExprSet tmp;
+        getConj(c, tmp);
+        for(auto& d: tmp)
         {
-          inferSeeds = {mk<GT>(c->left(), c->right()),
-                        mk<LT>(c->left(), c->right())};
-        }
-        else
-        {
-          inferSeeds = {c};
+          if (isOpX<EQ>(d))
+          {
+            inferSeeds.push_back(mk<GEQ>(d->left(), d->right()));
+            inferSeeds.push_back(mk<LEQ>(d->left(), d->right()));
+          }
+          else if (isOpX<NEQ>(d))
+          {
+            inferSeeds.push_back(mk<GT>(d->left(), d->right()));
+            inferSeeds.push_back(mk<LT>(d->left(), d->right()));          
+          }
+          else
+          {
+            inferSeeds.push_back(d);
+          }
         }
 
         if (i == 0)
@@ -766,16 +775,16 @@ namespace ufo {
         {
           for (auto itr = inferred.begin(); itr != inferred.end(); )
           {
-            bool toBreak = false;
+            // bool toBreak = false;
             if (!u.implies(c, *itr) || (imp && u.implies(*itr, c))) // experiment without the second disjunct
             {
               if (debug >= 4)
                 outs() << "  Erasing: " << *itr << "\n";
               itr = inferred.erase(itr);
-              toBreak = true;
+              // toBreak = true;
             }
-            if (toBreak)
-              break;
+            // if (toBreak)
+            //   break;
             itr++;
           }
         }
@@ -852,39 +861,49 @@ namespace ufo {
       ExprSet inferredFromData;
       if(dataInfer) inferredFromData = inferWithData(BigPhi); // infer2
 
-      splitExprs(BigPhi, infMap);
-      if (debug >= 4)
-      {
-        for(auto& m: infMap)
-        {
-          for(auto& mm : m.second)
-          {
-            outs() << "  From infMap: " << mm << "\n";
-          }
-          outs() << "\n";
-        }
-      }
-
-      // for(auto ev : infMap)
+      // splitExprs(BigPhi, infMap);
+      // if (debug >= 4)
       // {
-      //   ExprSet inferred;
-      //   infer(ev.second, inferred);
-      //   inferredRet.insert(inferred.begin(), inferred.end());
+      //   for(auto& m: infMap)
+      //   {
+      //     for(auto& mm : m.second)
+      //     {
+      //       outs() << "  From infMap: " << mm << "\n";
+      //     }
+      //     outs() << "\n";
+      //   }
       // }
 
-      for (auto ev : infMap)
-      {
-        vector<ExprVector> vec = separateOps(ev.second);
-        for(auto& v : vec)
-        {
-          if(v.size() <= 1) continue;
-          ExprSet inferred;
-          infer(v, inferred);
-          inferredRet.insert(inferred.begin(), inferred.end());        
-        } 
-      }
+      // if(sepOps)
+      // {
+      //   for (auto ev : infMap)
+      //   {
+      //     vector<ExprVector> vec = separateOps(ev.second);
+      //     for(auto& v : vec)
+      //     {
+      //       if(v.size() <= 1) continue;
+      //       ExprSet inferred;
+      //       infer(v, inferred);
+      //       inferredRet.insert(inferred.begin(), inferred.end());        
+      //     } 
+      //   }
+      // }
+      // else
+      // {
+      //   for(auto ev : infMap)
+      //   {
+      //     ExprSet inferred;
+      //     infer(ev.second, inferred);
+      //     inferredRet.insert(inferred.begin(), inferred.end());
+      //   }
+      // }
 
-      if(absConsts)
+
+      ExprSet inferred;
+      infer(BigPhi, inferred);
+      inferredRet.insert(inferred.begin(), inferred.end());
+
+      if(absConsts && false)
       {
         ExprVector reRun;
         reRun.insert(reRun.end(), inferredRet.begin(), inferredRet.end());
@@ -948,6 +967,7 @@ namespace ufo {
     }
 
     Expr firstRowExpr = mk<TRUE>(m_efac);
+    ExprVector rowsExpr;
     boost::tribool invFromData(Expr src, Expr dst, Expr block, 
                                map<Expr, ExprSet>& candMap, int n) {
       
@@ -986,7 +1006,7 @@ namespace ufo {
         for (auto &d : dataGrds) outs() << d << "\n";
       }
 
-      ExprVector rowsExpr = dl2.exprForRows(invDecl);
+      rowsExpr = dl2.exprForRows(invDecl);
       if(rowsExpr.size() > 0) firstRowExpr = rowsExpr[0];
 
       filterCandMap(candMap, rowsExpr);
@@ -1029,7 +1049,7 @@ namespace ufo {
       {
         if (u.implies(c, conjoin(inferred, m_efac)))
         {
-          if(debug >= 3) outs() << "SANE\n";
+          if(debug >= 5) outs() << "SANE\n";
         }
         else
         {
@@ -1085,11 +1105,19 @@ namespace ufo {
       if(debug >= 4) printBigPhi(BigPhi);
 
       ExprSet inferred = infer(BigPhi);
-      if(!checkSanity(inferred, BigPhi)) return mk<FALSE>(m_efac);
+      if(!checkSanity(inferred, BigPhi)) exit(1);//return mk<FALSE>(m_efac);
       
       // TODO: Move to its own method. Add sanity check.
       ExprSet mutatedInferred;
-      if(mutateInferred) mutateHeuristicInf(mutatedInferred, inferred, BigPhi);
+      if(mutateInferred) 
+      {
+        // for(auto dg = dataGrds.rbegin(); dg != dataGrds.rend(); dg++)
+        // {
+        //   mutatedInferred.insert(mk<GEQ>((*dg)->left(), (*dg)->right()));
+        //   mutatedInferred.insert(mk<LEQ>((*dg)->left(), (*dg)->right()));
+        // }
+        mutateHeuristicInf(mutatedInferred, inferred, BigPhi);
+      } 
 
       Expr c;
       boost::tribool safe = false; 
@@ -1200,6 +1228,13 @@ namespace ufo {
 
     boost::tribool toKeep(Expr p)
     {
+      // If a projection (p) is satisfiable with one of the rows from data
+      // keep it. Else throw it away.
+      // for(auto& m: rowsExpr)
+      // {
+      //   if(u.isSat(m, p)) return true;
+      // }
+      // return false;
       ExprVector vars;
       filter(p, IsConst(), inserter(vars, vars.begin()));
       ExprVector conjs;
@@ -1220,12 +1255,13 @@ namespace ufo {
       boost::tribool res = u.isSat(m);
       if(res) outs() << "SAT\n";
       else outs() << "UNSAT\n";
-
+      
       return  res;
     }
 
     vector<ExprVector> abds;
     vector<ExprVector> allCombs;
+    bool abdErr = false;
     Expr getPre(Expr p, Expr f, int n)
     {
       // p holds the conjunction of the negated previous preconditions.
@@ -1254,7 +1290,7 @@ namespace ufo {
       prepareRuleManager(rm, rules);
 
       BndExpl bnd(rm, (debug > 0));
-      ExprVector BigPhi;
+      // ExprVector BigPhi;
       Expr bound;
 
       abds.clear();
@@ -1270,7 +1306,7 @@ namespace ufo {
         {
           Expr res = mk<TRUE>(m_efac);
           if(debug >= 4) outs() << "  phi is UNSAT\n";
-          if(BigPhi.size() < 1) return res;
+          return res;
         }
 
         vector<ExprVector> vars;
@@ -1281,9 +1317,11 @@ namespace ufo {
         if (u.implies(elim, phi))
         {
           if(debug >= 4) outs() << "  ERROR with abduction\n";
+          abdErr = true;
           continue;
         }
 
+        abdErr = false;
         elim = simplifyArithm(makePretty(elim, k, vars, rm));
 
         if (debug >= 3)
@@ -1298,7 +1336,7 @@ namespace ufo {
         for(auto& p: prjcts2)
         {
           if(debug >= 4) outs() << "  Checking Projection: " << simplifyArithm(p) << "\n";
-          // if(!toKeep(p)) // TODO: make this a flag.
+          // if(toKeep(p)) // TODO: make this a flag.
             prjcts.push_back(simplifyArithm(p));
         }
 
@@ -1334,6 +1372,7 @@ namespace ufo {
       for(int i = 0; i < allCombs.size(); i++)
       {
         ExprVector current;
+        if(allCombs[i].size() < 3) continue;
         for(int j = 0; j < allCombs[i].size(); j++)
         {
           current.push_back(allCombs[i][j]);
@@ -1341,7 +1380,7 @@ namespace ufo {
 
         if(debug >= 3) 
         {
-          outs() << "  current projs:\n";
+          outs() << "  projs[ " << i << " ]:\n";
           pprint(current);
           outs() << "\n\n";
         }
@@ -1364,7 +1403,7 @@ namespace ufo {
         {
           for(auto& cc: c)
           {
-            outs() << "Comb " << i << ": " << cc << "\n";
+            outs() << "Combs so far " << i << ": " << cc << "\n";
           }
           i++;
         }
@@ -1509,12 +1548,15 @@ namespace ufo {
             outs() << "SSA: ";
             pprint(ssa, 2);
           }
+
           ssa = mk<AND>(p, ssa);
           ssa = replaceAll(ssa, fc->srcVars, invVars);
+
           if(debug >= 4) {
             outs() << "SSA after: ";
             pprint(ssa, 2);
           }
+          
           if(u.isSat(ssa))
           {
             m.push_back(i+1);
@@ -1599,7 +1641,7 @@ namespace ufo {
               psi = getPre(p, f, m.back());
               psi = simplifyArithm(psi);
               if(debug >= 4) outs() << "  psi after getPre: " << psi << "\n";
-              if (!isOpX<FALSE>(psi))
+              if (!abdErr && !isOpX<FALSE>(psi))
               {
                 if (debug >= 2)
                 {
@@ -1663,7 +1705,7 @@ namespace ufo {
   inline void learnBoundsV2(string smt, int inv, int stren, bool dg,
                                   bool data2, bool doPhases, int limit, 
                                   bool gj, bool dc, bool ac, bool iwd, 
-                                  bool ra, bool imp, bool mi, int debug)
+                                  bool imp, bool mi, bool so, int debug)
   {
     ExprFactory m_efac;
     EZ3 z3(m_efac);
@@ -1672,7 +1714,7 @@ namespace ufo {
     ruleManager.parse(smt, false);
 
     BoundSolverV2 bs(ruleManager, inv, dg, data2, doPhases, limit, gj,
-                     dc, ac, iwd, ra, imp, mi, debug);
+                     dc, ac, iwd, imp, mi, so, debug);
     // bs.removeQuery();
     bs.setUpQueryAndSpec(mk<TRUE>(m_efac), mk<TRUE>(m_efac));
     // bs.collectPhaseGuards();

@@ -62,19 +62,19 @@ int main (int argc, char ** argv)
     return 0;
   }
 
-  int learn = getIntValue("--learn", 2, argc, argv);
-  int limit = getIntValue("--limit", 3, argc, argv);
+  int learn = getIntValue("--learn", 2, argc, argv); 
+  int limit = getIntValue("--limit", 3, argc, argv); // unrolling limit
   int cex = getIntValue("--cex", 0, argc, argv);
   int str = getIntValue("--stren", 5, argc, argv);
   int debug = getIntValue("--debug", 0, argc, argv);
-  bool useDataGrds = !getBoolValue("--data-guards", false, argc, argv);
-  bool gj = getBoolValue("--gj", false, argc, argv);
-  bool dc = getBoolValue("--dc", false, argc, argv);
-  bool abstractConsts = getBoolValue("--abstract-consts", false, argc, argv);
-  bool iwd = getBoolValue("--data-inference", false, argc, argv);
-  bool ra = getBoolValue("--readd-infer", false, argc, argv);
-  bool imp = getBoolValue("--extra-implies", false, argc, argv);
-  bool mi = getBoolValue("--mutate-inferred", false, argc, argv);
+  bool useDataGrds = !getBoolValue("--data-guards", false, argc, argv); // use data guards
+  bool gj = getBoolValue("--gj", false, argc, argv); // do Gauss Jordan
+  bool dc = getBoolValue("--dc", false, argc, argv); // do connect
+  bool ac = getBoolValue("--ac", false, argc, argv); // abstract large constants
+  bool iwd = getBoolValue("--di", false, argc, argv); // data inference
+  bool imp = getBoolValue("--ei", false, argc, argv); // enable second implication
+  bool mi = getBoolValue("--mi", false, argc, argv); // mutate inferred
+  bool so = getBoolValue("--so", false, argc, argv); // separate ops.
   bool data2 = getBoolValue("--data2", false, argc, argv);
   bool doPhases = getBoolValue("--phase-data", false, argc, argv);
 
@@ -91,7 +91,7 @@ int main (int argc, char ** argv)
     learnBounds(string(argv[argc-1]), cex, str, useDataGrds, data2, doPhases, debug);
   else
     learnBoundsV2(string(argv[argc-1]), cex, str, useDataGrds, data2, doPhases, limit,
-                  gj, dc, abstractConsts, iwd, ra, imp, mi, debug);
+                  gj, dc, ac, iwd, imp, mi, so, debug);
     
   return 0;
 }

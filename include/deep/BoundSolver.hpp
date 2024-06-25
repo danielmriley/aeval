@@ -1106,8 +1106,15 @@ namespace ufo
         else i++;
       }
       ExprSet tmp;
-      for(auto& e : candSet) {
-        tmp.insert(normalize(e, ghostVars[0]));
+      for (auto i = candSet.begin(); i != candSet.end();)
+      {
+        Expr e = normalize(*i, ghostVars[0]);
+        if(isOpX<MULT>(e->left()) && false) i = candSet.erase(i);
+        else
+        {
+          tmp.insert(e);
+          i++;
+        }
       }
       candSet = tmp;
     }
