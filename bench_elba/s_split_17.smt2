@@ -8,7 +8,7 @@
 (declare-var w0 Int)
 (declare-var w1 Int)
 
-(rule (=> true (inv x0 z0 v0 w0)))
+(rule (=> (and (= v0 0) (= w0 0) (> x0 z0)) (inv x0 z0 v0 w0)))
 
 (rule (=> (and
         (inv x0 z0 v0 w0)

@@ -5,7 +5,7 @@
 (declare-var y1 Int)
 (declare-var m0 Int)
 
-(rule (=> true (inv x0 y0 m0)))
+(rule (=> (and (= x0 0) (= y0 0)) (inv x0 y0 m0)))
 
 (rule (=> (and
         (inv x0 y0 m0)

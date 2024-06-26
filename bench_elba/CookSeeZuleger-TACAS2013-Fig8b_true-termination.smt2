@@ -3,7 +3,7 @@
 (declare-var x1 Int)
 (declare-var M Int)
 
-(rule (=> (> M 0) (inv x0 M)))
+(rule (=> true (inv x0 M)))
 
 (rule (=> (and
         (inv x0 M)

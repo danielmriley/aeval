@@ -14,5 +14,3 @@
         (= res1 (+ res0 1))
         (= y1 (+ 1 x0)))
     (inv x0 y1 res1)))
-
-; Elba finds a solution but it is wrong for the case where the loop executes. Should be gh = 1.

@@ -84,7 +84,7 @@ namespace ufo {
       {
         outs() << "Abstract a constant: ";
         outs() << "e: " << e << "\n";
-        outs() << "e->arg(i)" << e->arg(1) << "\n";
+        outs() << "e->arg(i): " << typeOf(e) << "\n";
         outs() << std::endl;
       }
 
@@ -93,38 +93,52 @@ namespace ufo {
 
       Expr var;
       Expr varPr;
-      Expr type = e->arg(1);
+      Expr type = typeOf(e);
       for(auto& av: abstrVars)
       {
         if(av.second == e)
         {
           var = fapp(constDecl(av.first, type));
-          varPr = mkTerm<string>(lexical_cast<string>(av.first) + "'", m_efac);
-          varPr = fapp(constDecl(varPr, type));
+          // varPr = mkTerm<string>(lexical_cast<string>(av.first) + "'", m_efac);
+          // varPr = fapp(constDecl(varPr, type));
           if(debug >= 4) outs() << "Constant already abstracted: " << var << "\n";
           hr.body = replaceAll(hr.body, e, var);
           return;
         }
 
-        cpp_int eVal = lexical_cast<cpp_int>(e);
-        cpp_int avVal = lexical_cast<cpp_int>(av.second);
-        if(avVal % eVal == 0)
-        {
-          cpp_int div = avVal / eVal;
-          var = mk<MULT>(mkMPZ(div, m_efac), av.first);
-          varPr = mkTerm<string>(lexical_cast<string>(av.first) + "'", m_efac);
-          varPr = fapp(constDecl(varPr, type));
-          if (debug >= 4)
-            outs() << "Constant already abstracted: " << var << "\n";
-          hr.body = replaceAll(hr.body, av.first, var);
-          hr.body = replaceAll(hr.body, e, av.first);
-          av.second = e;
-          return;
-        }
-        else
-        {
-          outs() << "Unable to find relationships between " << eVal << " and " << avVal << "\n";
-        }
+        // cpp_int eVal = lexical_cast<cpp_int>(e);
+        // cpp_int avVal = lexical_cast<cpp_int>(av.second);
+        // if(avVal % eVal == 0)
+        // {
+        //   cpp_int div = avVal / eVal;
+        //   var = mk<MULT>(mkMPZ(div, m_efac), av.first);
+        //   // varPr = mkTerm<string>(lexical_cast<string>(av.first) + "'", m_efac);
+        //   // varPr = fapp(constDecl(varPr, type));
+        //   if (debug >= 4)
+        //     outs() << "Constant already abstracted: " << var << "\n";
+        //   hr.body = replaceAll(hr.body, av.first, var);
+        //   hr.body = replaceAll(hr.body, e, av.first);
+        //   av.second = e;
+        //   return;
+        // }
+        // else if (eVal % avVal == 0)
+        // {
+        //   cpp_int div = eVal / avVal;
+        //   var = mk<MULT>(mkMPZ(div, m_efac), av.first);
+        //   // varPr = mkTerm<string>(lexical_cast<string>(av.first) + "'", m_efac);
+        //   // varPr = fapp(constDecl(varPr, type));
+        //   if (debug >= 4)
+        //     outs() << "Constant already abstracted: " << var << "\n";
+        //   hr.body = replaceAll(hr.body, av.first, var);
+        //   hr.body = replaceAll(hr.body, e, av.first);
+        //   av.second = e;
+
+        //   return;
+        // }
+        // else
+        // {
+        //   outs() << "Unable to find relationships between " << eVal << " and " << avVal << "\n";
+        // }
       }
       var = mkTerm<string>("_AB_" + lexical_cast<string>(abstrVars.size()), m_efac);
       var = fapp(constDecl(var, type));
@@ -190,13 +204,19 @@ namespace ufo {
         getConj(hr.body, conjs);
         for(auto& c: conjs)
         {
+          // Expr c = normalize(cc);
           if(debug >= 4) outs() << "conj: " << c << "\n";
           ExprVector vars;
           filter(c, IsConst(), inserter(vars, vars.begin()));
           Expr rhs = c->right();
+          Expr lhs = c->left();
           if(isNumericConst(rhs))
           {
             abstractConst(rhs, hr);
+          }
+          if(isNumericConst(lhs))
+          {
+            abstractConst(lhs, hr);
           }
           if(containsOp<ITE>(rhs))
           {
@@ -219,7 +239,7 @@ namespace ufo {
             hr.srcVars.push_back(av.first);
           }
           Expr dstVar = mkTerm<string>(lexical_cast<string>(av.first) + "'", m_efac);
-          dstVar = fapp(constDecl(dstVar, av.second->arg(1)));
+          dstVar = fapp(constDecl(dstVar, typeOf(av.second)));
           if(!hr.isQuery) hr.dstVars.push_back(dstVar);
 
           if(hr.isInductive)
@@ -783,9 +803,10 @@ namespace ufo {
               itr = inferred.erase(itr);
               // toBreak = true;
             }
+            else
+              itr++;
             // if (toBreak)
             //   break;
-            itr++;
           }
         }
 

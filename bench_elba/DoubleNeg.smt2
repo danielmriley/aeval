@@ -19,3 +19,4 @@
 
 ; gh = i or gh = j if i or j > 0
 ; else gh = 0
+; Nonterm if both i and j < 0
