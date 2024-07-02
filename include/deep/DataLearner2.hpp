@@ -354,6 +354,7 @@ namespace ufo
       int m = A[0].size();
       for (int i = 0; i < n; i++)
       {
+        outs() << "  ";
         for (int j = 0; j < m; j++)
         {
           if (j > 0)

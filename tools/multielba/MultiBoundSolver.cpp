@@ -57,9 +57,6 @@ vector<string> getCommaSepStrValues(const char * opt, vector<string> defValue, i
 
 int main (int argc, char ** argv)
 {
-  outs() << "SOON..\n";
-  return 0;
-
   if (getBoolValue("--help", false, argc, argv) || argc == 1){
     outs () <<   "TODO                                \n";
     return 0;
@@ -70,6 +67,15 @@ int main (int argc, char ** argv)
   int str = getIntValue("--stren", 5, argc, argv);
   int debug = getIntValue("--debug", 0, argc, argv);
   bool useDataGrds = !getBoolValue("--data-guards", false, argc, argv);
+  bool gj = getBoolValue("--gj", false, argc, argv);  // do Gauss Jordan
+  bool dc = getBoolValue("--dc", false, argc, argv);  // do connect
+  bool ac = getBoolValue("--ac", false, argc, argv);  // abstract large constants
+  bool iwd = getBoolValue("--di", false, argc, argv); // data inference
+  bool imp = getBoolValue("--ei", false, argc, argv); // enable second implication
+  bool mi = getBoolValue("--mi", false, argc, argv);  // mutate inferred
+  bool so = getBoolValue("--so", false, argc, argv);  // separate ops.
+  bool tk = getBoolValue("--tk", false, argc, argv);  // check projections from abduction.
+  int md = getIntValue("--md", 0, argc, argv);        // mutate results from data.
   bool data2 = getBoolValue("--data2", false, argc, argv);
   bool doPhases = getBoolValue("--phase-data", false, argc, argv);
 
@@ -80,7 +86,8 @@ int main (int argc, char ** argv)
     return 0;
   }
 
-  learnMultipleBounds(string(argv[argc - 1]), cex, str, useDataGrds, data2, doPhases, limit, debug);
-  
+  learnMultipleBounds(string(argv[argc - 1]), cex, str, useDataGrds, data2, doPhases, limit,
+                      gj, dc, ac, iwd, imp, mi, so, tk, md, debug);
+
   return 0;
 }

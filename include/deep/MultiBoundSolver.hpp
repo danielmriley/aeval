@@ -12,17 +12,44 @@ namespace ufo {
     EZ3 z3;
     SMTUtils u;
 
+    int debug = 0;
+
     int inv;
-    int limit;
     int stren;
     bool dg;
     bool data2;
     bool doPhases;
     int strenBound;
-    int debug = 0;
+    
+    int n; // parameter to control the number of trace iterations.
+    int limit;
+    int to = 100;
+    int freqs = 1;
+    int aggp = 1;
+    int mut = 1;
+    int dat = 1;
+    int doProp = 0;
+    int mutData = 0;
 
-    bool dc = false;
-    bool gj = false;
+    // For RndLearner
+    bool doDisj = true;
+    bool mbpEqs = false;
+    bool dAllMbp = true;
+    bool dAddProp = false;
+    bool dAddDat = true;
+    bool dStrenMbp = false;
+    bool dFwd = false;
+    bool dRec = false;
+    bool dGenerous = false;
+
+    bool doGJ = false;
+    bool doConnect = false;
+    bool absConsts = false;
+    bool dataInfer = false;
+    bool imp = false;
+    bool mutateInferred = false;
+    bool sepOps = false;
+    bool checkProj = false;
 
     vector<pair<Expr, Expr>> graphPairs;
     map<Expr, CHCs *> rms; // One map to rule(Manager) them all.
@@ -34,10 +61,16 @@ namespace ufo {
 
   public:
     // Constructor
-    MultiBoundSolver(CHCs &r, int _b, bool _dg, bool d2, bool _dp, int _limit, int dbg = 0)
-        : ruleManager(r), m_efac(r.m_efac), z3(r.m_efac), u(r.m_efac), smt(z3), debug(dbg), 
-          strenBound(_b), dg(_dg), data2(d2), doPhases(_dp), limit(_limit)
+    MultiBoundSolver(CHCs &r, int _b, bool _dg, bool d2, bool _dp, int _limit, bool gj,
+                     bool dc, bool abConsts, bool iwd, bool _imp, bool mi, bool _sepOps,
+                     bool _tk, int md, int dbg)
+        : m_efac(r.m_efac), ruleManager(r), z3(m_efac), u(m_efac), smt(z3), debug(dbg),
+          strenBound(_b), dg(_dg), data2(d2), doPhases(_dp), limit(_limit), n(_limit),
+          doGJ(gj), doConnect(dc), absConsts(abConsts), dataInfer(iwd), imp(_imp),
+          mutateInferred(mi), sepOps(_sepOps), checkProj(_tk), mutData(md)
     {
+      outs() << "Made it here\n";
+      exit(0);
     }
 
     HornRuleExt *makeNewTr(Expr body, Expr rel, CHCs &ruleManager)
@@ -459,7 +492,9 @@ namespace ufo {
             lastLoophead = *l;
 
             bool ranOnceAlready = false;
-            // elbas[*l] = new BoundSolverV2(*rms[*l], stren, dg, data2, doPhases, limit, gj, dc, debug);
+            elbas[*l] = new BoundSolverV2(*rms[*l], stren, dg, data2, doPhases, limit,
+                                          doGJ, doConnect, absConsts, dataInfer, imp, 
+                                          mutateInferred, sepOps, checkProj, mut, debug);
             int counter = 0;
             // From here hide the preprocessing.
             for (auto &bnd : prevBounds)
@@ -676,16 +711,22 @@ namespace ufo {
   };
 
   inline void learnMultipleBounds(string smt, int inv, int stren, bool dg,
-                                  bool data2, bool doPhases, int limit, int debug = 0)
+                                  bool data2, bool doPhases, int limit,
+                                  bool gj, bool dc, bool ac, bool iwd,
+                                  bool imp, bool mi, bool so, bool tk,
+                                  int md, int debug)
   {
     ExprFactory m_efac;
     EZ3 z3(m_efac);
     CHCs ruleManager(m_efac, z3, debug);
     
     ruleManager.parse(smt, false);
+    ruleManager.print(true);
+    outs() << "Finished printing\n";
 
-    MultiBoundSolver mbs(ruleManager, inv, dg, data2, doPhases, limit, debug);
-    
+    MultiBoundSolver mbs(ruleManager, inv, dg, data2, doPhases, limit, gj,
+                         dc, ac, iwd, imp, mi, so, tk, md, debug);
+
     mbs.solve();
   }
 }

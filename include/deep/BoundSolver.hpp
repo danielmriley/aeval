@@ -17,11 +17,11 @@ namespace ufo
   {
   protected:
 
+    CHCs& ruleManager;
     ExprFactory &m_efac;
     EZ3 z3;
     ZSolver<EZ3> smt;
     SMTUtils u;
-    CHCs& ruleManager;
     int varCnt = 0;
     ExprVector ssaSteps;
     map<Expr, ExprSet> candidates;

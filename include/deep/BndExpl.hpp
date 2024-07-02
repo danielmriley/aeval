@@ -942,21 +942,21 @@ namespace ufo
 
           ExprMap allModels;
           u.getModel(allVars, allModels);
-          // pprint(u.getModel());
-          // vector<double> _model;
-          // for(int d = 0; d < srcVars.size(); d++)
-          // {
+          pprint(u.getModel());
+          vector<double> _model;
+          for(int d = 0; d < srcVars.size(); d++)
+          {
             
-          //   _model.push_back(lexical_cast<double>(u.getModel(srcVars[d])));
-          //   outs() << "Model value: " << srcVars[d] << " = " << _model.back() << "\n";
-          // }
-          // models.push_back(_model);
+            _model.push_back(lexical_cast<double>(u.getModel(srcVars[d])));
+            outs() << "Model value: " << srcVars[d] << " = " << _model.back() << "\n";
+          }
+          models.push_back(_model);
 
-          // ExprSet gh_condVars;
-          // set<int> gh_condVarsIndex; // Get gh_cond vars here
-          // filter(gh_cond, bind::IsConst(), inserter(gh_condVars, gh_condVars.begin()));
-          // for (auto & a : gh_condVars)
-          //   gh_condVarsIndex.insert(getVarIndex(a, srcVars));
+          ExprSet gh_condVars;
+          set<int> gh_condVarsIndex; // Get gh_cond vars here
+          filter(gh_cond, bind::IsConst(), inserter(gh_condVars, gh_condVars.begin()));
+          for (auto & a : gh_condVars)
+            gh_condVarsIndex.insert(getVarIndex(a, srcVars));
 
           if (debug) outs () << "\n  Unroll and execute the cycle for " <<  srcRel
           << " and TERM " << gh_cond << "\n  - - - - - \n";
