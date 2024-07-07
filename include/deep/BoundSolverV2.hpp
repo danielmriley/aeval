@@ -300,8 +300,11 @@ namespace ufo {
         }
       }
 
-      if(debug >= 4) outs() << "\n** NEW CHCS **\n";
-      ruleManager.print(true);
+      if(debug >= 4)
+      {
+        outs() << "\n** NEW CHCS **\n";
+        ruleManager.print(true);
+      } 
     }
 
     void copyRule(HornRuleExt* dst, HornRuleExt* src)
@@ -914,18 +917,14 @@ namespace ufo {
         {
           for (auto itr = inferred.begin(); itr != inferred.end(); )
           {
-            // bool toBreak = false;
-            if (!u.implies(c, *itr) || (imp && u.implies(*itr, c))) // experiment without the second disjunct
+            if (!u.implies(c, *itr) || (imp && u.implies(*itr, c))) 
             {
               if (debug >= 4)
                 outs() << "  Erasing: " << *itr << "\n";
               itr = inferred.erase(itr);
-              // toBreak = true;
             }
             else
               itr++;
-            // if (toBreak)
-            //   break;
           }
         }
 
@@ -1000,44 +999,6 @@ namespace ufo {
       // Do data learning on BigPhi.
       ExprSet inferredFromData;
       if(dataInfer) inferredFromData = inferWithData(BigPhi); // infer2
-
-      // splitExprs(BigPhi, infMap);
-      // if (debug >= 4)
-      // {
-      //   for(auto& m: infMap)
-      //   {
-      //     for(auto& mm : m.second)
-      //     {
-      //       outs() << "  From infMap: " << mm << "\n";
-      //     }
-      //     outs() << "\n";
-      //   }
-      // }
-
-      // if(sepOps)
-      // {
-      //   for (auto ev : infMap)
-      //   {
-      //     vector<ExprVector> vec = separateOps(ev.second);
-      //     for(auto& v : vec)
-      //     {
-      //       if(v.size() <= 1) continue;
-      //       ExprSet inferred;
-      //       infer(v, inferred);
-      //       inferredRet.insert(inferred.begin(), inferred.end());        
-      //     } 
-      //   }
-      // }
-      // else
-      // {
-      //   for(auto ev : infMap)
-      //   {
-      //     ExprSet inferred;
-      //     infer(ev.second, inferred);
-      //     inferredRet.insert(inferred.begin(), inferred.end());
-      //   }
-      // }
-
 
       ExprSet inferred;
       infer(BigPhi, inferred);
@@ -1327,9 +1288,12 @@ namespace ufo {
         vars.push_back(mk<MULT>(a[2], v));
       }
 
-      for(auto& v: vars) 
-        outs() << v << ", ";
-      outs() << "\n\n";
+      if(debug >= 5)
+      {
+        for(auto& v: vars) 
+          outs() << v << ", ";
+        outs() << "\n\n";
+      }
 
       ExprSet vars2;
       for(auto i = vars.begin(); i != vars.end(); i++)
@@ -1345,9 +1309,13 @@ namespace ufo {
           vars2.insert(add);
         }
       }
-      for (auto &v : vars2)
-        outs() << v << ", ";
-      outs() << "\n";
+
+      if (debug >= 5)
+      {
+        for (auto &v : vars2)
+          outs() << v << ", ";
+        outs() << "\n\n";
+      }
 
       // adaptInterval(vars2);
       ExprSet tmp; // Make combinations of LEQ GEQ here. Check for redundancy.
@@ -1366,7 +1334,8 @@ namespace ufo {
           {
             tt = reBuildCmp(tt, tt->left()->right(), mpzZero);
           }
-          ineqs.insert(tt);
+          if(toKeep(tt, 1))
+            ineqs.insert(tt);
         } 
       }
       tmp.clear();
@@ -1388,7 +1357,8 @@ namespace ufo {
           {
             tt = reBuildCmp(tt, tt->left()->right(), mpzZero);
           }
-          ineqs.insert(tt);
+          if(toKeep(tt, 1))
+            ineqs.insert(tt);
         }
       }
       if(debug >= 4)
@@ -1400,6 +1370,48 @@ namespace ufo {
         }
       }
       return true;
+    }
+
+    Expr getNextMutant(ExprSet& mutatedInferred)
+    {
+      if(mutatedInferred.empty()) return mk<TRUE>(m_efac);
+      Expr mutant = *mutatedInferred.begin();
+      mutatedInferred.erase(mutatedInferred.begin());
+      return mutant;
+    }
+
+    Expr weakenAndCheck(ExprSet& inferred, Expr mutant, Expr bound)
+    {
+      if(debug >= 3) outs() << "\n\nWeaken & Check\n==============\n";
+      ExprSet tmpInf = inferred;
+      ExprSet reAdd;
+
+      while(!tmpInf.empty())
+      {
+        Expr check = *tmpInf.begin();
+        tmpInf.erase(tmpInf.begin());
+
+        Expr c = conjoin(tmpInf, m_efac);
+        Expr m = mk<AND>(mutant, conjoin(reAdd, m_efac));
+        c = mk<AND>(c, m);
+        c = simplifyArithm(c);
+
+        if(debug >= 5) outs() << "  c: " << c << "\n";
+
+        boost::tribool safe = checkSafety(c, bound);
+
+        if(!safe)
+        {
+          if(debug >= 5) outs() << "Readding: " << check << "\n";
+          reAdd.insert(check);
+        } 
+      }
+
+      inferred = reAdd;
+
+      if(debug >= 3) outs() << "\n==============\n";
+      
+      return simplifyArithm(mk<AND>(conjoin(inferred, m_efac), mutant));
     }
 
     // Break equalities into inequalities.
@@ -1418,10 +1430,6 @@ namespace ufo {
       if(mutateInferred) 
       {
         inferInequalities(mutatedInferred, BigPhi);
-      } 
-      else
-      {
-        mutatedInferred.insert(inferred.begin(), inferred.end());
       }
 
       Expr c;
@@ -1429,25 +1437,19 @@ namespace ufo {
       // do while loop, remove from infer until all "combinations" are tried.
       // Unsafe means the "removed" conjunct needs to be readded.
       // Write a "weakener".
-      for(auto& m: mutatedInferred)
+
+      do
       {
-        if(isOpX<TRUE>(m)) continue;
+        Expr mutant = getNextMutant(mutatedInferred);
         c = conjoin(inferred, m_efac);
-        c = mk<AND>(c, m);
+        c = mk<AND>(c, mutant);
         if(debug >= 4) outs() << "  c with mutated Expr: " << c << "\n";
 
         // try to weaken the precond iteratively and send back to FH only if safe.
         safe = checkSafety(c, bound);
+        if(safe) c = weakenAndCheck(inferred, mutant, bound);
+      } while (!safe && !mutatedInferred.empty());
 
-        if(safe) break;
-        else if(debug >= 3) 
-          outs() << "\n\n********\n*MUTATE*\n*UNSAFE*\n********\n\n";
-      }
-
-      // if(!safe) {
-      //   c = conjoin(inferred, m_efac);
-      //   safe = checkSafety(c, bound);
-      // } 
 
       if(debug >= 3) 
       {
@@ -1540,11 +1542,17 @@ namespace ufo {
     {
       // If a projection (p) is satisfiable with one of the rows from data
       // keep it. Else throw it away.
+      if (debug >= 4)
+        outs() << "  Checking Projection: " << simplifyArithm(p) << "\n";
 
-      for(int i = rowsExpr.size() - 1 - k; i < rowsExpr.size(); i++)
+      for(int i = 0; i < k; i++)
       {
         if(debug >= 5) outs() << "  Checking row[" << i << "]: " << rowsExpr[i] << "\n";
-        if(u.isSat(rowsExpr[i], p)) return true;
+        if(u.isSat(rowsExpr[i], p))
+        {
+          if(debug >= 5) outs() << "  Keeping\n";
+          return true;
+        } 
       }
       return false;
       // ExprVector vars;
@@ -1574,7 +1582,7 @@ namespace ufo {
     vector<ExprVector> abds;
     vector<ExprVector> allCombs;
     bool abdErr = false;
-    Expr getPre(Expr p, Expr f, int n)
+    Expr getPre(Expr p, Expr f, vector<int> m)
     {
       // p holds the conjunction of the negated previous preconditions.
       // f is the data invariant.
@@ -1589,7 +1597,7 @@ namespace ufo {
         pprint(p, 2);
         outs() << "  f: ";
         pprint(f, 2);
-        outs() << "  n: " << n << "\n";
+        // outs() << "  b: " << b << "   n: " << n << "\n";
       }
 
       ExprSet Phi;
@@ -1607,7 +1615,7 @@ namespace ufo {
 
       abds.clear();
       allCombs.clear();
-      for(int k = 1; k <= n; k++) 
+      for(auto k: m) 
       {
         vector<int> trace;
         buildTrace(trace, k);
@@ -1647,11 +1655,18 @@ namespace ufo {
 
         for(auto& p: prjcts2)
         {
-          if(debug >= 4) outs() << "  Checking Projection: " << simplifyArithm(p) << "\n";
-          if(checkProj && toKeep(p, k)) // If enabled, checks the projection before adding it.
-            prjcts.push_back(simplifyArithm(p));
+          if(debug >= 4) outs() << "  Projection: " << normalize(p) << "\n";
+          if(checkProj)
+          {
+            if(toKeep(p, k)) // If enabled, checks the projection before adding it.
+            {
+              prjcts.push_back(simplifyArithm(p));
+            }
+          }
           else // If disabled, adds the projection without checking.
+          {
             prjcts.push_back(simplifyArithm(p));
+          }  
         }
 
         abds.push_back(prjcts);
@@ -1680,7 +1695,7 @@ namespace ufo {
           i++;
         }
       }
-      Expr c = mk<FALSE>(m_efac);
+      Expr a = mk<FALSE>(m_efac);
 
       for(int i = 0; i < allCombs.size(); i++)
       {
@@ -1697,12 +1712,17 @@ namespace ufo {
           pprint(current);
           outs() << "\n\n";
         }
-        c = weakenAndSplit(current, bound);
-        if(debug >= 3) outs() << "  Result from W&S: " << c << "\n";
-        if(!isOpX<FALSE>(c)) return c;
+        Expr b = weakenAndSplit(current, bound);
+        if(debug >= 3) outs() << "  Result from W&S: " << b << "\n";
+        // if(!isOpX<FALSE>(c)) return c;
+        if(u.implies(a, b)) a = b;
+        else if(u.implies(b, a)) continue;
+        else a = mk<OR>(a, b);
+
+        if(debug >= 3) outs() << "Current a: " << a << "\n";
       }
 
-      return c;
+      return a;
     }
 
     void getAllCombs(vector<ExprVector>& allCombs, vector<ExprVector>& abds, int i)
@@ -1794,8 +1814,8 @@ namespace ufo {
 
       if(debug >= 4) 
       {
-        outs() << "  Trace information: size: ";
-        outs() << trace.size() << "\n";
+        outs() << "\n  Trace information: size: ";
+        outs() << trace.size() << "\n  ";
         for (auto &t : trace)
           outs() << t << "  ";
         outs() << "\n";
@@ -1829,8 +1849,8 @@ namespace ufo {
           p = simplifyArithm(p);
           if(debug >= 4) outs() << "  Final p: " << p << "\n";
         
-          if(debug >= 2) outs() << "  Adding zero bound.\n";
-          bounds[p] = mk<EQ>(ghostVars[0], mkMPZ(0, m_efac));
+          if(debug >= 2) outs() << "  Adding zero bound.\n"; // This needs to check if it is possible to skip the loop before adding
+          if(!u.isFalse(p)) bounds[p] = mk<EQ>(ghostVars[0], mkMPZ(0, m_efac));
           return;
         }
         if(debug >= 4) outs() << "  phi is SAT\n";
@@ -1932,7 +1952,7 @@ namespace ufo {
             if (toContinue)
               continue;
 
-            psi = getPre(p, f, m.back());
+            psi = getPre(p, f, m);
             psi = simplifyArithm(psi);
             if(debug >= 4) outs() << "  psi after getPre: " << psi << "\n";
             if (!abdErr && !isOpX<FALSE>(psi))

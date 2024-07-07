@@ -6,6 +6,7 @@
 namespace ufo {
   class MultiBoundSolver {
   private:
+
     CHCs &ruleManager;
     ExprFactory &m_efac;
     ZSolver<EZ3> smt;
@@ -64,7 +65,7 @@ namespace ufo {
     MultiBoundSolver(CHCs &r, int _b, bool _dg, bool d2, bool _dp, int _limit, bool gj,
                      bool dc, bool abConsts, bool iwd, bool _imp, bool mi, bool _sepOps,
                      bool _tk, int md, int dbg)
-        : m_efac(r.m_efac), ruleManager(r), z3(m_efac), u(m_efac), smt(z3), debug(dbg),
+        : m_efac(r.m_efac), ruleManager(r), u(m_efac), smt(z3), z3(m_efac), debug(dbg),
           strenBound(_b), dg(_dg), data2(d2), doPhases(_dp), limit(_limit), n(_limit),
           doGJ(gj), doConnect(dc), absConsts(abConsts), dataInfer(iwd), imp(_imp),
           mutateInferred(mi), sepOps(_sepOps), checkProj(_tk), mutData(md)

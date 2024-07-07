@@ -942,13 +942,13 @@ namespace ufo
 
           ExprMap allModels;
           u.getModel(allVars, allModels);
-          pprint(u.getModel());
+          // pprint(u.getModel());
           vector<double> _model;
           for(int d = 0; d < srcVars.size(); d++)
           {
             
             _model.push_back(lexical_cast<double>(u.getModel(srcVars[d])));
-            outs() << "Model value: " << srcVars[d] << " = " << _model.back() << "\n";
+            // outs() << "Model value: " << srcVars[d] << " = " << _model.back() << "\n";
           }
           models.push_back(_model);
 

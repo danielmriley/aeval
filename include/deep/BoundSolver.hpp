@@ -183,7 +183,7 @@ namespace ufo
       fc_body.insert(replaceAll(fc->body, invVarsPr, specVars));
       fc_body.insert(mk<EQ>(ghostVars[1], ghostVarsPr[0]));
 
-      fc_new->body = conjoin(fc_body, m_efac);
+      fc_new->body = normalize(conjoin(fc_body, m_efac));
       if (debug >= 5) outs() << "fc_new body: " << fc_new->body << "\n";
       fc_new->srcVars.push_back(ghostVars[1]);
       specVars = fc_new->srcVars;
