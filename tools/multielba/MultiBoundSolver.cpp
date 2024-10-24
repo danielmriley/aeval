@@ -86,6 +86,8 @@ int main (int argc, char ** argv)
     return 0;
   }
 
+  if (!dc && !gj) dc = true;
+
   learnMultipleBounds(string(argv[argc - 1]), cex, str, useDataGrds, data2, doPhases, limit,
                       gj, dc, ac, iwd, imp, mi, so, tk, md, debug);
 

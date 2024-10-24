@@ -2,6 +2,7 @@
 #define BOUND_SOLVER_V2_HPP
 
 #include "BoundSolver.hpp" 
+#include "RndLearnerV4.hpp"
 
 namespace ufo {
   class BoundSolverV2 : public BoundSolver {
@@ -11,18 +12,18 @@ namespace ufo {
     int n; // parameter to control the number of trace iterations.
     int limit;
 
-    int to = 100;
+    int to = 50;
     int freqs = 1;
     int aggp = 1;
-    int mut = 0;
+    int mut = 2;
     int dat = 1;
     int doProp = 0;
-    int mutData = 0;
-    bool doDisj = true;
+    int mutData = 1;
+    bool doDisj = false;
     bool mbpEqs = false;
-    bool dAllMbp = true;
+    bool dAllMbp = false;
     bool dAddProp = false;
-    bool dAddDat = true;
+    bool dAddDat = false;
     bool dStrenMbp = false;
     bool dFwd = false;
     bool dRec = false;
@@ -108,39 +109,39 @@ namespace ufo {
           return;
         }
 
-        // cpp_int eVal = lexical_cast<cpp_int>(e);
-        // cpp_int avVal = lexical_cast<cpp_int>(av.second);
-        // if(avVal % eVal == 0)
-        // {
-        //   cpp_int div = avVal / eVal;
-        //   var = mk<MULT>(mkMPZ(div, m_efac), av.first);
-        //   // varPr = mkTerm<string>(lexical_cast<string>(av.first) + "'", m_efac);
-        //   // varPr = fapp(constDecl(varPr, type));
-        //   if (debug >= 4)
-        //     outs() << "Constant already abstracted: " << var << "\n";
-        //   hr.body = replaceAll(hr.body, av.first, var);
-        //   hr.body = replaceAll(hr.body, e, av.first);
-        //   av.second = e;
-        //   return;
-        // }
-        // else if (eVal % avVal == 0)
-        // {
-        //   cpp_int div = eVal / avVal;
-        //   var = mk<MULT>(mkMPZ(div, m_efac), av.first);
-        //   // varPr = mkTerm<string>(lexical_cast<string>(av.first) + "'", m_efac);
-        //   // varPr = fapp(constDecl(varPr, type));
-        //   if (debug >= 4)
-        //     outs() << "Constant already abstracted: " << var << "\n";
-        //   hr.body = replaceAll(hr.body, av.first, var);
-        //   hr.body = replaceAll(hr.body, e, av.first);
-        //   av.second = e;
+        cpp_int eVal = lexical_cast<cpp_int>(e);
+        cpp_int avVal = lexical_cast<cpp_int>(av.second);
+        if(avVal % eVal == 0)
+        {
+          cpp_int div = avVal / eVal;
+          var = mk<MULT>(mkMPZ(div, m_efac), av.first);
+          // varPr = mkTerm<string>(lexical_cast<string>(av.first) + "'", m_efac);
+          // varPr = fapp(constDecl(varPr, type));
+          if (debug >= 4)
+            outs() << "Constant already abstracted: " << var << "\n";
+          hr.body = replaceAll(hr.body, av.first, var);
+          hr.body = replaceAll(hr.body, e, av.first);
+          av.second = e;
+          return;
+        }
+        else if (eVal % avVal == 0)
+        {
+          cpp_int div = eVal / avVal;
+          var = mk<MULT>(mkMPZ(div, m_efac), av.first);
+          // varPr = mkTerm<string>(lexical_cast<string>(av.first) + "'", m_efac);
+          // varPr = fapp(constDecl(varPr, type));
+          if (debug >= 4)
+            outs() << "Constant already abstracted: " << var << "\n";
+          hr.body = replaceAll(hr.body, av.first, var);
+          hr.body = replaceAll(hr.body, e, av.first);
+          av.second = e;
 
-        //   return;
-        // }
-        // else
-        // {
-        //   outs() << "Unable to find relationships between " << eVal << " and " << avVal << "\n";
-        // }
+          return;
+        }
+        else
+        {
+          outs() << "Unable to find relationships between " << eVal << " and " << avVal << "\n";
+        }
       }
       var = mkTerm<string>("_AB_" + lexical_cast<string>(abstrVars.size()), m_efac);
       var = fapp(constDecl(var, type));
@@ -888,7 +889,7 @@ namespace ufo {
         {
           outs() << "conjunctive infer " << c << "\n";
         }
-        
+        // Should this run after i == 0? I don't think so...
         ExprSet tmp;
         getConj(c, tmp);
         for(auto& d: tmp)
@@ -898,11 +899,11 @@ namespace ufo {
             inferSeeds.push_back(mk<GEQ>(d->left(), d->right()));
             inferSeeds.push_back(mk<LEQ>(d->left(), d->right()));
           }
-          else if (isOpX<NEQ>(d))
-          {
-            inferSeeds.push_back(mk<GT>(d->left(), d->right()));
-            inferSeeds.push_back(mk<LT>(d->left(), d->right()));          
-          }
+          // else if (isOpX<NEQ>(d))
+          // {
+          //   inferSeeds.push_back(mk<GT>(d->left(), d->right()));
+          //   inferSeeds.push_back(mk<LT>(d->left(), d->right()));          
+          // }
           else
           {
             inferSeeds.push_back(d);
@@ -1012,19 +1013,6 @@ namespace ufo {
         infer(reRun, inferredRet);
       }
 
-      if(debug >= 2)
-      {
-        for (auto &i : inferredRet)
-        {
-          outs() << "Inferred: " << i << "\n";
-        }
-        for(auto& i: inferredFromData)
-        {
-          outs() << "Inferred from data: " << i << "\n";
-        }
-        outs() << "Common: " << common << "\n";
-      }
-
       if (common != mk<TRUE>(m_efac))
       {
         ExprSet commonSet;
@@ -1040,6 +1028,24 @@ namespace ufo {
       {
         outs() << "Inferred after removeRedundant: ";
         outs() << conjoin(inferredRet, m_efac) << "\n";
+      }
+
+      Expr simplified = conjoin(inferredRet,m_efac);
+      simplified = simplifyArithm(simplified);
+      inferredRet.clear();
+      getConj(simplified, inferredRet);
+
+      if (debug >= 2)
+      {
+        for (auto &i : inferredRet)
+        {
+          outs() << "Inferred: " << i << "\n";
+        }
+        for (auto &i : inferredFromData)
+        {
+          outs() << "Inferred from data: " << i << "\n";
+        }
+        outs() << "Common: " << common << "\n";
       }
 
       return inferredRet;
@@ -1382,7 +1388,7 @@ namespace ufo {
 
     Expr weakenAndCheck(ExprSet& inferred, Expr mutant, Expr bound)
     {
-      if(debug >= 3) outs() << "\n\nWeaken & Check\n==============\n";
+      if(debug >= 2) outs() << "\n\nWeaken & Check\n==============\n";
       ExprSet tmpInf = inferred;
       ExprSet reAdd;
 
@@ -1396,21 +1402,23 @@ namespace ufo {
         c = mk<AND>(c, m);
         c = simplifyArithm(c);
 
-        if(debug >= 5) outs() << "  c: " << c << "\n";
+        if(debug >= 2) outs() << "  c: " << c << "\n";
+        if(debug >= 2) outs() << "  check: " << check << "\n";
 
         boost::tribool safe = checkSafety(c, bound);
 
         if(!safe)
         {
-          if(debug >= 5) outs() << "Readding: " << check << "\n";
+          if(debug >= 2) outs() << "Readding: " << check << "\n";
           reAdd.insert(check);
         } 
       }
-
+      if(debug >= 2) outs() << "reAdd: " << conjoin(reAdd, m_efac) << std::endl;
+      assert(checkSafety(conjoin(reAdd, m_efac), bound));
       inferred = reAdd;
 
-      if(debug >= 3) outs() << "\n==============\n";
-      
+      if(debug >= 2) outs() << "\n==============\n";
+      // If this is never violated write a "reasonably formal" proof that we can trust the construction of the result from this function.
       return simplifyArithm(mk<AND>(conjoin(inferred, m_efac), mutant));
     }
 
@@ -1418,12 +1426,13 @@ namespace ufo {
     // Find weakest.
     // Check that the previous expr is an overapproximation.
     // Process them in order, run simplifyArithm on each one.
-    Expr weakenAndSplit(ExprVector &BigPhi, Expr bound)
+    Expr inferFromProjs(ExprVector &BigPhi, Expr bound)
     {
-      if(debug >= 2) outs() << "\n\nWeaken & Split\n==============\n";
+      if(debug >= 2)
+        outs() << "\n\nInfer From Projections\n==============\n";
       if(debug >= 4) printBigPhi(BigPhi);
 
-      ExprSet inferred = infer(BigPhi);
+      ExprSet inferred = infer(BigPhi); // Main routine here.
       if(!checkSanity(inferred, BigPhi)) return mk<FALSE>(m_efac);
       
       ExprSet mutatedInferred;
@@ -1440,11 +1449,14 @@ namespace ufo {
 
       do
       {
+        // TODO: Make this more beautiful.
+        // Make a better seperation of this flag so that it only does anything when turned on.
         Expr mutant = getNextMutant(mutatedInferred);
+
         c = conjoin(inferred, m_efac);
         c = mk<AND>(c, mutant);
-        if(debug >= 4) outs() << "  c with mutated Expr: " << c << "\n";
-
+        c = simplifyArithm(c);
+        if(debug >= 2) outs() << "  c with mutated Expr: " << c << "\n";
         // try to weaken the precond iteratively and send back to FH only if safe.
         safe = checkSafety(c, bound);
         if(safe) c = weakenAndCheck(inferred, mutant, bound);
@@ -1625,12 +1637,14 @@ namespace ufo {
         if (!u.isSat(phi))
         {
           Expr res = mk<TRUE>(m_efac);
-          if(debug >= 4) outs() << "  phi is UNSAT\n";
+          if(debug >= 4) outs() << "  phi is UNSAT in getPre\n";
           return res;
+          // continue;
         }
 
         vector<ExprVector> vars;
-        Expr elim = simplifyArithm(abduction(phi, f, bound, k, vars, trace, bnd, rm));
+        Expr elim = simplifyArithm(
+          abduction(phi, f, bound, k, vars, trace, bnd, rm));
 
         // value of y = 1, y = 2, y = 4... make an example like this.
         
@@ -1646,6 +1660,7 @@ namespace ufo {
 
         if (debug >= 3)
         {
+          if(debug >= 4) outs() << "  bound: " << bound << "\n";
           outs() << "  Result from Abduction: ";
           pprint(elim, 2);
         }
@@ -1674,14 +1689,17 @@ namespace ufo {
 
       if(abds.size() < 1) return mk<TRUE>(m_efac);
 
-      for(int i = 0; i < abds.size(); i++)
+      if (debug >= 4) 
       {
-        for(int j = 0; j < abds[i].size(); j++)
+        for (int i = 0; i < abds.size(); i++)
         {
-          if(debug >= 4) outs() << "  Final from Abduction " << i << ": " << abds[i][j] << "\n";
+          for (int j = 0; j < abds[i].size(); j++)
+          {
+            outs() << "  Final from Abduction " << i << ": " << abds[i][j] << "\n";
+          }
         }
       }
-      getAllCombs(allCombs, abds, 0);
+      getAllCombs(allCombs, abds, 0); // make an example of why we need to check all combos.
       if(debug >= 4)
       {
         outs() << "  All Combs size: " << allCombs.size() << "\n";
@@ -1712,7 +1730,7 @@ namespace ufo {
           pprint(current);
           outs() << "\n\n";
         }
-        Expr b = weakenAndSplit(current, bound);
+        Expr b = inferFromProjs(current, bound);
         if(debug >= 3) outs() << "  Result from W&S: " << b << "\n";
         // if(!isOpX<FALSE>(c)) return c;
         if(u.implies(a, b)) a = b;
