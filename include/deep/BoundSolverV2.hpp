@@ -19,11 +19,11 @@ namespace ufo {
     int dat = 1;
     int doProp = 0;
     int mutData = 1;
-    bool doDisj = false;
+    bool doDisj = true;
     bool mbpEqs = false;
     bool dAllMbp = false;
     bool dAddProp = false;
-    bool dAddDat = false;
+    bool dAddDat = true;
     bool dStrenMbp = false;
     bool dFwd = false;
     bool dRec = false;
@@ -458,10 +458,10 @@ namespace ufo {
     {
 
       if(debug >= 2) outs() << "\n\nCheck Safety\n============\n";
-      if(debug >= 4)
+      if(debug >= 3)
       {
-        outs() << "  elim: " << elim << "\n";
-        outs() << "  preCond: " << preCond << "\n";
+        outs() << "  precond: " << elim << "\n";
+        outs() << "  bound: " << preCond << "\n";
       }
       if(!u.isSat(elim))
       {
