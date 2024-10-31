@@ -454,6 +454,7 @@ namespace ufo {
         outs() << "  none\n";
     }
 
+    ExprSet prevInvs;
     boost::tribool checkSafety(Expr elim, Expr preCond)
     {
 
@@ -513,6 +514,7 @@ namespace ufo {
       {
         ds.addCandidates(dcl, cands[dcl]);
       }
+      ds.addCandidates(invDecl, prevInvs);
       if(ds.bootstrap())
       { 
         return true;
@@ -520,7 +522,14 @@ namespace ufo {
       ds.calculateStatistics();
       ds.deferredPriorities();
       std::srand(std::time(0));
-      return ds.synthesize(to);
+      boost::tribool res = ds.synthesize(to);
+
+      if(res)
+      {
+        prevInvs = ds.getlearnedLemmas(0);
+      }
+
+      return res;
     }
 
     void removeCommonExpr(ExprVector &d, ExprVector& toDisj, Expr& cm)
@@ -899,11 +908,11 @@ namespace ufo {
             inferSeeds.push_back(mk<GEQ>(d->left(), d->right()));
             inferSeeds.push_back(mk<LEQ>(d->left(), d->right()));
           }
-          // else if (isOpX<NEQ>(d))
-          // {
-          //   inferSeeds.push_back(mk<GT>(d->left(), d->right()));
-          //   inferSeeds.push_back(mk<LT>(d->left(), d->right()));          
-          // }
+          else if (isOpX<NEQ>(d))
+          {
+            inferSeeds.push_back(mk<GT>(d->left(), d->right()));
+            inferSeeds.push_back(mk<LT>(d->left(), d->right()));          
+          }
           else
           {
             inferSeeds.push_back(d);
@@ -1411,10 +1420,15 @@ namespace ufo {
         {
           if(debug >= 2) outs() << "Readding: " << check << "\n";
           reAdd.insert(check);
-        } 
+        }
+        if(debug >= 2 && safe) outs() << "  Dropping" << check << "\n";
       }
-      if(debug >= 2) outs() << "reAdd: " << conjoin(reAdd, m_efac) << std::endl;
-      assert(checkSafety(conjoin(reAdd, m_efac), bound));
+      if(debug >= 2)
+      {
+        outs() << "\n\nreAdd: " << conjoin(reAdd, m_efac) << std::endl;
+        outs() << "checking safety of: " << conjoin(reAdd, m_efac) << std::endl;
+      }
+      assert(checkSafety(mk<AND>(mutant, conjoin(reAdd, m_efac)), bound));
       inferred = reAdd;
 
       if(debug >= 2) outs() << "\n==============\n";
@@ -1459,7 +1473,10 @@ namespace ufo {
         if(debug >= 2) outs() << "  c with mutated Expr: " << c << "\n";
         // try to weaken the precond iteratively and send back to FH only if safe.
         safe = checkSafety(c, bound);
-        if(safe) c = weakenAndCheck(inferred, mutant, bound);
+        if(safe) {
+          c = weakenAndCheck(inferred, mutant, bound);
+          prevInvs.clear();
+        } 
       } while (!safe && !mutatedInferred.empty());
 
 
