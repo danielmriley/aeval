@@ -55,14 +55,38 @@ vector<string> getCommaSepStrValues(const char * opt, vector<string> defValue, i
   return defValue;
 }
 
+void printHelpMessage()
+{
+  std::cout << "Usage: elba [flags] <filename.smt2>\n";
+  std::cout << "Options:\n";
+  std::cout << "  --learn <int>     Invariant synthesis limit (default: 50)\n";
+  std::cout << "  --limit <int>     Unrolling limit (default: 3)\n";
+  std::cout << "  --cex <int>       Counterexample level (default: 0)\n";
+  std::cout << "  --stren <int>     Strength reduction level (default: 5)\n";
+  std::cout << "  --debug <int>     Debug level (default: 0)\n";
+  // std::cout << "  --data-guards     Disable data guards (default: enabled)\n";
+  std::cout << "  --gj              Enable Gauss Jordan elimination\n";
+  std::cout << "  --dc              Enable CONNECT analysis\n";
+  std::cout << "  --ac              Enable abstraction of large constants\n";
+  std::cout << "  --di              Enable data inference\n";
+  std::cout << "  --ei              Enable second implication\n";
+  std::cout << "  --mi              Mutate inferred data\n";
+  std::cout << "  --so              Separate operations\n";
+  std::cout << "  --tk              Check projections from abduction\n";
+  std::cout << "  --md <int>        Mutate data results (default: 0)\n";
+  // std::cout << "  --data2           Enable secondary data source\n";
+  // std::cout << "  --phase-data      Enable phased data processing\n";
+  // std::cout << std::endl;
+}
+
 int main (int argc, char ** argv)
 {
   if (getBoolValue("--help", false, argc, argv) || argc == 1){
-    outs () <<   "TODO                                \n";
+      printHelpMessage();
     return 0;
   }
 
-  int learn = getIntValue("--learn", 2, argc, argv); 
+  int learn = getIntValue("--learn", 50, argc, argv); // Limit for invariant synthesize.
   int limit = getIntValue("--limit", 3, argc, argv); // unrolling limit
   int cex = getIntValue("--cex", 0, argc, argv);
   int str = getIntValue("--stren", 5, argc, argv);
@@ -92,7 +116,7 @@ int main (int argc, char ** argv)
   if(learn == 1) 
     learnBounds(string(argv[argc-1]), cex, str, useDataGrds, data2, doPhases, debug);
   else
-    learnBoundsV2(string(argv[argc-1]), cex, str, useDataGrds, data2, doPhases, limit,
+    learnBoundsV2(string(argv[argc-1]), cex, str, useDataGrds, learn, data2, doPhases, limit,
                   gj, dc, ac, iwd, imp, mi, so, tk, md, debug);
     
   return 0;

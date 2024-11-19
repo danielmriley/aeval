@@ -43,10 +43,10 @@ namespace ufo {
 
   public:
     // Constructor
-    BoundSolverV2(CHCs &r, int _b, bool _dg, bool d2, bool _dp, int _limit, bool gj,
+    BoundSolverV2(CHCs &r, int _b, bool _dg, bool d2, bool _dp, int learn, int _limit, bool gj,
                   bool dc, bool abConsts, bool iwd, bool _imp, bool mi, bool _sepOps,
                   bool _tk, int md, int dbg)
-        : BoundSolver(r, _b, _dg, d2, _dp, dbg), limit(_limit), n(_limit), doGJ(gj),
+        : BoundSolver(r, _b, _dg, d2, _dp, dbg), limit(_limit), to(learn), n(_limit), doGJ(gj),
           doConnect(dc), absConsts(abConsts), dataInfer(iwd), imp(_imp),
           mutateInferred(mi), sepOps(_sepOps), checkProj(_tk), mutData(md)
     {
@@ -1014,13 +1014,13 @@ namespace ufo {
       infer(BigPhi, inferred);
       inferredRet.insert(inferred.begin(), inferred.end());
 
-      if(absConsts && false)
-      {
-        ExprVector reRun;
-        reRun.insert(reRun.end(), inferredRet.begin(), inferredRet.end());
-        inferredRet.clear();
-        infer(reRun, inferredRet);
-      }
+      // if(absConsts && false)
+      // {
+      //   ExprVector reRun;
+      //   reRun.insert(reRun.end(), inferredRet.begin(), inferredRet.end());
+      //   inferredRet.clear();
+      //   infer(reRun, inferredRet);
+      // }
 
       if (common != mk<TRUE>(m_efac))
       {
@@ -1029,6 +1029,7 @@ namespace ufo {
         inferredRet.insert(commonSet.begin(), commonSet.end());
       }
 
+      if(debug >= 2) outs() << "Number of inferred from data: " << inferredFromData.size() << "\n";
       inferredRet.insert(inferredFromData.begin(), inferredFromData.end());
 
       u.removeRedundantConjuncts(inferredRet);
@@ -1453,6 +1454,7 @@ namespace ufo {
       if(mutateInferred) 
       {
         inferInequalities(mutatedInferred, BigPhi);
+        if(debug >= 2) outs() << "\n\nThere are " << mutatedInferred.size() << " mutants.\n\n";
       }
 
       Expr c;
@@ -1608,6 +1610,21 @@ namespace ufo {
       // return  res;
     }
 
+    void filterCombs(vector<ExprVector>& allCombs)
+    {
+      for(auto c: allCombs)
+      {
+        for(auto i = c.begin(); i != c.end(); )
+        {
+          if(!u.isSat(rowsExpr[rowsExpr.size() - 1], *i))
+          {
+            i = c.erase(i);
+          }
+          else i++;
+        }
+      }
+    }
+
     vector<ExprVector> abds;
     vector<ExprVector> allCombs;
     bool abdErr = false;
@@ -1717,6 +1734,8 @@ namespace ufo {
         }
       }
       getAllCombs(allCombs, abds, 0); // make an example of why we need to check all combos.
+      
+      filterCombs(allCombs);
       if(debug >= 4)
       {
         outs() << "  All Combs size: " << allCombs.size() << "\n";
@@ -1748,13 +1767,13 @@ namespace ufo {
           outs() << "\n\n";
         }
         Expr b = inferFromProjs(current, bound);
-        if(debug >= 3) outs() << "  Result from W&S: " << b << "\n";
+        if(debug >= 2) outs() << "  Result from W&S: " << b << "\n";
         // if(!isOpX<FALSE>(c)) return c;
         if(u.implies(a, b)) a = b;
         else if(u.implies(b, a)) continue;
         else a = mk<OR>(a, b);
 
-        if(debug >= 3) outs() << "Current a: " << a << "\n";
+        if(debug >= 2) outs() << "Current a: " << a << "\n";
       }
 
       return a;
@@ -1972,7 +1991,7 @@ namespace ufo {
 
           for (auto &f : formsVec)
           {
-            if (debug >= 3)
+            if (debug >= 2)
               outs() << "Trying next bound: " << f << "\n";
             bool toContinue = false;
             for (auto &b : bounds)
@@ -2051,7 +2070,7 @@ namespace ufo {
 
   // TODO: Test implementation over more benchmarks.
 
-  inline void learnBoundsV2(string smt, int inv, int stren, bool dg,
+  inline void learnBoundsV2(string smt, int inv, int stren, bool dg, int learn,
                                   bool data2, bool doPhases, int limit, 
                                   bool gj, bool dc, bool ac, bool iwd, 
                                   bool imp, bool mi, bool so, bool tk,
@@ -2063,7 +2082,7 @@ namespace ufo {
 
     ruleManager.parse(smt, false);
 
-    BoundSolverV2 bs(ruleManager, inv, dg, data2, doPhases, limit, gj,
+    BoundSolverV2 bs(ruleManager, inv, dg, data2, doPhases, learn, limit, gj,
                      dc, ac, iwd, imp, mi, so, tk, md, debug);
 
     bs.setUpQueryAndSpec(mk<TRUE>(m_efac), mk<TRUE>(m_efac));
