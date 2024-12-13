@@ -1,4 +1,5 @@
 #include "deep/RndLearnerV4.hpp"
+#include "deep/BitHorn.hpp"
 
 using namespace ufo;
 using namespace std;
@@ -57,6 +58,7 @@ int main (int argc, char ** argv)
   const char *OPT_V2 = "--v2";
   const char *OPT_V3 = "--v3";
   const char *OPT_V4 = "--v4";
+  const char *OPT_V5 = "--bv";
   const char *OPT_MAX_ATTEMPTS = "--attempts";
   const char *OPT_TO = "--to";
   const char *OPT_K_IND = "--kind";
@@ -82,6 +84,7 @@ int main (int argc, char ** argv)
   const char *OPT_REC = "--re";
   const char *OPT_MBP = "--eqs-mbp";
   const char *OPT_SER = "--serialize";
+  const char *OPT_LIA2BV = "--lia2bv";
   const char *OPT_DEBUG = "--debug";
 
   if (getBoolValue(OPT_HELP, false, argc, argv) || argc == 1){
@@ -94,7 +97,9 @@ int main (int argc, char ** argv)
         "Options:\n" <<
         " " << OPT_V1 << "                            original version (one-by-one sampling)\n"
         " " << OPT_V2 << "                            optimized version for transition systems (+ bootstrapping)\n"
-        " " << OPT_V3 << " (default)                  optimized version (+ bootstrapping, propagation, and data candidates)\n"
+        " " << OPT_V3 << "                            optimized version (+ bootstrapping, propagation, and data candidates)\n"
+        " " << OPT_V4 << " (default)                  optimized version (+ multi-phase loops)\n"
+        " " << OPT_V5 << "                            optimized version (+ bit vectors)\n"
         " " << OPT_GET_FREQS << "                         calculate frequency distributions and sample from them\n" <<
         " " << OPT_AGG_PRUNING << "                          prioritize and prune the search space aggressively\n" <<
         "                                 (if not specified, sample from uniform distributions)\n" <<
@@ -137,13 +142,14 @@ int main (int argc, char ** argv)
   bool vers2 = getBoolValue(OPT_V2, false, argc, argv);
   bool vers3 = getBoolValue(OPT_V3, false, argc, argv);
   bool vers4 = getBoolValue(OPT_V4, false, argc, argv);
-  if (vers1 + vers2 + vers3 + vers4 > 1)
+  bool vers5 = getBoolValue(OPT_V5, false, argc, argv);
+  if (vers1 + vers2 + vers3 + vers4 + vers5 > 1)
   {
     outs() << "Only one version of the algorithm can be chosen.\n";
     return 0;
   }
 
-  if (!vers1 && !vers2 && !vers3 && !vers4) vers4 = true; // default
+  if (!vers1 && !vers2 && !vers3 && !vers4 && !vers5) vers4 = true; // default
 
   int max_attempts = getIntValue(OPT_MAX_ATTEMPTS, 2000000, argc, argv);
   int to = getIntValue(OPT_TO, 1000, argc, argv);
@@ -170,6 +176,7 @@ int main (int argc, char ** argv)
   bool d_g = !getBoolValue(OPT_D6, false, argc, argv);
   bool d_r = getBoolValue(OPT_REC, false, argc, argv);
   bool d_ser = getBoolValue(OPT_SER, false, argc, argv);
+  bool d_lia2bv = getBoolValue(OPT_LIA2BV, false, argc, argv);
   int debug = getIntValue(OPT_DEBUG, 0, argc, argv);
 
   if (d_m || d_p || d_d || d_s) do_disj = true;
@@ -191,7 +198,11 @@ int main (int argc, char ** argv)
     if (do_dl == 0) do_dl = 1;
   }
 
-  if (vers4)      // MBP-based, path-sensitive algorithms
+  if(vers5)
+    learnInvariants5(string(argv[argc - 1]), max_attempts, to, densecode, aggressivepruning,
+                     do_dl, do_mu, do_elim, do_arithm, do_disj, do_prop, mbp_eqs,
+                     d_m, d_p, d_d, d_s, d_f, d_r, d_g, d_se, d_lia2bv, debug);
+  else if (vers4)      // MBP-based, path-sensitive algorithms
     learnInvariants4(string(argv[argc-1]), max_attempts, to, densecode, aggressivepruning,
                    do_dl, do_mu, do_elim, do_arithm, do_disj, do_prop, mbp_eqs,
                    d_m, d_p, d_d, d_s, d_f, d_r, d_g, d_se, d_ser, debug);

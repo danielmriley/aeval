@@ -277,6 +277,7 @@ namespace ufo
     void addCandidates(Expr rel, ExprSet& cands)
     {
       int invNum = getVarIndex(rel, decls);
+      outs() << "Adding candidate for rel: " << rel << " invNum: " << invNum << "\n";
       for (auto & a : cands) addCandidate(invNum, a);
     }
 
@@ -708,6 +709,22 @@ namespace ufo
     {
       if (printLog >= 3) outs () << "MultiHoudini\n";
       if (printLog >= 4) printCands();
+
+      // HACK to aviod mod, since we can't convert back to BV yet.
+      for(auto &c: candidates)
+      {
+        for (auto e = c.second.begin(); e != c.second.end();)
+        {
+          if (containsOp<MOD>(*e))
+          {
+            e = c.second.erase(e);
+          }
+          else
+          {
+            ++e;
+          }
+        }
+      }
 
       bool res1 = true;
       for (auto &hr: worklist)

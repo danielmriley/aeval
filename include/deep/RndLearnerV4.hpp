@@ -9,7 +9,7 @@ namespace ufo
 {
   class RndLearnerV4 : public RndLearnerV3
   {
-    private:
+    protected:
 
     bool dDisj;
     bool dAllMbp;

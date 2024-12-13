@@ -9,16 +9,38 @@ using namespace expr::op::bind;
 using namespace boost;
 using namespace boost::multiprecision;
 
+namespace
+{
+  bool isAllZeroes(std::string const &str)
+  {
+    return std::all_of(str.begin(), str.end(), [](char c)
+                       { return c == '0'; });
+  }
+
+  bool isAllOnes(std::string const &str)
+  {
+    return std::all_of(str.begin(), str.end(), [](char c)
+                       { return c == '1'; });
+  }
+}
+
 namespace ufo
 {
-  template<typename Range> static Expr conjoin(Range& conjs, ExprFactory &efac){
+  inline static bool hasBoolSort(Expr e)
+  {
+    if (bind::isBoolConst(e) || isOp<BoolOp>(e))
+      return true;
+    return false;
+  }
+  
+  template<typename Range> static Expr conjoin(Range const & conjs, ExprFactory &efac){
     return
       (conjs.size() == 0) ? mk<TRUE>(efac) :
       (conjs.size() == 1) ? *conjs.begin() :
       mknary<AND>(conjs);
   }
 
-  template<typename Range> static Expr disjoin(Range& disjs, ExprFactory &efac){
+  template<typename Range> static Expr disjoin(Range const & disjs, ExprFactory &efac){
     return
       (disjs.size() == 0) ? mk<FALSE>(efac) :
       (disjs.size() == 1) ? *disjs.begin() :
@@ -1226,36 +1248,27 @@ namespace ufo
   {
     ExprFactory &efac;
 
-    SimplifyBoolExpr (ExprFactory& _efac) : efac(_efac){};
+    SimplifyBoolExpr(ExprFactory &_efac) : efac(_efac) {};
 
-    Expr operator() (Expr exp)
+    Expr operator()(Expr exp)
     {
       // GF: to enhance
 
       if (isOpX<IMPL>(exp))
       {
-        if (exp->left() == exp->right())
-          return mk<TRUE>(efac);
-
         if (isOpX<TRUE>(exp->right()))
           return mk<TRUE>(efac);
 
-        if (isOpX<FALSE>(exp->left()))
-          return mk<TRUE>(efac);
-
         if (isOpX<FALSE>(exp->right()))
-          return mkNeg(exp->left());
+          return mk<NEG>(exp->left());
 
-//        return simplifyBool(mk<OR>(
-//                 mkNeg(exp->left()),
-//                 exp->right()));
+        return (mk<OR>(
+            mk<NEG>(exp->left()),
+            exp->right()));
       }
 
       if (isOpX<EQ>(exp))
       {
-        if (exp->left() == exp->right())
-          return mk<TRUE>(efac);
-
         if (isOpX<TRUE>(exp->right()))
           return exp->left();
 
@@ -1263,30 +1276,10 @@ namespace ufo
           return exp->right();
 
         if (isOpX<FALSE>(exp->right()))
-          return mkNeg(exp->left());
+          return mk<NEG>(exp->left());
 
         if (isOpX<FALSE>(exp->left()))
-          return mkNeg(exp->right());
-      }
-
-      if (exp->arity() == 2 && (isOpX<NEQ>(exp) || isOpX<XOR>(exp)))
-      {
-        if (exp->left() == exp->right())
-          return mk<FALSE>(efac);
-
-        if (isOpX<FALSE>(exp->right()))
-          return exp->left();
-
-        if (isOpX<FALSE>(exp->left()))
-          return exp->right();
-
-        if (isOpX<TRUE>(exp->right()))
-        {
-          return mkNeg(exp->left());
-        }
-
-        if (isOpX<TRUE>(exp->left()))
-          return mkNeg(exp->right());
+          return mk<NEG>(exp->right());
       }
 
       if (isOpX<OR>(exp))
@@ -1294,9 +1287,8 @@ namespace ufo
         ExprSet dsjs;
         ExprSet newDsjs;
         getDisj(exp, dsjs);
-        for (auto a : dsjs)
+        for (auto &a : dsjs)
         {
-          a = simplifyBool(a);
           if (isOpX<TRUE>(a))
           {
             return mk<TRUE>(efac);
@@ -1305,16 +1297,9 @@ namespace ufo
           {
             continue;
           }
-          newDsjs.insert(a);
+          newDsjs.insert(simplifyBool(a));
         }
-        if (newDsjs.size() == 2)
-        {
-          Expr lhs = *newDsjs.begin();
-          Expr rhs = *(std::next(newDsjs.begin()));
-          if (lhs == mkNeg(rhs)) return mk<TRUE>(efac);
-          if (rhs == mkNeg(lhs)) return mk<TRUE>(efac);
-        }
-        return disjoin (newDsjs, efac);
+        return disjoin(newDsjs, efac);
       }
 
       if (isOpX<AND>(exp))
@@ -1322,9 +1307,8 @@ namespace ufo
         ExprSet cnjs;
         ExprSet newCnjs;
         getConj(exp, cnjs);
-        for (auto a : cnjs)
+        for (auto &a : cnjs)
         {
-          a = simplifyBool(a);
           if (isOpX<FALSE>(a))
           {
             return mk<FALSE>(efac);
@@ -1333,42 +1317,466 @@ namespace ufo
           {
             continue;
           }
-          newCnjs.insert(a);
+          newCnjs.insert(simplifyBool(a));
         }
-        return conjoin (newCnjs, efac);
+        return conjoin(newCnjs, efac);
       }
 
       if (isOpX<ITE>(exp))
       {
-        Expr cond = exp->arg(0);
+        Expr cond = simplifyBool(exp->arg(0));
+        Expr br1 = hasBoolSort(exp->arg(1)) ? simplifyBool(exp->arg(1)) : exp->arg(1);
+        Expr br2 = hasBoolSort(exp->arg(2)) ? simplifyBool(exp->arg(2)) : exp->arg(2);
         if (isOpX<TRUE>(cond))
-        {
-          return exp->arg(1);
-        }
-        else if (isOpX<FALSE>(cond))
-        {
-          return exp->arg(2);
-        }
-        else if (isOpX<TRUE>(exp->arg(1)) && isOpX<FALSE>(exp->arg(2)))
-        {
+          return br1;
+        if (isOpX<FALSE>(cond))
+          return br2;
+
+        if (br1 == br2)
+          return br1;
+
+        if (isOpX<TRUE>(br1) && isOpX<FALSE>(br2))
           return cond;
-        }
-        else if (isOpX<FALSE>(exp->arg(1)) && isOpX<TRUE>(exp->arg(2)))
-        {
+
+        if (isOpX<FALSE>(br1) && isOpX<TRUE>(br2))
           return mkNeg(cond);
-        }
-        else if (exp->arg(1) == exp->arg(2))
+        return mk<ITE>(cond, br1, br2);
+      }
+
+      return exp;
+    }
+  };
+
+  static inline Expr concatConstants(Expr f, Expr s)
+  {
+    assert(bv::is_bvnum(f));
+    assert(bv::is_bvnum(s));
+    std::string f_str = bv::constToBinary(f);
+    std::string s_str = bv::constToBinary(s);
+    assert(bv::width(f->right()) == f_str.size());
+    assert(bv::width(s->right()) == s_str.size());
+    std::string res_str = f_str + s_str;
+    Expr res = bv::constFromBinary(res_str, res_str.size(), f->getFactory());
+    return res;
+  }
+  template <typename Range>
+  static inline Expr concatConstants(const Range &r)
+  {
+    std::vector<std::string> strs;
+    std::transform(std::begin(r), std::end(r), std::back_inserter(strs),
+                   [](Expr e)
+                   { return bv::constToBinary(e); });
+    std::string res_str = "";
+    for (auto const &s : strs)
+    {
+      res_str.append(s);
+    }
+    assert(!res_str.empty());
+    Expr res = bv::constFromBinary(res_str, res_str.size(), (*std::begin(r))->getFactory());
+    return res;
+  }
+
+  struct SimplifyBVExpr
+  {
+    ExprFactory &efac;
+    std::map<Expr, unsigned> &bitwidths;
+
+    Expr zero;
+    Expr one;
+
+    SimplifyBVExpr(ExprFactory &_efac, std::map<Expr, unsigned> &bitwidths)
+        : efac(_efac), bitwidths(bitwidths)
+    {
+      zero = mkTerm(mpz_class(0), efac);
+      one = mkTerm(mpz_class(1), efac);
+    };
+
+    // This is intended to use with RW visitor, so it assumes the kids have been processed already
+    Expr operator()(Expr exp)
+    {
+      //      std::cout << exp << std::endl;
+      getBitWidth(exp);
+      if (isOpX<BEXTRACT>(exp))
+      {
+        if (bv::high(exp) == 0 && bv::low(exp) == 0)
         {
-          return exp->arg(1);
+          Expr extractArg = exp->arg(2);
+          auto it = bitwidths.find(extractArg);
+          if (it != bitwidths.end() && it->second == 1)
+          {
+            return extractArg;
+          }
+        }
+      }
+      if (isOpX<ITE>(exp))
+      {
+        Expr cond = exp->arg(0);
+        Expr br1 = exp->arg(1);
+        Expr br2 = exp->arg(2);
+        if (isOpX<TRUE>(cond))
+          return br1;
+        if (isOpX<FALSE>(cond))
+          return br2;
+        if (br1 == br2)
+          return br1;
+        auto it = bitwidths.find(exp);
+        if (it != bitwidths.end() && it->second == 1)
+        {
+          if (isOneBV(br1) && isZeroBV(br2))
+          {
+            Expr ret = bv::frombool(cond);
+            bitwidths[ret] = 1;
+            return ret;
+          }
+
+          if (isZeroBV(br1))
+          {
+            Expr ret = nullptr;
+            if (isOneBV(br2))
+            {
+              ret = bv::frombool(mkNeg(cond));
+            }
+            else
+            {
+              ret = bv::frombool(mk<AND>(mkNeg(cond), bv::tobool(br2)));
+            }
+            bitwidths[ret] = 1;
+            return ret;
+          }
+          if (isZeroBV(br2))
+          {
+            Expr ret = nullptr;
+            if (isOneBV(br1))
+            {
+              ret = bv::frombool(cond);
+            }
+            else
+            {
+              ret = bv::frombool(mk<AND>(cond, bv::tobool(br1)));
+            }
+            bitwidths[ret] = 1;
+            return ret;
+          }
+          Expr br1_new = bv::tobool(br1);
+          Expr br2_new = bv::tobool(br2);
+          Expr ret = bv::frombool(mk<ITE>(cond, br1_new, br2_new));
+          bitwidths[ret] = 1;
+          return ret;
+        }
+      }
+      if (isOpX<BNOT>(exp))
+      {
+        Expr arg = exp->first();
+        if (isOpX<BOOL2BV>(arg))
+        {
+          Expr ret = bv::frombool(mkNeg(arg->first()));
+          bitwidths[ret] = 1;
+          return ret;
+        }
+        //        std::cerr << exp << std::endl;
+        auto it = bitwidths.find(arg);
+        if (it != bitwidths.end() && it->second == 1)
+        {
+          Expr ret = bv::frombool(mkNeg(bv::tobool(arg)));
+          bitwidths[ret] = 1;
+          return ret;
+        }
+        return exp;
+      }
+      if (isOpX<EQ>(exp) || isOpX<NEQ>(exp))
+      {
+        Expr left = exp->left();
+        Expr right = exp->right();
+        auto it = bitwidths.find(left);
+        if (it != bitwidths.end() && it->second == 1)
+        {
+          assert(bitwidths.find(right) != bitwidths.end() && bitwidths.find(right)->second == 1);
+          const bool isLeftConstant = bv::is_bvnum(left);
+          const bool isRightConstant = bv::is_bvnum(right);
+          if (isLeftConstant || isRightConstant)
+          {
+            Expr constant = isLeftConstant ? left : right;
+            Expr other = isLeftConstant ? right : left;
+            bool negative = (isOpX<EQ>(exp) ^ isOneBV(constant));
+            Expr res = negative ? mkNeg(bv::tobool(other)) : bv::tobool(other);
+            return res;
+          }
+        }
+      }
+      if (isOpX<BOR>(exp) && exp->arity() == 2)
+      {
+        auto it = bitwidths.find(exp);
+        if (it != bitwidths.end() && it->second == 1)
+        {
+          Expr left = exp->left();
+          Expr right = exp->right();
+          assert(bitwidths.find(left) != bitwidths.end() && bitwidths.find(left)->second == 1);
+          assert(bitwidths.find(right) != bitwidths.end() && bitwidths.find(right)->second == 1);
+          Expr res = bv::frombool(disjoin(ExprVector{bv::tobool(left), bv::tobool(right)}, efac));
+          bitwidths[res] = 1;
+          return res;
+        }
+        Expr left = exp->left();
+        Expr right = exp->right();
+        if (bv::is_bvnum(left) || bv::is_bvnum(right))
+        {
+          Expr constant = bv::is_bvnum(left) ? left : right;
+          Expr other = constant == left ? right : left;
+          if (isOpX<BCONCAT>(other))
+          {
+            Expr first = other->first();
+            Expr second = other->arg(1);
+            auto it1 = bitwidths.find(first);
+            auto it2 = bitwidths.find(second);
+            assert(it1 != bitwidths.end() && it2 != bitwidths.end());
+            int width1 = it1->second;
+            int width2 = it2->second;
+            // For now let's simplify only when the two parts of constant are either 0 or all 1s
+            auto it_const = bitwidths.find(constant);
+            assert(it_const != bitwidths.end() && it_const->second == width1 + width2);
+            int width = width1 + width2;
+            auto const_str = bv::constToBinary(constant);
+            auto str1 = const_str.substr(0, width1);
+            auto str2 = const_str.substr(width1, width2);
+            if ((isAllZeroes(str1) || isAllOnes(str1)) && (isAllZeroes(str2) || isAllOnes(str2)))
+            {
+              Expr arg1_new = isAllZeroes(str1) ? first : bv::constFromBinary(str1, width1, exp->getFactory());
+              Expr arg2_new = isAllZeroes(str2) ? second : bv::constFromBinary(str2, width2, exp->getFactory());
+              Expr res = mk<BCONCAT>(arg1_new, arg2_new);
+              //              std::cout << *res << std::endl;
+              bitwidths[res] = width;
+              return res;
+            }
+          }
+        }
+      }
+      if (isOpX<BCONCAT>(exp))
+      {
+        Expr first = exp->first();
+        Expr second = exp->arg(1);
+        const bool isFirstConstant = bv::is_bvnum(first);
+        const bool isSecondConstant = bv::is_bvnum(second);
+        if (isFirstConstant || isSecondConstant)
+        {
+          if (isFirstConstant && isSecondConstant)
+          {
+            Expr res = concatConstants(first, second);
+            bitwidths[res] = bitwidths.at(first) + bitwidths.at(second);
+            return res;
+          }
+          Expr constant = bv::is_bvnum(first) ? first : second;
+          Expr other = bv::is_bvnum(first) ? second : first;
+          if (isOpX<ITE>(other))
+          {
+            // FOR now simplify only if ite returns constant
+            bool returnsConstant = bv::is_bvnum(other->arg(1)) && bv::is_bvnum(other->arg(2));
+            if (returnsConstant)
+            {
+              // propagate concatenation of constant inside ite
+              Expr n_then = isFirstConstant ? concatConstants(constant, other->arg(1)) : concatConstants(other->arg(1), constant);
+              Expr n_else = isFirstConstant ? concatConstants(constant, other->arg(2)) : concatConstants(other->arg(2), constant);
+              Expr res = mk<ITE>(other->first(), n_then, n_else);
+              bitwidths[res] = bitwidths.at(other) + bitwidths.at(constant);
+              return res;
+            }
+          }
+          if (isOpX<BOOL2BV>(other))
+          {
+            Expr bvone = bv::bvnum(one, bv::bvsort(1, one->getFactory()));
+            Expr bvzero = bv::bvnum(zero, bv::bvsort(1, zero->getFactory()));
+            Expr n_then = isFirstConstant ? concatConstants(constant, bvone) : concatConstants(bvone, constant);
+            Expr n_else = isFirstConstant ? concatConstants(constant, bvzero) : concatConstants(bvzero, constant);
+            Expr res = mk<ITE>(other->first(), n_then, n_else);
+            assert(bitwidths.at(other) == 1);
+            bitwidths[res] = bitwidths.at(other) + bitwidths.at(constant);
+            return res;
+          }
+        }
+      }
+      if (isOpX<AND>(exp))
+      {
+        auto bwit = bitwidths.find(exp);
+        if (bwit != bitwidths.end() && bwit->second == 1 && exp->arity() == 2)
+        {
+          Expr left = exp->left();
+          Expr right = exp->right();
+          assert(bitwidths.find(left) != bitwidths.end() && bitwidths.find(left)->second == 1);
+          assert(bitwidths.find(right) != bitwidths.end() && bitwidths.find(right)->second == 1);
+          Expr res = bv::frombool(conjoin(ExprVector{bv::tobool(left), bv::tobool(right)}, efac));
+          bitwidths[res] = 1;
+          return res;
+        }
+        ExprSet conjuncts;
+        getConj(exp, conjuncts);
+        ExprVector conjVec(conjuncts.begin(), conjuncts.end());
+        auto beg = std::begin(conjVec);
+        auto end = std::end(conjVec);
+        auto boundary = std::partition(beg, end, [](Expr e)
+                                       {
+          if (!isOpX<EQ>(e)) return false;
+          Expr lhs = e->left();
+          Expr rhs = e->right();
+          const bool isLeftExtract = isOpX<BEXTRACT>(lhs);
+          const bool isRightExtract = isOpX<BEXTRACT>(rhs);
+          if (!isLeftExtract && !isRightExtract) { return false; }
+          const bool isLeftConst = bv::is_bvnum(lhs);
+          const bool isRightConst = bv::is_bvnum(rhs);
+          if (!isLeftConst && !isRightConst) { return false; }
+          return true; });
+        if (std::distance(beg, boundary) > 1)
+        {
+          // There is hope to join extracts only if there is more than one
+          std::map<Expr, std::vector<std::pair<Expr, Expr>>> varToExtracts;
+          for (auto it = beg; it != boundary; ++it)
+          {
+            Expr conjunct = *it;
+            const bool isLeftExtract = isOpX<BEXTRACT>(conjunct->left());
+            Expr extract = isLeftExtract ? conjunct->left() : conjunct->right();
+            Expr constant = isLeftExtract ? conjunct->right() : conjunct->left();
+            Expr extr_arg = extract->arg(2);
+            varToExtracts[extr_arg].emplace_back(extract, constant);
+          }
+          ExprVector res;
+          for (auto &entry : varToExtracts)
+          {
+            if (entry.second.size() > 1)
+            {
+              // we can hope to simplify it here
+              auto &args = entry.second;
+              std::sort(args.begin(), args.end(),
+                        [](std::pair<Expr, Expr> const &p1, std::pair<Expr, Expr> const &p2)
+                        {
+                          return bv::high(p2.first) < bv::high(p1.first);
+                        });
+              const bool isConsecutive = [](std::vector<std::pair<Expr, Expr>> const &v)
+              {
+                for (int i = 0; i < v.size() - 1; ++i)
+                {
+                  if (bv::high(v[i + 1].first) != bv::low(v[i].first) - 1)
+                  {
+                    return false;
+                  }
+                }
+                return true;
+              }(args);
+              if (isConsecutive)
+              {
+                Expr n_lhs = bv::extract(bv::high(args[0].first), bv::low(args.back().first), entry.first);
+                if (bv::low(n_lhs) == 0 && bv::high(n_lhs) == bitwidths[entry.first] - 1)
+                {
+                  n_lhs = entry.first;
+                }
+                ExprVector constants;
+                std::transform(args.begin(), args.end(), std::back_inserter(constants),
+                               [](std::pair<Expr, Expr> const &p)
+                               { return p.second; });
+                Expr n_rhs = concatConstants(constants);
+                res.push_back(mk<EQ>(n_lhs, n_rhs));
+              }
+              else
+              {
+                for (auto const &pair : args)
+                {
+                  res.push_back(mk<EQ>(pair.first, pair.second));
+                }
+              }
+            }
+            else
+            {
+              assert(!entry.second.empty());
+              auto const &pair = entry.second[0];
+              res.push_back(mk<EQ>(pair.first, pair.second));
+            }
+          }
+          res.insert(res.end(), boundary, end);
+          Expr ret = conjoin(res, exp->getFactory());
+          return ret;
+        }
+      }
+      {
+        Expr isZero = bv::toIsZero(exp);
+        if (isZero)
+        {
+          assert(isOpX<EQ>(isZero) && isOpX<BEXTRACT>(isZero->left()));
+          Expr extr = isZero->left();
+          Expr arg = bv::earg(extr);
+          auto it = bitwidths.find(arg);
+          assert(it != bitwidths.end());
+          if (bv::width(isZero->right()->right()) == it->second)
+          {
+            // extracting all bits -> just remove the extract
+            return mk<EQ>(arg, isZero->right());
+          }
+          return isZero;
         }
       }
 
-      if (isOpX<NEG>(exp) &&
-          (isOp<ComparissonOp>(exp->left()) ||
-           isOpX<TRUE>(exp->left()) || isOpX<FALSE>(exp->left())))
-        return mkNeg(exp->left());
-
       return exp;
+    }
+
+  private:
+    bool isZeroBV(Expr e) { return bv::is_bvnum(e) && e->first() == zero; }
+    bool isOneBV(Expr e) { return bv::is_bvnum(e) && e->first() == one; }
+
+    void getBitWidth(Expr e)
+    {
+      //        std::cout << "Called for " << *e << std::endl;
+      if (bv::is_bvvar(e) || bv::is_bvnum(e))
+      {
+        Expr sort = e->right();
+        bitwidths[e] = bv::width(sort);
+        return;
+      }
+      if (bv::is_bvconst(e))
+      {
+        Expr sort = e->first()->right();
+        bitwidths[e] = bv::width(sort);
+        return;
+      }
+      if (isOpX<BAND>(e) || isOpX<BOR>(e) || isOpX<BADD>(e) || isOpX<BSUB>(e) || isOpX<BMUL>(e)) // TODO: add all; check BVMUL!
+      {
+        Expr e1 = e->left();
+        Expr e2 = e->right();
+        assert(bitwidths.find(e1) != bitwidths.end() && bitwidths.find(e2) != bitwidths.end() && bitwidths[e1] == bitwidths[e2]);
+
+        bitwidths[e] = bitwidths[e1];
+      }
+      else if (isOpX<BNOT>(e))
+      {
+        Expr arg = e->first();
+        assert(bitwidths.find(arg) != bitwidths.end());
+        bitwidths[e] = bitwidths[arg];
+      }
+      else if (isOpX<BEXTRACT>(e))
+      {
+        auto h = bv::high(e);
+        auto l = bv::low(e);
+        assert(h >= l);
+        int res = h - l + 1;
+        bitwidths[e] = res;
+      }
+      else if (isOpX<ITE>(e))
+      {
+        Expr e1 = e->arg(1);
+        Expr e2 = e->arg(2);
+        if (bitwidths.find(e1) != bitwidths.end() && bitwidths.find(e2) != bitwidths.end() && bitwidths[e1] == bitwidths[e2])
+        {
+          bitwidths[e] = bitwidths[e1];
+        }
+      }
+      else if (isOpX<BCONCAT>(e))
+      {
+        assert(e->arity() == 2); // MB: Can be different?
+        Expr e1 = e->arg(0);
+        Expr e2 = e->arg(1);
+        auto it1 = bitwidths.find(e1);
+        auto it2 = bitwidths.find(e2);
+        assert(it1 != bitwidths.end() && it2 != bitwidths.end());
+        if (it1 != bitwidths.end() && it2 != bitwidths.end())
+        {
+          bitwidths[e] = bitwidths[e1] + bitwidths[e2];
+        }
+      }
     }
   };
 
@@ -2808,6 +3216,120 @@ namespace ufo
     ExprSet vars;
     filter (def, IsConst (), inserter(vars, vars.begin()));
     return mkQFla(def, vars, forall);
+  }
+
+  template <typename Range>
+  static void update_min_value(ExprMap &m, Expr key, Expr value, Range &quantified, ExprSet &newCnjs)
+  {
+    // just heuristic
+    if (m[key] == NULL)
+    {
+      m[key] = value;
+    }
+    else if (emptyIntersect(value, quantified) || treeSize(value) < treeSize(m[key]))
+    {
+      newCnjs.insert(mk<EQ>(key, m[key]));
+      m[key] = value;
+    }
+    else
+    {
+      newCnjs.insert(mk<EQ>(key, value));
+    }
+  }
+
+  template <typename Range>
+  static Expr simpleQE(Expr exp, Range &quantified, bool removeUsed, bool strict)
+  {
+    // rewrite just equalities
+    ExprSet cnjs;
+    ExprSet newCnjs;
+    ExprMap eqs;
+    getConj(exp, cnjs);
+    for (auto &a : cnjs)
+    {
+      bool eq = false;
+      if (isOpX<EQ>(a))
+      {
+        for (auto &b : quantified)
+        {
+          if (a->left() == b && (!strict || emptyIntersect(a->right(), quantified)))
+          {
+            eq = true;
+            update_min_value(eqs, b, a->right(), quantified, newCnjs);
+            break;
+          }
+          else if (a->right() == b && (!strict || emptyIntersect(a->left(), quantified)))
+          {
+            eq = true;
+            update_min_value(eqs, b, a->left(), quantified, newCnjs);
+            break;
+          }
+        }
+      }
+      if (!eq)
+      {
+        newCnjs.insert(a);
+      }
+    }
+
+    Expr qed = conjoin(newCnjs, exp->getFactory());
+    ExprSet used;
+    while (true)
+    {
+      bool toBreak = true;
+      for (auto &a : eqs)
+      {
+        if (a.first == NULL || a.second == NULL)
+          continue;
+        if (!emptyIntersect(a.first, qed))
+        {
+          qed = replaceAll(qed, a.first, a.second);
+          if (removeUsed)
+            used.insert(a.first);
+          toBreak = false;
+        }
+        for (auto &b : eqs)
+        {
+          if (a == b)
+            continue;
+          if (!emptyIntersect(a.first, b.second))
+          {
+            b.second = replaceAll(b.second, a.first, a.second);
+          }
+        }
+      }
+      if (toBreak)
+        break;
+    }
+
+    newCnjs.clear();
+    getConj(qed, newCnjs);
+    if (strict)
+    {
+      for (auto it = newCnjs.begin(); it != newCnjs.end();)
+        if (emptyIntersect(*it, quantified))
+          ++it;
+        else
+          it = newCnjs.erase(it);
+      return conjoin(newCnjs, exp->getFactory());
+    }
+
+    for (auto &a : eqs)
+    {
+      if (find(used.begin(), used.end(), a.first) == used.end())
+        newCnjs.insert(mk<EQ>(a.first, a.second));
+    }
+    qed = conjoin(newCnjs, exp->getFactory());
+    return qed;
+    //    if (!strict) return qed;
+    //
+    //    // check if there are some not eliminated vars
+    //    ExprVector av;
+    //    filter (qed, bind::IsConst (), inserter(av, av.begin()));
+    //    if (emptyIntersect(av, quantified)) return qed;
+    //
+    //    // otherwise result is incomplete
+    //    return mk<TRUE>(exp->getFactory());
   }
 
   // rewrite just equalities
@@ -4603,6 +5125,151 @@ namespace ufo
       outs () << string(inden, ' ') << "]";
     }
     if (upper) outs() << "\n";
+  }
+
+  Expr convertBVToLeqAndLt(Expr e) {
+    assert(bv::isBVComparison(e));
+    if (isOpX<BULE>(e) || isOpX<BULT>(e) || isOpX<BSLE>(e) || isOpX<BSLT>(e)) {
+      return e;
+    }
+    if (isOpX<BUGE>(e)) { return bv::bvule(e->right(), e->left()); }
+    if (isOpX<BUGT>(e)) { return bv::bvult(e->right(), e->left()); }
+    if (isOpX<BSGE>(e)) { return bv::bvsle(e->right(), e->left()); }
+    if (isOpX<BSGT>(e)) { return bv::bvslt(e->right(), e->left()); }
+    return nullptr;
+  }
+
+  inline static void mutateHeuristicBV(Expr exp, ExprSet &guesses /*, int bnd = 100*/)
+  {
+    //    std::cout << "Mutate called on " << *exp << std::endl;
+    exp = unfoldITE(exp);
+    ExprSet cnjs;
+    getConj(exp, cnjs);
+    ExprSet ineqs;
+    ExprSet eqs;
+    ExprSet disjs;
+    for (auto c : cnjs)
+    {
+      if (isOpX<NEG>(c))
+        c = c->left();
+
+      if (isOpX<EQ>(c))
+      {
+        if (isNumeric(c->left()))
+        {
+          eqs.insert(c);
+          ineqs.insert(bv::bvule(c->right(), c->left()));
+          ineqs.insert(bv::bvule(c->left(), c->right()));
+          // TODO: signed?
+        }
+        else
+        {
+          guesses.insert(c);
+        }
+      }
+      else if (bv::isBVComparison(c))
+      {
+        c = convertBVToLeqAndLt(c);
+        guesses.insert(c);
+        ineqs.insert(c);
+      }
+      else if (isOpX<OR>(c))
+      {
+        ExprSet terms;
+        getDisj(c, terms);
+        ExprSet newTerms;
+        for (auto t : terms)
+        {
+          if (newTerms.size() > 2)
+            continue; // don't consider large disjunctions
+          if (isOpX<NEG>(t))
+            t = mkNeg(t->left());
+          if (!bv::isBVComparison(t))
+            continue;
+          if (!isNumeric(t->left()))
+            continue;
+          newTerms.insert(t);
+        }
+        c = disjoin(newTerms, c->getFactory());
+        disjs.insert(c);
+        guesses.insert(c);
+      }
+      else
+        guesses.insert(c);
+    }
+
+    for (auto &z : eqs)
+    {
+      for (auto &in : ineqs)
+      {
+        // if (bnd > guesses.size()) return;
+        if (!emptyIntersect(z, in))
+          continue;
+        ineqs.insert(bv::bvule(bv::bvadd(in->left(), z->left()), bv::bvadd(in->right(), z->right())));
+        ineqs.insert(bv::bvule(bv::bvadd(in->left(), z->right()), bv::bvadd(in->right(), z->left())));
+      }
+
+      for (auto &d : disjs)
+      {
+        // if (bnd > guesses.size()) return;
+        ExprSet terms;
+        getDisj(d, terms);
+        ExprSet newTerms;
+        for (auto c : terms)
+        {
+          if (bv::isBVComparison(c))
+          {
+            if (emptyIntersect(z, c))
+              newTerms.insert(reBuildCmp(c,
+                                         bv::bvadd(c->left(), z->left()), bv::bvadd(c->right(), z->right())));
+            else
+              newTerms.insert(c);
+          }
+          else
+            newTerms.insert(c);
+        }
+        if (newTerms.size() > 0)
+          guesses.insert(disjoin(newTerms, d->getFactory()));
+      }
+    }
+
+    guesses.insert(ineqs.begin(), ineqs.end());
+
+    for (auto &e : eqs)
+    {
+      for (auto &in : ineqs)
+      {
+        // if (bnd > guesses.size()) return;
+        //        assert(isOpX<LEQ>(in));
+        Expr g;
+        if (in->left() == e->left() && !evalLeq(e->right(), in->right()))
+          g = reBuildCmp(in, e->right(), in->right());
+        else if (in->left() == e->right() && !evalLeq(e->left(), in->right()))
+          g = reBuildCmp(in, e->left(), in->right());
+        else if (in->right() == e->left() && !evalLeq(in->left(), e->right()))
+          g = reBuildCmp(in, in->left(), e->right());
+        else if (in->right() == e->right() && !evalLeq(in->left(), e->left()))
+          g = reBuildCmp(in, in->left(), e->left());
+
+        if (g != NULL)
+          guesses.insert(g);
+      }
+    }
+
+    for (auto &in1 : ineqs)
+    {
+      for (auto &in2 : ineqs)
+      {
+        //        if (bnd > guesses.size()) return;
+        if (in1 == in2)
+          continue;
+
+        if (isOpX<BULE>(in1) && isOpX<BULE>(in2) && (in1->right() == in2->left()))
+        {
+          guesses.insert(bv::bvule(in1->left(), in2->right()));
+        }
+      }
+    }
   }
 }
 

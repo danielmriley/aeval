@@ -2995,6 +2995,16 @@ namespace expr
     return dagVisit (rav, exp);
   }
 
+  template <typename Range>
+  inline Range replaceAll (const Range &r, ExprVector& s, ExprVector& t)
+  {
+    assert(s.size() == t.size());
+    Range res;
+    for (auto &e : r)
+      res.insert(replaceAll(e, s, t));
+    return res;
+  }
+
   // pairwise replacing
   inline Expr replaceAll (Expr exp, ExprVector& s, ExprVector& t)
   {

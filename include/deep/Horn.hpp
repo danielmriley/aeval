@@ -117,6 +117,36 @@ namespace ufo
 
     CHCs(ExprFactory &efac, EZ3 &z3, int d = false) :
       u(efac), m_efac(efac), m_z3(z3), hasAnyArrays(false), debug(d) {};
+    CHCs(CHCs const &r) : CHCs(r.m_efac, r.m_z3, r.debug) 
+    {
+      indeces = r.indeces;
+      failDecl = r.failDecl;
+      chcs = r.chcs;
+      allCHCs = r.allCHCs;
+      wtoCHCs = r.wtoCHCs;
+      dwtoCHCs = r.dwtoCHCs;
+      wtoDecls = r.wtoDecls;
+      decls = r.decls;
+      invVars = r.invVars;
+      invVarsPrime = r.invVarsPrime;
+      outgs = r.outgs;
+      cycleSearchDone = r.cycleSearchDone;
+      loopheads = r.loopheads;
+      cycles = r.cycles;
+      prefixes = r.prefixes;
+      acyclic = r.acyclic;
+      seqPoints = r.seqPoints;
+      hasArrays = r.hasArrays;
+      hasAnyArrays = r.hasAnyArrays;
+      hasBV = r.hasBV;
+      hasQuery = r.hasQuery;
+      debug = r.debug;
+      chcsToCheck1 = r.chcsToCheck1;
+      chcsToCheck2 = r.chcsToCheck2;
+      toEraseChcs = r.toEraseChcs;
+      glob_ind = r.glob_ind;
+      origVrs = r.origVrs;
+    };
 
     bool isFapp (Expr e)
     {
@@ -353,6 +383,7 @@ namespace ufo
                                                  !hasBV && doArithm, false);
           hr.body = u.removeITE(hr.body);
           hr.body = simplifyArr(hr.body);
+          hr.body = u.removeRedundantConjuncts(hr.body);
           hr.shrinkLocVars();
         }
         else
@@ -1184,6 +1215,24 @@ namespace ufo
       }
     }
 
+    Expr getPostcondition(int i, ExprVector &vars)
+    {
+      HornRuleExt &hr = chcs[i];
+      ExprSet cnjs;
+      ExprSet newCnjs;
+      getConj(hr.body, cnjs);
+      ExprVector allVars = hr.locVars;
+      // for (auto &a : hr.srcVars)
+        allVars.insert(allVars.end(), hr.srcVars.begin(), hr.srcVars.end());
+      for (auto &a : cnjs)
+      {
+        if (emptyIntersect(a, allVars))
+          newCnjs.insert(a);
+      }
+      Expr res = conjoin(newCnjs, m_efac);
+      return replaceAll(res, hr.dstVars, vars);
+    }
+
     Expr getPrecondition (HornRuleExt* hr)
     {
       Expr tmp = keepQuantifiers(hr->body, hr->srcVars);
@@ -1362,6 +1411,134 @@ namespace ufo
         enc_chc << ")\n\n";
       }
       enc_chc << "(check-sat)\n";
+    }
+
+    ZFixedPoint<EZ3> toZ3fp()
+    {
+      // fixed-point object
+      ZFixedPoint<EZ3> fp(m_z3);
+      ZParams<EZ3> params(m_z3);
+      fp.set(params);
+
+      Expr errRel = bind::boolConstDecl(failDecl);
+      fp.registerRelation(errRel);
+
+      for (auto &dcl : decls)
+        fp.registerRelation(dcl);
+
+      for (auto &r : chcs)
+      {
+        ExprSet allVars;
+        allVars.insert(r.srcVars.begin(), r.srcVars.end());
+        
+        allVars.insert(r.dstVars.begin(), r.dstVars.end());
+        allVars.insert(r.locVars.begin(), r.locVars.end());
+
+
+        ExprSet pres;
+        if (!r.isFact)
+        {
+          for (auto &dcl : decls)
+          {
+            if (dcl->left() == r.srcRelation)
+            {
+              pres.insert(bind::fapp(dcl, r.srcVars));
+              break;
+            }
+          }
+        }
+        getConj(r.body, pres);
+        fp.addRule(allVars, boolop::limp(conjoin(pres, m_efac), *decls.begin()));
+      }
+      fp.addQuery(bind::fapp(bind::fdecl(this->failDecl, ExprVector{sort::boolTy(m_efac)})));
+      return fp;
+    }
+
+    ExprMap solve(unsigned timeout = 0u)
+    {
+      auto fp = toZ3fp();
+      ZParams<EZ3> params(m_z3);
+      params.set("timeout", timeout);
+      fp.set(params);
+      tribool res;
+      ExprMap solution;
+      try
+      {
+        res = fp.query();
+      }
+      catch (z3::exception &e)
+      {
+        std::string msg = e.msg();
+        if (msg.find("canceled") == std::string::npos)
+        {
+          outs() << "Z3 ex: " << e.msg() << "...\n";
+          exit(55);
+        }
+        else
+        {
+          // timeout
+          return solution;
+        }
+      }
+      if (!res)
+      {
+        for (auto const &pred : decls)
+        {
+          auto it = invVars.find(bind::name(pred));
+          assert(it != invVars.end());
+          Expr lemma = fp.getCoverDelta(bind::fapp(pred, it->second));
+          solution.insert(std::make_pair<>(pred, lemma));
+        }
+      }
+      return solution;
+    }
+
+    void simplifyCHCSystemSyntactically()
+    {
+      for (auto &chc : chcs)
+      {
+        chc.body = simplifyExpressionSyntactically(chc.body);
+      }
+    }
+
+    Expr simplifyExpressionSyntactically(Expr e)
+    {
+      Expr res = simplifyBool(e);
+      if (hasBV)
+      {
+        return simplifyBVConstructs(res);
+      }
+      return res;
+    }
+
+    Expr simplifyBVConstructs(Expr e)
+    {
+      std::map<Expr, unsigned> bitwidths;
+      RW<SimplifyBVExpr> rw(new SimplifyBVExpr(e->getFactory(), bitwidths));
+      return dagVisit(rw, e);
+    }
+
+    void strengthenWithInvariants(ExprMap const &invariants)
+    {
+      for (auto &chc : this->chcs)
+      {
+        // inspiration from check CHC
+        ExprSet newBody;
+        newBody.insert(chc.body);
+        Expr rel = chc.srcRelation;
+        ExprSet lms = {invariants.at(rel)};
+        Expr substInvariants = replaceAll(conjoin(lms, m_efac), this->invVars[rel], chc.srcVars);
+        getConj(substInvariants, newBody);
+  
+        if (!chc.isQuery)
+        {
+          Expr rel = chc.dstRelation;
+          Expr lms = invariants.at(rel);
+          Expr substInvariants = replaceAll(lms, this->invVars[rel], chc.dstVars);
+          getConj(substInvariants, newBody);
+        }
+        chc.body = conjoin(newBody, this->m_efac);
+      }
     }
   };
 }
