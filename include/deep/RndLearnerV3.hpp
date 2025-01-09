@@ -277,7 +277,7 @@ namespace ufo
     void addCandidates(Expr rel, ExprSet& cands)
     {
       int invNum = getVarIndex(rel, decls);
-      outs() << "Adding candidate for rel: " << rel << " invNum: " << invNum << "\n";
+      if(printLog >= 4) outs() << "Adding candidate for rel: " << rel << " invNum: " << invNum << "\n";
       for (auto & a : cands) addCandidate(invNum, a);
     }
 

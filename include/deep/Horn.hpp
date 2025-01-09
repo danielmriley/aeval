@@ -1356,7 +1356,112 @@ namespace ufo
       }
     }
 
-    void serialize ()
+    void serialize(bool horn = true)
+    {
+      if (horn) serializeHorn();
+      else serializeCHC();
+    }
+
+    void serializeCHC()
+    {
+      std::ofstream enc_chc;
+      enc_chc.open("chc.smt2");
+      
+      for (auto & d : decls)
+      {
+        enc_chc << "(declare-rel " << d->left() << " (";
+        for (int i = 1; i < d->arity()-1; i++)
+        {
+          u.print(d->arg(i), enc_chc);
+          if (i < d->arity()-2) enc_chc << " ";
+        }
+        enc_chc << "))\n";
+      }
+
+      enc_chc << "(declare-rel fail ())\n\n";
+
+      for(auto& v: invVars)
+      {
+        for(auto& a: v.second)
+        {
+          enc_chc << "(declare-var ";
+          u.print(a, enc_chc);
+          enc_chc << " ";
+          u.print(bind::typeOf(a), enc_chc);
+          enc_chc << ")\n";
+        }
+        enc_chc << "\n";
+      }
+
+      if(invVarsPrime.empty())
+      {
+        std::cerr << "No primed variables found\n";
+      }
+      for (auto &v : invVarsPrime)
+      {
+        for (auto &a : v.second)
+        {
+          enc_chc << "(declare-var ";
+          u.print(a, enc_chc);
+          enc_chc << " ";
+          u.print(bind::typeOf(a), enc_chc);
+          enc_chc << ")\n";
+        }
+        enc_chc << "\n";
+      }
+
+      for (auto & c : chcs)
+      {
+        enc_chc << "(rule ";
+        Expr src, dst;
+        if (c.isFact)
+        {
+          src = mk<TRUE>(m_efac);
+        }
+        else
+        {
+          for (auto &d : decls)
+          {
+            if (d->left() == c.srcRelation)
+            {
+              src = fapp(d, c.srcVars);
+              break;
+            }
+          }
+        }
+        if (c.isQuery)
+        {
+          dst = failDecl;
+        }
+        else
+        {
+          for (auto &d : decls)
+          {
+            if (d->left() == c.dstRelation)
+            {
+              dst = fapp(d, c.dstVars);
+              break;
+            }
+          }
+        }
+        enc_chc << "(=> ";
+        u.print(mk<AND>(src, c.body), enc_chc);
+        if(c.isQuery) 
+        {
+          enc_chc << " " << dst << ")";
+        }
+        else
+        {
+          enc_chc << " ";
+          u.print(dst, enc_chc);
+          enc_chc << ")";
+        }
+        enc_chc << ")\n\n";  
+      }
+      enc_chc << "(query fail)\n";
+    }
+
+    void serializeHorn ()
     {
       std::ofstream enc_chc;
       enc_chc.open("chc.smt2");

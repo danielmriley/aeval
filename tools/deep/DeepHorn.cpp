@@ -84,7 +84,9 @@ int main (int argc, char ** argv)
   const char *OPT_REC = "--re";
   const char *OPT_MBP = "--eqs-mbp";
   const char *OPT_SER = "--serialize";
+  const char *OPT_SERTRANS = "--serialize-translation";
   const char *OPT_LIA2BV = "--lia2bv";
+  const char *OPT_HORN = "--horn";
   const char *OPT_DEBUG = "--debug";
 
   if (getBoolValue(OPT_HELP, false, argc, argv) || argc == 1){
@@ -142,14 +144,14 @@ int main (int argc, char ** argv)
   bool vers2 = getBoolValue(OPT_V2, false, argc, argv);
   bool vers3 = getBoolValue(OPT_V3, false, argc, argv);
   bool vers4 = getBoolValue(OPT_V4, false, argc, argv);
-  bool vers5 = getBoolValue(OPT_V5, false, argc, argv);
-  if (vers1 + vers2 + vers3 + vers4 + vers5 > 1)
+  bool bv_solver = getBoolValue(OPT_V5, false, argc, argv);
+  if (vers1 + vers2 + vers3 + vers4 + bv_solver > 1)
   {
     outs() << "Only one version of the algorithm can be chosen.\n";
     return 0;
   }
 
-  if (!vers1 && !vers2 && !vers3 && !vers4 && !vers5) vers4 = true; // default
+  if (!vers1 && !vers2 && !vers3 && !vers4 && !bv_solver) vers4 = true; // default
 
   int max_attempts = getIntValue(OPT_MAX_ATTEMPTS, 2000000, argc, argv);
   int to = getIntValue(OPT_TO, 1000, argc, argv);
@@ -176,7 +178,9 @@ int main (int argc, char ** argv)
   bool d_g = !getBoolValue(OPT_D6, false, argc, argv);
   bool d_r = getBoolValue(OPT_REC, false, argc, argv);
   bool d_ser = getBoolValue(OPT_SER, false, argc, argv);
+  bool d_sertrans = getBoolValue(OPT_SERTRANS, false, argc, argv);
   bool d_lia2bv = getBoolValue(OPT_LIA2BV, false, argc, argv);
+  bool d_horn = getBoolValue(OPT_HORN, false, argc, argv);
   int debug = getIntValue(OPT_DEBUG, 0, argc, argv);
 
   if (d_m || d_p || d_d || d_s) do_disj = true;
@@ -198,10 +202,10 @@ int main (int argc, char ** argv)
     if (do_dl == 0) do_dl = 1;
   }
 
-  if(vers5)
+  if(bv_solver)
     learnInvariants5(string(argv[argc - 1]), max_attempts, to, densecode, aggressivepruning,
                      do_dl, do_mu, do_elim, do_arithm, do_disj, do_prop, mbp_eqs,
-                     d_m, d_p, d_d, d_s, d_f, d_r, d_g, d_se, d_lia2bv, debug);
+                     d_m, d_p, d_d, d_s, d_f, d_r, d_g, d_se, d_lia2bv, d_horn, d_sertrans, debug);
   else if (vers4)      // MBP-based, path-sensitive algorithms
     learnInvariants4(string(argv[argc-1]), max_attempts, to, densecode, aggressivepruning,
                    do_dl, do_mu, do_elim, do_arithm, do_disj, do_prop, mbp_eqs,

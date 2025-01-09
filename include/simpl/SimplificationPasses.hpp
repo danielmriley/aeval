@@ -8,25 +8,12 @@
 #include "deep/Horn.hpp"
 #include "ufo/ExprBv.hh"
 #include "ufo/Expr.hpp"
+#include "bv2lia.hpp"
 
 namespace ufo
 {
   namespace passes
   {
-
-    unsigned int binaryLog(mpz_class v)
-    {
-      if (v.fits_ulong_p())
-      {
-        unsigned long v_ul = v.get_ui();
-        unsigned int res = 0;
-        while (v_ul >>= 1) { ++res; }
-        return res;
-      }
-      // TODO: implement this
-      throw std::logic_error("Not implemented yet!");
-    }
-
     struct DeconstructVariables
     {
 
@@ -84,8 +71,28 @@ namespace ufo
       void operator()(const CHCs &in)
       {
         CHCs *copy = new CHCs(in);
-        outs() << "here: " << copy->chcs.size() << "\n";
-        copy->print(true);
+        
+        {
+          outs() << "BV1ToBool\n";
+          outs() << "Vars: ";
+          for(auto& v: copy->invVars)
+          {
+            for(auto& a: v.second)
+            {
+              outs() << *a << " ";
+            }
+          }
+          outs() << "\n";
+          outs() << "Primed vars: ";
+          for(auto& vp: copy->invVarsPrime)
+          {
+            for(auto& a: vp.second)
+            {
+              outs() << *a << " ";
+            }
+          }
+        }
+
         res = std::unique_ptr<CHCs>(copy);
         std::unordered_set<Expr> bv1vars;
         auto isBV1 = [](Expr exp)
@@ -377,7 +384,8 @@ namespace ufo
       void translateBody(const HornRuleExt &in, HornRuleExt &out);
       // void translateHead(const HornRuleExt &in, HornRuleExt &out);
       void addRangeConstraints(const ufo::HornRuleExt &in, ufo::HornRuleExt &out);
-
+      void simplifyBody(HornRuleExt &out);
+      
       Expr translateVar(Expr var);
       TranslationResult translateGeneralExpression(Expr body);
 
@@ -387,7 +395,31 @@ namespace ufo
 
     void BV2LIAPass::operator()(const CHCs &system)
     {
-      transformed.reset(new CHCs{system.m_efac, system.m_z3});
+      CHCs *copy = new CHCs(system);
+
+      {
+        outs() << "BV2LIAPass\n";
+        outs() << "Vars: ";
+        for (auto &v : copy->invVars)
+        {
+          for (auto &a : v.second)
+          {
+            outs() << *a << " ";
+          }
+        }
+        outs() << "\n";
+        outs() << "Primed vars: ";
+        for (auto &vp : copy->invVarsPrime)
+        {
+          for (auto &a : vp.second)
+          {
+            outs() << *a << " ";
+          }
+        }
+      }
+
+      transformed = std::unique_ptr<CHCs>(copy);
+      // transformed.reset(new CHCs{system.m_efac, system.m_z3});
       CHCs &liaSystem = *transformed;
 
       liaSystem.decls = translateDeclarations(system.decls);
@@ -397,6 +429,7 @@ namespace ufo
       liaSystem.chcs = translateClauses(system.chcs);
       // translate var info
       liaSystem.invVars = translateInvVars(system.invVars);
+      liaSystem.invVarsPrime = translateInvVars(system.invVarsPrime);
       // translate incms
       // TODO: test what is the key
       // liaSystem.incms = system.incms;
@@ -442,12 +475,57 @@ namespace ufo
 
         // translateHead(clause, translated);
         // copy the relations, these are just names
-        assert(isOpX<STRING>(clause.dstRelation));
+        // assert(isOpX<STRING>(clause.dstRelation));
         translated.dstRelation = clause.dstRelation;
         translated.srcRelation = clause.srcRelation;
         addRangeConstraints(clause, translated);
+        simplifyBody(translated);
       }
       return ret;
+    }
+
+    void BV2LIAPass::simplifyBody(HornRuleExt &out)
+    {
+      SMTUtils u(out.body->getFactory());
+
+      Expr body = out.body;
+      if(!containsOp<ITE>(body)) return;
+      outs() << "Simplifying ITEs in the body of the clause.\n";
+      // Remove redundant ITEs in the body.
+      ExprSet conjs;
+      getConj(body, conjs);
+      ExprSet ites, nonites;
+      for (auto &c : conjs)
+      {
+        if (containsOp<ITE>(c))
+        {
+          ites.insert(c);
+        }
+        else
+        {
+          nonites.insert(c);
+        }
+      }
+
+      ExprSet newBody;
+      for(auto &ite : ites) {
+        Expr cond = ite->right()->arg(0);
+        Expr then = ite->right()->arg(1);
+        Expr els = ite->right()->arg(2);
+        Expr condNeg = mkNeg(cond);
+        if(!u.isSat(cond, conjoin(nonites, cond->getFactory()))) {
+          newBody.insert(mk<EQ>(ite->left(), els));
+        }
+        else if(!u.isSat(condNeg, conjoin(nonites, condNeg->getFactory()))) {
+          newBody.insert(mk<EQ>(ite->left(), then));
+        }
+        else
+        {
+          newBody.insert(ite);
+        }
+      }
+      newBody.insert(nonites.begin(), nonites.end());
+      out.body = conjoin(newBody, body->getFactory());
     }
 
     void BV2LIAPass::translateVariables(const ufo::HornRuleExt &in, ufo::HornRuleExt &out)
@@ -575,14 +653,10 @@ namespace ufo
       for (const auto &entry : originals)
       {
         Expr predicate = entry.first;
-        outs() << "Predicate: " << *predicate << "\n";
-        for(auto& v: entry.second) {
-          outs() << "Var: " << *v << "\n";
-        }
         if(predicate == mk<TRUE>(predicate->getFactory())) {
           continue;
         }
-        assert(isOpX<STRING>(predicate));
+        // assert(isOpX<STRING>(predicate));
         const auto &vars = entry.second;
         ExprVector translatedVars;
         for (const auto &var : vars)
