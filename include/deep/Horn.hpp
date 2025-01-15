@@ -1392,11 +1392,7 @@ namespace ufo
         }
         enc_chc << "\n";
       }
-
-      if(invVarsPrime.empty())
-      {
-        std::cerr << "No primed variables found\n";
-      }
+      
       for (auto &v : invVarsPrime)
       {
         for (auto &a : v.second)

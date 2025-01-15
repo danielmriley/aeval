@@ -5,10 +5,11 @@
 #ifndef SEAHORN_SIMPLIFICATIONPASSES_HPP
 #define SEAHORN_SIMPLIFICATIONPASSES_HPP
 
+#include <cmath>
 #include "deep/Horn.hpp"
 #include "ufo/ExprBv.hh"
 #include "ufo/Expr.hpp"
-#include "bv2lia.hpp"
+#include "Lia2Bv.hpp"
 
 namespace ufo
 {
@@ -371,10 +372,12 @@ namespace ufo
       InvariantTranslator getInvariantTranslator() const;
 
     private:
+      int debug = 0;
       std::unique_ptr<CHCs> transformed;
 
       std::map<Expr, Expr> variableMap;
       std::map<Expr, Expr> declsMap;
+      std::map<Expr, int> rangeExpansionMap;
 
       ExprSet translateDeclarations(const ExprSet &originals);
       std::vector<HornRuleExt> translateClauses(const std::vector<HornRuleExt> &originals);
@@ -385,7 +388,9 @@ namespace ufo
       // void translateHead(const HornRuleExt &in, HornRuleExt &out);
       void addRangeConstraints(const ufo::HornRuleExt &in, ufo::HornRuleExt &out);
       void simplifyBody(HornRuleExt &out);
-      
+      void initRangeExpansionMap(std::vector<HornRuleExt> &system);
+      int getRangeMultiplier(Expr var);
+      void mapVarToInt(Expr e);
       Expr translateVar(Expr var);
       TranslationResult translateGeneralExpression(Expr body);
 
@@ -393,10 +398,61 @@ namespace ufo
       static bool isBVSort(Expr e) { return isOpX<BVSORT>(e); }
     };
 
+    void BV2LIAPass::mapVarToInt(Expr e)
+    {
+      outs() << "Mapping " << e << " to int.\n";
+      ExprVector consts;
+      filter(e, bind::IsHardIntConst(), std::inserter(consts, consts.begin()));
+      for(auto& c: consts)
+      {
+        outs() << "const: " << *c << "\n";
+      }
+      ExprVector vars;
+      // This is brittle, but it will have to do for now.
+      filter(e->left(), bind::IsConst(), std::inserter(vars, vars.begin()));
+      for(auto& v: vars)
+      {
+        outs() << "var: " << *v << "\n";
+      }
+      rangeExpansionMap[vars[0]] = lexical_cast<int>(consts[0]);
+    }
+
+    void BV2LIAPass::initRangeExpansionMap(std::vector<HornRuleExt> &system)
+    {
+      for (auto &hr: system)
+      {
+        if(hr.isQuery)
+        {
+          Expr body = hr.body;
+          ExprSet conjs;
+          getConj(body, conjs);
+          for(auto& c: conjs)
+          {
+            if ((isOpX<EQ>(c) || isOpX<NEQ>(c)) && containsOp<MULT>(c))
+            {
+              // Check what is being multiplied.
+              // This is LIA so it should only be a constant.
+              mapVarToInt(c);
+            }
+          }
+          if(debug >= 3)
+          {
+            outs() << "Range expansion map:\n";
+            for(auto& entry: rangeExpansionMap)
+            {
+              outs() << entry.first << " -> " << entry.second << "\n";
+            }
+          }
+        }
+      }
+    }
+
     void BV2LIAPass::operator()(const CHCs &system)
     {
+      debug = system.debug;
       CHCs *copy = new CHCs(system);
 
+      if(debug >= 2)
       {
         outs() << "BV2LIAPass\n";
         outs() << "Vars: ";
@@ -419,7 +475,6 @@ namespace ufo
       }
 
       transformed = std::unique_ptr<CHCs>(copy);
-      // transformed.reset(new CHCs{system.m_efac, system.m_z3});
       CHCs &liaSystem = *transformed;
 
       liaSystem.decls = translateDeclarations(system.decls);
@@ -430,10 +485,6 @@ namespace ufo
       // translate var info
       liaSystem.invVars = translateInvVars(system.invVars);
       liaSystem.invVarsPrime = translateInvVars(system.invVarsPrime);
-      // translate incms
-      // TODO: test what is the key
-      // liaSystem.incms = system.incms;
-      // liaSystem.qCHCNum = system.qCHCNum;
     }
 
     ExprSet BV2LIAPass::translateDeclarations(const ExprSet &originals)
@@ -473,11 +524,17 @@ namespace ufo
 
         translateBody(clause, translated);
 
-        // translateHead(clause, translated);
-        // copy the relations, these are just names
-        // assert(isOpX<STRING>(clause.dstRelation));
         translated.dstRelation = clause.dstRelation;
         translated.srcRelation = clause.srcRelation;
+      }
+
+      initRangeExpansionMap(ret);
+
+      for(int i = 0; i < ret.size(); i++)
+      {
+        if(debug >= 3) outs() << "Translated clause: " << *ret[i].body << "\n";
+        HornRuleExt &translated = ret[i];
+        HornRuleExt clause = originals[i];
         addRangeConstraints(clause, translated);
         simplifyBody(translated);
       }
@@ -587,29 +644,15 @@ namespace ufo
       return {res, translator.getAbstractionsMap()};
     }
 
-    // void BV2LIAPass::translateHead(const ufo::HornRuleExt &in, ufo::HornRuleExt &out)
-    // {
-    //   if (in.isQuery)
-    //   {
-    //     // Fail declaration is treated differently, so manual handling of special case
-    //     out.head = in.head;
-    //     return;
-    //   }
-    //   //      Expr head = in.head;
-    //   //      outs () << *head << "\n";
-    //   //      assert(bind::isFapp(head));
-    //   Expr decl = in.head; // bind::fname(head);
-    //   assert(declsMap.find(decl) != declsMap.end());
-    //   Expr n_decl = declsMap.at(decl);
-    //   //      ExprVector n_args;
-    //   //      for (int i = 0; i < bind::domainSz(decl); ++i) {
-    //   //        Expr arg = head->arg(i + 1);
-    //   //        assert(variableMap.find(arg) != variableMap.end());
-    //   //        n_args.push_back(variableMap.at(arg));
-    //   //      }
-    //   //      Expr n_head = bind::fapp(n_decl, n_args);
-    //   out.head = n_decl;
-    // }
+    int BV2LIAPass::getRangeMultiplier(Expr var)
+    {
+      auto it = rangeExpansionMap.find(var);
+      if(it != rangeExpansionMap.end())
+      {
+        return it->second;
+      }
+      return 1;
+    }
 
     void BV2LIAPass::addRangeConstraints(const ufo::HornRuleExt &in, ufo::HornRuleExt &out)
     {
@@ -636,7 +679,8 @@ namespace ufo
         assert(it != variableMap.end());
         Expr intVar = it->second;
         Expr lowerBound = mk<LEQ>(zero, intVar);
-        mpz_class ubVal = bv::power(2, width) - 1;
+        double range = (bv::power(2, width).get_d() - 1) * getRangeMultiplier(intVar);
+        mpz_class ubVal = std::ceil(range);
         Expr ubValExpr = mkTerm(ubVal, efac);
         Expr upperBound = mk<LEQ>(intVar, ubValExpr);
         constraints.push_back(lowerBound);

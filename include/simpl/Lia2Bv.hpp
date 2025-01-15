@@ -38,10 +38,10 @@ namespace ufo
       std::unique_ptr<CHCs> transformed;
 
       int bitwidth = 0;
-      int debug;
+      int debug = 0;
 
       public:
-      LIA2BVPass(int debug = 0) {}
+      LIA2BVPass(int _debug = 0) : debug(_debug) {}
 
       CHCs *getTransformed() { return transformed.get(); }
 
@@ -94,16 +94,6 @@ namespace ufo
         }
 
         return ret;
-        // Expr bvType = bv::bvsort(bitwidth, clause.body->getFactory());
-        // outs() << "bvType: " << bvType << "\n";
-        // ExprVector relTypes;
-        // relTypes.push_back(bvType);
-        // relTypes.push_back(mk<BOOL_TY>(clause.body->getFactory()));
-        // Expr bvSrcRelation = bind::fdecl(clause.srcRelation, relTypes);
-        // Expr bvDstRelation = bind::fdecl(clause.dstRelation, relTypes);
-        // outs() << "BV src relation: " << *bvSrcRelation << "\n";
-        // outs() << "BV dst relation: " << *bvDstRelation << "\n";
-        // outs() << "srcRelation type: " << clause.srcRelation->left() << "\n";
       }
 
       void translateConsts(Expr e)
@@ -135,13 +125,17 @@ namespace ufo
         for (auto &c : conjs)
         {
           if (debug >= 4)
+          {
             outs() << "Expr: " << c << "\n";
+          }
           if (isOpX<MPZ>(c))
           {
             mpz_class val = getTerm<mpz_class>(c);
             int bw = binaryLog(val);
             if (debug >= 4)
+            {
               outs() << "BW: " << bw << "\n";
+            }
             if (bw > maxBitWidth)
             {
               maxBitWidth = bw;
@@ -169,14 +163,17 @@ namespace ufo
 
       void findBitWitdth(const std::vector<HornRuleExt> &origClauses)
       {
-        // First, find the largest constant in the body of the clauses.
+        // Find the largest constant in the body of the clauses.
         for (const auto &clause : origClauses)
         {
           Expr body = clause.body;
           int bw = computeExpressionBitWidth(body);
           if (bw > bitwidth) bitwidth = bw;
         }
-        if (debug >= 3) outs() << "Max bit width found: " << bitwidth << "\n";
+        if (debug >= 3)
+        {
+          outs() << "Max bit width found: " << bitwidth << "\n";
+        } 
       }
 
       std::vector<HornRuleExt> translateClauses(const std::vector<HornRuleExt> &origClauses)
