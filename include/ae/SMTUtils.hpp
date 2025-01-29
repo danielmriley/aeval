@@ -703,6 +703,7 @@ namespace ufo
         out << ")";
       }
       else out << z3.toSmtLib (e);
+      // Add more cases to catch BV operations and operands.
     }
 
     void serialize_formula(Expr form)

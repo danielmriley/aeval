@@ -1406,6 +1406,21 @@ namespace ufo
         enc_chc << "\n";
       }
 
+      for(auto & c : chcs)
+      {
+        bool added = false;
+        for(auto & l: c.locVars)
+        {
+          enc_chc << "(declare-var ";
+          u.print(l, enc_chc);
+          enc_chc << " ";
+          u.print(bind::typeOf(l), enc_chc);
+          enc_chc << ")\n";
+          added = true;
+        }
+        if(added) enc_chc << "\n";
+      }
+
       for (auto & c : chcs)
       {
         enc_chc << "(rule ";

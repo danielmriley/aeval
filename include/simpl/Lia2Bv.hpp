@@ -13,6 +13,10 @@ namespace ufo
 
     unsigned int binaryLog(mpz_class v)
     {
+      if(v < 0)
+      {
+        v *= -1;
+      }
       if (v.fits_ulong_p())
       {
         unsigned long v_ul = v.get_ui();
@@ -36,12 +40,13 @@ namespace ufo
       std::map<Expr, Expr> constMap;
 
       std::unique_ptr<CHCs> transformed;
+      CHCs& liaSystem;
 
       int bitwidth = 0;
       int debug = 0;
 
       public:
-      LIA2BVPass(int _debug = 0) : debug(_debug) {}
+      LIA2BVPass(CHCs& _r, int _debug = 0) : liaSystem(_r), debug(_debug) {}
 
       CHCs *getTransformed() { return transformed.get(); }
 
@@ -102,6 +107,11 @@ namespace ufo
         getConj(e, conjs);
         for (auto &c : conjs)
         {
+          if(debug >= 3)
+          {
+            outs() << "Consts translation expr: " << c << "\n";
+          }
+
           if (isOpX<MPZ>(c))
           {
             if (debug >= 4)
@@ -110,10 +120,14 @@ namespace ufo
             constMap[c] = bv::bvnum(getTerm<mpz_class>(c), bitwidth, c->getFactory());
           }
 
-          Expr lhs = c->left();
-          Expr rhs = c->right();
-          if (lhs != NULL) translateConsts(lhs);
-          if (rhs != NULL) translateConsts(rhs);
+          for(auto arg = c->args_begin(); arg != c->args_end(); ++arg)
+          {
+            translateConsts(*arg);
+          }
+          // Expr lhs = c->left();
+          // Expr rhs = c->right();
+          // if (lhs != NULL) translateConsts(lhs);
+          // if (rhs != NULL) translateConsts(rhs);
         }
       }
 
@@ -206,6 +220,16 @@ namespace ufo
           // Translate the variables.
           translated.srcVars = translateInvVars(clause.srcVars);
           translated.dstVars = translateInvVars(clause.dstVars);
+          translated.locVars = translateInvVars(clause.locVars, true);
+          
+          if(debug >= 3)
+          {
+            outs() << "var mapping:\n";
+            for(auto const &entry: variableMap)
+            {
+              outs() << *entry.first << " -> " << *entry.second << "\n";
+            }
+          }
 
           // // Translate the body.
           translated.body = translateRecursively(clause.body);
@@ -213,6 +237,11 @@ namespace ufo
           // Create new src and dst relations with bv type.
           translated.dstRelation = clause.dstRelation;
           translated.srcRelation = clause.srcRelation;
+        }
+
+        if(debug >= 3)
+        {
+          outs() << "Translated clauses:\n";
         }
 
         return translatedClauses;
@@ -224,6 +253,7 @@ namespace ufo
 
         auto isConstant = bind::IsHardIntConst{};
         if(isConstant(exp)) {
+          outs() << "Finding const" << std::endl;
           return constMap.at(exp);
         }
         if (isOpX<AND>(exp) || isOpX<OR>(exp) || isOpX<IFF>(exp))
@@ -246,8 +276,16 @@ namespace ufo
           ExprVector n_args;
           for(auto it = exp->args_begin(); it != exp->args_end(); ++it) {
             Expr arg = *it;
+            outs() << "arg: " << *arg << "\n";
             if(isConstant(arg)) {
+              outs() << "adding const to n_args " << arg << "\n";
               n_args.push_back(constMap.at(arg));
+            }
+            else if(isOpX<UN_MINUS>(arg))
+            {
+              outs() << "arg->first(): " << *arg->first() << "\n";
+              Expr negOne = bv::bvnum(-1, bitwidth, exp->getFactory());
+              n_args.push_back(mk<BMUL>(negOne, translateRecursively(arg->first())));
             } 
             else {
               n_args.push_back(translateRecursively(arg));
@@ -291,6 +329,11 @@ namespace ufo
 
         std::cerr << "Unhandled case when translating LIA invariant to BV: " << *exp << std::endl;
         assert(false);
+      }
+
+      Expr translateExpr(Expr e)
+      {
+        return translateRecursively(e);
       }
 
       Expr translateOperation(Expr e, ExprVector n_args)
@@ -351,6 +394,11 @@ namespace ufo
         if (isOpX<IDIV>(e))
         {
           return mknary<BUDIV>(n_args);
+        }
+
+        if(isOpX<MOD>(e))
+        {
+          return mknary<BUREM>(n_args);
         }
 
         std::cerr << "Case not covered when translating operation from LIA to BV " << *e << std::endl;

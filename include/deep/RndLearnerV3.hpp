@@ -1148,8 +1148,11 @@ namespace ufo
         assignPrioritiesForLearned();
         if (checkAllLemmas())
         {
-          outs () << "Success after bootstrapping\n";
-          printSolution();
+          if (printLog >= 1)
+          {
+            outs() << "Success after bootstrapping\n";
+            printSolution();
+          }
           return true;
         }
       }
@@ -1185,8 +1188,11 @@ namespace ufo
               generalizeArrInvars(invNum, sf);
               if (checkAllLemmas())
               {
-                outs () << "Success after bootstrapping\n";
-                printSolution();
+                if(printLog >= 1)
+                {
+                  outs () << "Success after bootstrapping\n";
+                  printSolution();
+                }
                 return true;
               }
             }
@@ -1226,8 +1232,11 @@ namespace ufo
           assignPrioritiesForLearned();
           if (checkAllLemmas())
           {
-            outs () << "Success after bootstrapping\n";
-            printSolution();
+            if (printLog >= 1)
+            {
+              outs() << "Success after bootstrapping\n";
+              printSolution();
+            }
             return true;
           }
         }

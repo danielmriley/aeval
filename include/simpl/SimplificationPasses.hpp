@@ -73,27 +73,6 @@ namespace ufo
       {
         CHCs *copy = new CHCs(in);
         
-        {
-          outs() << "BV1ToBool\n";
-          outs() << "Vars: ";
-          for(auto& v: copy->invVars)
-          {
-            for(auto& a: v.second)
-            {
-              outs() << *a << " ";
-            }
-          }
-          outs() << "\n";
-          outs() << "Primed vars: ";
-          for(auto& vp: copy->invVarsPrime)
-          {
-            for(auto& a: vp.second)
-            {
-              outs() << *a << " ";
-            }
-          }
-        }
-
         res = std::unique_ptr<CHCs>(copy);
         std::unordered_set<Expr> bv1vars;
         auto isBV1 = [](Expr exp)
@@ -228,8 +207,6 @@ namespace ufo
         ITEVisitor v(smtutils);
         for (auto &chc : in.chcs)
         {
-          outs() << "ITE simplificaton passes.\n";
-          outs() << chc.body << "\n";
           chc.body = dagVisit(v, chc.body);
         }
       }
@@ -523,7 +500,6 @@ namespace ufo
         translateVariables(clause, translated);
 
         translateBody(clause, translated);
-
         translated.dstRelation = clause.dstRelation;
         translated.srcRelation = clause.srcRelation;
       }
@@ -547,7 +523,7 @@ namespace ufo
 
       Expr body = out.body;
       if(!containsOp<ITE>(body)) return;
-      outs() << "Simplifying ITEs in the body of the clause.\n";
+      // outs() << "Simplifying ITEs in the body of the clause.\n";
       // Remove redundant ITEs in the body.
       ExprSet conjs;
       getConj(body, conjs);

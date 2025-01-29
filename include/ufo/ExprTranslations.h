@@ -109,21 +109,23 @@ namespace expr
         }
         if (isOpX<BADD>(e))
         {
-          auto wit = bitwidths.find(e);
-          assert(wit != bitwidths.end());
-          int width = wit->second;
-          Expr bound = getUpperBoundForBitWidthExpr(width, e->getFactory());
           Expr plus = mk<PLUS>(e->left(), e->right());
-          return mk<ITE>(mk<GEQ>(plus, bound), mk<MINUS>(plus, bound), plus);
+          return plus;
+          // auto wit = bitwidths.find(e);
+          // assert(wit != bitwidths.end());
+          // int width = wit->second;
+          // Expr bound = getUpperBoundForBitWidthExpr(width, e->getFactory());
+          // return mk<ITE>(mk<GEQ>(plus, bound), mk<MINUS>(plus, bound), plus);
         }
         if (isOpX<BSUB>(e))
         {
           Expr minus = mk<MINUS>(e->left(), e->right());
-          auto wit = bitwidths.find(e);
-          assert(wit != bitwidths.end());
-          int width = wit->second;
-          Expr bound = getUpperBoundForBitWidthExpr(width, e->getFactory());
-          return mk<ITE>(mk<LT>(minus, mkTerm(mpz_class(0), e->getFactory())), mk<PLUS>(minus, bound), minus);
+          return minus;
+          // auto wit = bitwidths.find(e);
+          // assert(wit != bitwidths.end());
+          // int width = wit->second;
+          // Expr bound = getUpperBoundForBitWidthExpr(width, e->getFactory());
+          // return mk<ITE>(mk<LT>(minus, mkTerm(mpz_class(0), e->getFactory())), mk<PLUS>(minus, bound), minus);
         }
         if (isOpX<BMUL>(e))
         {

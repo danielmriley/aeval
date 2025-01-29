@@ -64,11 +64,12 @@ namespace ufo
             outs() << "Decl: " << d << "\n";
         } 
         int invIndex = getVarIndex(invDecl, decls);
-        outs() << "InvIndex: " << invIndex << "\n";
         ExprSet llms = getlearnedLemmas(invIndex);
+
         if(printLog >= 3) outs() << "Got " << llms.size() << " lemmas\n";
         u.removeRedundantConjuncts(llms);
         if(printLog >= 3) outs() << "After removing redundant lemmas: " << llms.size() << "\n";
+        
         ExprSet llmsSimplified;
         for(auto& a : llms)
         {
@@ -751,6 +752,19 @@ namespace ufo
         }
       }
 
+      ExprSet getProjections(Expr fla)
+      {
+        ExprVector prjcts;
+        u.flatten(fla, prjcts, false, ruleManager.invVars[invDecl], keepQuantifiersRepl);
+        ExprSet res;
+        for (auto &a : prjcts)
+        {
+          res.insert(a);
+        }
+
+        return res;
+      }
+
       void printSolution(ExprMap llms, bool simplify = true)
       {
         for (int i = 0; i < decls.size(); i++)
@@ -1037,7 +1051,7 @@ namespace ufo
   // }
 
   //DR: A rewrite of the solve function to use the new BitHorn class.
-  inline void solve(string smt, bool spacer, bool serialize, int printLog = 0)
+  inline void solve(string smt, bool spacer, bool horn, bool serialize, int printLog = 0)
   {
     const unsigned timeout_seconds = 5;
     const unsigned timeout_milisecs = timeout_seconds * 1000; // in miliseconds
@@ -1125,7 +1139,7 @@ namespace ufo
       exit(0);
     }
 
-    current->serialize(false);
+    current->serialize(horn);
     // exit(0);
     CHCs liaRuleManager(m_efac, z3, printLog);
     liaRuleManager.parse("chc.smt2");
@@ -1138,12 +1152,18 @@ namespace ufo
     // MB: First try to find some useful invariants with FreqHorn
     BitHorn liaSyst(liaRuleManager, printLog);
     liaSyst.setUp();
-    if (printLog >= 3)
-      std::cout << "Running guessAndSolve\n"
-                << std::endl;
+
+    if (printLog >= 3) std::cout << "Running guessAndSolve\n"<< std::endl;
     const bool invariantFound = liaSyst.synth(1000); // MB: not necessarily safe invariant!
-    if (printLog >= 3)
-      outs() << "guessAndSolve finished.." << std::endl;
+    if (printLog >= 3) outs() << "guessAndSolve finished.." << std::endl;
+
+    // Testing out flatten for projections.
+    // ExprSet proj = liaSyst.getProjections(liaRuleManager.chcs[1].body);
+    // for(auto& a: proj)
+    // {
+    //   outs() << "Projection: " << *a << '\n';
+    // }
+    // exit(0);
 
     if (invariantFound)
     {
@@ -1173,7 +1193,7 @@ namespace ufo
     for(auto& s: solution)
     {
       s.second = replaceAll(s.second, liaRuleManager.invVars[s.first], current->invVars[s.first]);  
-      outs() << *s.first << " - " << *s.second << '\n';
+      if (printLog >= 3) outs() << *s.first << " - " << *s.second << '\n';
     }
     // solution contains some invariants that can be used to strengthen the transition relation
     // Translate to BV and check if they are invariants there
@@ -1239,13 +1259,11 @@ namespace ufo
         }
         // BV invariant, let's add it to the transition relations, see if it simplifies anything
         ExprMap bvInvariants;
-        outs() << "get solution from bvsolver\n";
         for (auto &t : translated)
         {
           bvInvariants.insert(std::make_pair(t.first, t.second));
         }
-        // bvsolver.getSolution(bvInvariants);
-        outs() << "got solution from bvsolver\n";
+
         if (printLog >= 3)
         {
           std::cout << "BV Solution:\n";
@@ -1259,7 +1277,7 @@ namespace ufo
         bvsolver.setCandidates(bvInvariants);
         if (bvsolver.checkAllOver(true))
         {
-          std::cout << "\nSuccess! Safe Invariant found!" << std::endl;
+          std::cout << "Success! Safe Invariant found!" << std::endl;
           ExprMap bvInv;
           for(auto& inv: bvInvariants)
           {
@@ -1279,7 +1297,7 @@ namespace ufo
           outs() << "Strengthening with BV invariants\n";
         }
         lastBVSystem->strengthenWithInvariants(bvInvariants);
-        //              lastBVSystem->print();
+        if(printLog >= 2) lastBVSystem->print(true);
         auto bvsolution = lastBVSystem->solve(timeout_milisecs);
         if (!bvsolution.empty())
         {
@@ -1300,11 +1318,11 @@ namespace ufo
     {
       outs() << "LIA 2 BV:\n";
     }
-    passes::LIA2BVPass lia2bv;
+    passes::LIA2BVPass lia2bv(ruleManager, printLog);
     lia2bv(ruleManager);
     
     CHCs *current = lia2bv.getTransformed();
-    current->print(true);
+    if(printLog >= 1) current->print(true);
     current->serialize(horn);
     // ruleManager.print(true);
   }
@@ -1343,7 +1361,7 @@ namespace ufo
       ruleManager.print(true);
     
     // Run BitHorn...
-    solve(smt, false, serTrans, debug);
+    solve(smt, false, horn, serTrans, debug);
   }
 }
 
