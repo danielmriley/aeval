@@ -752,11 +752,29 @@ namespace ufo
         }
       }
 
+      // Write a BV version of QE.
+      // coreQE check for equisatisfiability with original formula.
+      // Start rewriting a QE function. Use simpleQE and coreQE.
+      // BV -> simpleQE
+      // BV2LIA -> coreQE
+      // LIA2BV -> check
       ExprSet getProjections(Expr fla)
       {
         ExprVector prjcts;
-        u.flatten(fla, prjcts, false, ruleManager.invVars[invDecl], keepQuantifiersRepl);
         ExprSet res;
+        // ExprSet vars;
+
+        // filter(fla, bind::IsConst(), inserter(vars, vars.begin()));
+        // AeValSolver ae(mk<TRUE>(m_efac), fla, vars, (printLog > 0));
+
+        // if(ae.solve())
+        // {
+        //   Expr pr = ae.getValidSubset();
+        //   if(printLog >= 3) outs() << "Valid subset: " << pr << "\n";
+        // }
+        // exit(0);
+
+        u.flatten(fla, prjcts, false, ruleManager.invVars[invDecl], keepQuantifiersRepl);
         for (auto &a : prjcts)
         {
           res.insert(a);
@@ -789,282 +807,13 @@ namespace ufo
         }
       }
   };
-  
-  // inline void solve(string smt, bool serTrans, int printLog = 0)
-  // {
-  //   const unsigned timeout_seconds = 5;
-  //   const unsigned timeout_milisecs = timeout_seconds * 1000; // in miliseconds
-  //   ExprFactory m_efac;
-  //   EZ3 z3(m_efac);
-  //   CHCs ruleManager(m_efac, z3);
-  //   ruleManager.parse(smt);
-  //   if (printLog >= 3)
-  //     outs() << "After parsing:\n";
-  //   ruleManager.print(true);
-  //   if (printLog >= 3)
-  //     for (auto &e : ruleManager.invVars)
-  //     {
-  //       outs() << "InvVars for " << *e.first << ":\n";
-  //       for (auto &v : e.second)
-  //         outs() << *v << " ";
-  //       outs() << "\n";
-  //     }
-  //   CHCs original(ruleManager);
-  //   ruleManager.simplifyCHCSystemSyntactically();
-  //   if (printLog >= 3)
-  //   {
-  //     outs() << "After simplification:\n";
-  //     ruleManager.print(true);
-  //   }
-  //   ruleManager.slice();
-  //   if (printLog >= 3)
-  //   {
-  //     outs() << "After slicing:\n";
-  //     ruleManager.print(true);
 
-  //   }
-  //   passes::BV1ToBool cleanup_pass;
-  //   cleanup_pass(ruleManager);
-  //   if (printLog >= 3)
-  //     outs() << "After cleanup:\n";
-  //   CHCs *current = cleanup_pass.getCHCs();
-  //      current->print(true);
-  //   passes::ITESimplificationPass itepass;
-  //   itepass(*current);
-  //   if (current->hasBV)
-  //   {
-  //     CHCs *lastBVSystem = current;
-  //     lastBVSystem->print(true);
-  //     passes::BV2LIAPass bv2lia;
-  //     bv2lia(*current);
-  //     current = bv2lia.getTransformed();
-  //     if (printLog >= 3)
-  //     {
-  //       outs() << "LIA translation:\n";
-  //       current->print(true);
-  //     }
-  //     // exit(0);
-  //     ExprMap solution;
-  //     if (serTrans)
-  //     {
-  //       current->serialize(false);
-  //       exit(0);
-  //     }
-  //     else
-  //     {
-  //       current->serialize(false);
-  //       // exit(0);
-
-  //       CHCs liaRuleManager(m_efac, z3, printLog);
-  //       liaRuleManager.parse("chc.smt2");
-  //       if (printLog >= 3)
-  //       {
-  //         outs() << "After parsing LIA system:\n";
-  //         liaRuleManager.print(true);
-  //       }
-  //       // MB: First try to find some useful invariants with FreqHorn
-  //       BitHorn liaSyst(liaRuleManager, printLog);
-  //       liaSyst.setUp();
-  //       if (printLog >= 3)
-  //         std::cout << "Running guessAndSolve\n" << std::endl;
-  //       // const bool invariantFound = liaSyst.synth(1000); // MB: not necessarily safe invariant!
-  //       const bool invariantFound = liaSyst.guessAndSolve(false); // MB: not necessarily safe invariant!
-  //       if(printLog >= 3) outs() << "guessAndSolve finished." << std::endl;
-  //       if (invariantFound)
-  //       {
-  //         liaSyst.getSolution(solution, false);
-  //         if(printLog >= 3) outs() << "Solution found" << std::endl;
-  //         if (liaSyst.checkQuery(solution))
-  //         {
-  //           // It is a safe invariant for LIA translation, no need to do additional work on LIA representation
-  //           if(printLog >= 3)
-  //           {
-  //             std::cout << "LIA Solution!" << std::endl;
-  //             outs() <<    "=============\n";
-  //             for(auto const& entry : solution) {
-  //               std::cout << *entry.first << " - " << *entry.second << '\n';
-  //             }
-  //             outs() << "=============\n";
-  //           }
-  //         }
-  //         else
-  //         {
-  //           // strengthen and run spacer?
-  //           current->strengthenWithInvariants(solution);
-  //           auto spacerSolution = current->solve(timeout_milisecs);
-  //           if (!spacerSolution.empty())
-  //           {
-  //             solution = spacerSolution; // MB: or combine them together?
-  //           }
-  //         }
-  //         // solution contains some invariants that can be used to strengthen the transition relation
-  //         // Translate to BV and check if they are invariants there
-  //         passes::BV2LIAPass::InvariantTranslator invariantTranslator = bv2lia.getInvariantTranslator();
-  //         ExprMap translated = invariantTranslator.translateInvariant(solution);
-          
-  //         if(printLog >= 3)
-  //         {
-  //           std::cout << "Translated solution:\n";
-  //           outs() <<    "=============\n";
-  //           for (auto const& entry : translated) {
-  //             std::cout << *entry.first << " - " << *entry.second << '\n';
-  //           }
-  //           outs() << "=============\n";
-  //         }
-          
-  //         {
-  //           map<Expr, ExprSet> candidates;
-  //           for (auto &s : translated)
-  //           {
-  //             ExprSet tmp;
-  //             getConj(s.second, tmp);
-  //             candidates.insert(std::make_pair(bind::fname(s.first), tmp));
-  //           }
-  //           if(printLog >= 3)
-  //           {
-  //             std::cout << "Candidates for BV system:\n";
-  //             outs() << "=============\n";
-  //             for (auto const& entry : candidates) {
-  //               std::cout << *entry.first << '\n';
-  //               for (auto const& expr : entry.second) {
-  //                 std::cout << *expr << '\n';
-  //               }
-  //             }
-  //             outs() << "=============\n";
-  //           }
-  //           BitHorn bvsolver(*lastBVSystem, printLog);
-  //           bvsolver.setUp();
-  //           bvsolver.setCandidates(candidates);
-  //           if(printLog >= 3)
-  //             std::cout << "Running filterAndSolve\n" << std::endl;
-  //           bool invariantsFound = bvsolver.filterAndSolve(candidates, false); // We do not care if the invariant is safe
-  //           if(printLog >= 3) outs() << "filterAndSolve finished" << std::endl;
-  //           if (invariantFound)
-  //           {
-  //             if(printLog >= 3)
-  //             {
-  //               outs() << "Invariant found.\n";
-  //               for(auto const& entry : candidates) {
-  //                 outs() << *entry.first << " - " << entry.second.size() << ":\n";
-  //                 for(auto const& expr : entry.second) {
-  //                   outs() << *expr << '\n';
-  //                 }
-  //                 outs() << "\n";
-  //               }
-  //             }
-  //             // BV invariant, let's add it to the transition relations, see if it simplifies anything
-  //             ExprMap bvInvariants;
-  //             outs() << "get solution from bvsolver\n";
-  //             for(auto& t: translated)
-  //             {
-  //               bvInvariants.insert(std::make_pair(t.first, t.second));
-  //             }
-  //             // bvsolver.getSolution(bvInvariants);
-  //             outs() << "got solution from bvsolver\n";
-  //             if (printLog >= 3)
-  //             {
-  //               std::cout << "BV Solution:\n";
-  //               outs() << "BV Solution Size: " << bvInvariants.size() << '\n';
-  //               for (auto const& entry : bvInvariants) {
-  //                 std::cout << *entry.first << " --> " << *entry.second << '\n';
-  //               }
-  //             }
-  //             // TEST if it is not safe invariant
-  //             bvsolver.setCandidates(bvInvariants);
-  //             if (bvsolver.checkAllOver(true))
-  //             {
-  //               std::cout << "Success! Safe Invariant found!" << std::endl;
-  //               for(auto const& entry : bvInvariants) {
-  //                 std::cout << *entry.first << " - " << *entry.second << '\n';
-  //               }
-  //               exit(0);
-  //             }
-  //             // Not Safe invariant, so strengthen and continue
-  //             if(printLog >= 3)
-  //             {
-  //               outs() << "Invariant not safe.\n";
-  //               outs() << "Strengthening with BV invariants\n";
-  //             }
-  //             lastBVSystem->strengthenWithInvariants(bvInvariants);
-  //             //              lastBVSystem->print();
-  //             auto bvsolution = lastBVSystem->solve(timeout_milisecs);
-  //             if (!bvsolution.empty())
-  //             {
-  //               std::cout << "BV solution found after strengthening with invariants from LIA\n";
-  //             }
-  //             else
-  //             {
-  //               std::cout << "UNKNOWN" << std::endl;
-  //             }
-  //           }
-  //           else
-  //           {
-  //             // No new invariant learnt
-  //             std::cout << "UNKNOWN" << std::endl;
-  //           }
-  //         }
-  //       }
-  //       else
-  //       {
-  //         std::cout << "Guess and solve failed!" << std::endl;
-  //         // TODO: counterexample (using liaSyst.solveIncrementally)
-  //         exit(0);
-  //       }
-  //       exit(0);
-  //     }
-  //     if (!solution.empty())
-  //     {
-  //              std::cout << "Solution in LIA found!\n";
-  //              for (auto const& entry : solution) {
-  //                std::cout << *entry.first << " - " << *entry.second << '\n';
-  //              }
-  //       auto invariantTranslator = bv2lia.getInvariantTranslator();
-  //       auto translated = invariantTranslator.translateInvariant(solution);
-  //              std::cout << "Translated solution:\n";
-  //              for (auto const& entry : translated) {
-  //                std::cout << *entry.first << " - " << *entry.second << '\n';
-  //              }
-  //       auto originalSol = cleanup_pass.getInvariantTranslation().getOriginalSolution(translated);
-  //       std::map<Expr, ExprSet> candidates;
-  //       for (auto &s : originalSol)
-  //       {
-  //         ExprSet tmp;
-  //         getConj(s.second, tmp);
-  //         candidates.insert(std::make_pair(bind::fname(s.first), tmp));
-  //         //          std::cout << *bind::fname(s.first) << " - " << *s.second << std::endl;
-  //       }
-  //       BitHorn nonlin(original, printLog);
-  //       if (nonlin.filterAndSolve(candidates))
-  //       {
-  //         std::cout << "Solved!\n";
-  //       }
-  //       else
-  //       {
-  //         std::cout << "Some part of invariant does not work\n";
-  //       }
-  //     }
-  //     else
-  //     {
-  //       std::cout << "LIA Spacer found counterexample" << std::endl;
-  //     }
-  //   }
-  // }
-
-  //DR: A rewrite of the solve function to use the new BitHorn class.
-  inline void solve(string smt, bool spacer, bool horn, bool serialize, int printLog = 0)
+  void performBV2LIATranslation(CHCs &ruleManager, bool horn, bool serialize, 
+    passes::BV1ToBool& cleanup_pass, CHCs& liaRuleManager, passes::BV2LIAPass& bv2lia, 
+    CHCs& current, CHCs& lastBVSystem, int printLog = 0)
   {
-    const unsigned timeout_seconds = 5;
-    const unsigned timeout_milisecs = timeout_seconds * 1000; // in miliseconds
     ExprFactory m_efac;
     EZ3 z3(m_efac);
-    CHCs ruleManager(m_efac, z3);
-    ruleManager.parse(smt);
-    if (printLog >= 3)
-    {
-      outs() << "After parsing:\n";
-      ruleManager.print(true);
-    }
-
     CHCs original(ruleManager);
     ruleManager.simplifyCHCSystemSyntactically();
     if (printLog >= 3)
@@ -1078,53 +827,54 @@ namespace ufo
       outs() << "After slicing:\n";
       ruleManager.print(true);
     }
-    
-    passes::BV1ToBool cleanup_pass;
-    cleanup_pass(ruleManager);
-    if (printLog >= 3) outs() << "After cleanup:\n";
 
-    CHCs *current = cleanup_pass.getCHCs();
+    cleanup_pass(ruleManager);
+    if (printLog >= 3)
+      outs() << "After cleanup:\n";
+
+    current = cleanup_pass.getCHCs();
     if (printLog >= 3)
     {
       outs() << "After cleanup pass:\n";
-      current->print(true);
+      current.print(true);
     }
 
     passes::ITESimplificationPass itepass;
-    itepass(*current);
-    
-    assert(current->hasBV);
+    itepass(current);
 
-    CHCs *lastBVSystem = current;
-    if(printLog >= 3)
+    assert(current.hasBV);
+
+    lastBVSystem = current;
+    if (printLog >= 3)
     {
       outs() << "Last BV system:\n";
-      lastBVSystem->print(true);
+      lastBVSystem.print(true);
     }
-    passes::BV2LIAPass bv2lia;
-    bv2lia(*current);
-    current = bv2lia.getTransformed();
-  
+
+    bv2lia(current);
+    CHCs *intermediary = bv2lia.getTransformed();
+    current = *intermediary;
+
     if (printLog >= 3)
     {
       outs() << "LIA translation:\n";
-      current->print(true);
+      current.print(true);
     }
-    if (printLog >= 5) 
+    if (printLog >= 5)
     {
-      outs() << "decls: " << current->decls.size() << '\n';
-      for(auto& a : current->decls)
+      outs() << "decls: " << current.decls.size() << '\n';
+      for (auto &a : current.decls)
         outs() << a << '\n';
 
       outs() << "Vars: ";
-      for(auto& a : current->invVars)
+      for (auto &a : current.invVars)
       {
-        for(auto& b : a.second)
+        for (auto &b : a.second)
           outs() << *b << ' ';
       }
 
       outs() << "Vars prime: ";
-      for (auto &a : current->invVarsPrime)
+      for (auto &a : current.invVarsPrime)
       {
         for (auto &b : a.second)
           outs() << *b << ' ';
@@ -1132,22 +882,76 @@ namespace ufo
       }
     }
 
-    ExprMap solution;
     if (serialize)
     {
-      current->serialize(false);
+      current.serialize(false);
       exit(0);
     }
 
-    current->serialize(horn);
-    // exit(0);
-    CHCs liaRuleManager(m_efac, z3, printLog);
+    current.serialize(horn);
+
+    
     liaRuleManager.parse("chc.smt2");
-    if(printLog >= 3)
+    if (printLog >= 3)
     {
       outs() << "After parsing LIA system:\n";
       liaRuleManager.print(true);
     }
+  }
+
+  void qeForLemmas(CHCs& lastBVSystem, int printLog)
+  {
+    Expr qeRes = simpleQE(lastBVSystem.chcs[1].body, lastBVSystem.chcs[1].dstVars);
+    ExprSet qeConjs;
+    getConj(qeRes, qeConjs);
+    if(printLog >= 3)
+    {
+      outs() << "QE result: " << *qeRes << '\n';
+      outs() << "Conjuncts: " << qeConjs.size() << '\n';
+      for(auto& a: qeConjs)
+      {
+        outs() << *a << '\n';
+      }
+    }
+
+    // now do some translations to perform QE in LIA.
+    ExprFactory m_efac;
+    EZ3 z3(m_efac);
+    passes::BV2LIAPass bv2lia;
+    CHCs current(m_efac, z3, printLog);
+    CHCs liaRuleManager(m_efac, z3, printLog);
+    passes::BV1ToBool cleanup_pass;
+    performBV2LIATranslation(lastBVSystem, false, false, cleanup_pass,
+      liaRuleManager, bv2lia, current, lastBVSystem, printLog);
+
+    for(auto& e: qeConjs)
+    {
+      passes::BV2LIAPass::TranslationResult result = bv2lia.translateGeneralExpression(e);
+    }
+  }
+
+  //DR: A rewrite of the solve function to use the new BitHorn class.
+  inline void solve(string smt, bool spacer, bool horn, bool serialize, int printLog = 0)
+  {
+    const unsigned timeout_seconds = 5;
+    const unsigned timeout_milisecs = timeout_seconds * 1000; // in miliseconds
+    ExprFactory m_efac;
+    EZ3 z3(m_efac);
+    CHCs ruleManager(m_efac, z3, printLog);
+    ruleManager.parse(smt);
+    if (printLog >= 3)
+    {
+      outs() << "After parsing:\n";
+      ruleManager.print(true);
+    }
+
+    ExprMap solution; passes::BV2LIAPass bv2lia;
+    CHCs current(m_efac, z3, printLog);
+    CHCs lastBVSystem(m_efac, z3, printLog);
+    CHCs liaRuleManager(m_efac, z3, printLog);
+    passes::BV1ToBool cleanup_pass;
+    performBV2LIATranslation(ruleManager, horn, serialize, cleanup_pass,
+      liaRuleManager, bv2lia, current, lastBVSystem, printLog);
 
     // MB: First try to find some useful invariants with FreqHorn
     BitHorn liaSyst(liaRuleManager, printLog);
@@ -1192,7 +996,7 @@ namespace ufo
     }
     for(auto& s: solution)
     {
-      s.second = replaceAll(s.second, liaRuleManager.invVars[s.first], current->invVars[s.first]);  
+      s.second = replaceAll(s.second, liaRuleManager.invVars[s.first], current.invVars[s.first]);  
       if (printLog >= 3) outs() << *s.first << " - " << *s.second << '\n';
     }
     // solution contains some invariants that can be used to strengthen the transition relation
@@ -1233,7 +1037,12 @@ namespace ufo
         }
         outs() << "=============\n";
       }
-      BitHorn bvsolver(*lastBVSystem, printLog);
+
+      outs() << "Last BV System:\n";
+      lastBVSystem.print(true);
+
+      outs() << "Setting up BitHorn for BV run\n";
+      BitHorn bvsolver(lastBVSystem, printLog);
       bvsolver.setUp();
       bvsolver.setCandidates(candidates);
       if (printLog >= 3)
@@ -1261,7 +1070,7 @@ namespace ufo
         ExprMap bvInvariants;
         for (auto &t : translated)
         {
-          bvInvariants.insert(std::make_pair(t.first, t.second));
+          bvInvariants.insert(std::make_pair(t.first->left(), t.second));
         }
 
         if (printLog >= 3)
@@ -1296,9 +1105,28 @@ namespace ufo
           outs() << "Invariant not safe.\n";
           outs() << "Strengthening with BV invariants\n";
         }
-        lastBVSystem->strengthenWithInvariants(bvInvariants);
-        if(printLog >= 2) lastBVSystem->print(true);
-        auto bvsolution = lastBVSystem->solve(timeout_milisecs);
+        lastBVSystem.strengthenWithInvariants(bvInvariants);
+        if(printLog >= 2) lastBVSystem.print(true);
+
+        // Experiment with QE here.
+        qeForLemmas(lastBVSystem, printLog);
+        if (printLog >= 10) outs() << "We get here and fail\n";
+        ExprMap bvsolution = lastBVSystem.solve(timeout_milisecs);
+
+        // BitHorn bvsolver2(lastBVSystem, printLog);
+        // bvsolver2.setUp();
+        // bvsolver2.setCandidates(candidates);
+        // if (printLog >= 3)
+        //   std::cout << "Running filterAndSolve\n"
+        //             << std::endl;
+        // bool invariantsFound = bvsolver2.filterAndSolve(candidates, false);
+        // if (printLog >= 3)
+          outs() << "filterAndSolve finished" << std::endl;
+        // Here we have a partial solution but the BV system needs more invariants to prove safety.
+        // We need to try to learn more invariants from the LIA system and try again.
+        // This means doing another BV2LIA translation and invariant search.
+        // 
+        // auto bvsolution = lastBVSystem->solve(timeout_milisecs);
         if (!bvsolution.empty())
         {
           std::cout << "BV solution found after strengthening with invariants from LIA\n";

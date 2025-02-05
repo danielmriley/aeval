@@ -14,10 +14,10 @@
 
 (rule (=> 
     (and 
-	(inv x y len)
-        (< x len)
-	(= x1 (+ x 1))
-	(= y1 (+ y 2))
+    	(inv x y len)
+      (< x len)
+      (= x1 (+ x 1))
+      (= y1 (+ y 2))
     )
     (inv x1 y1 len)
   )

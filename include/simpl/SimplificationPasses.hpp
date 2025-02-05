@@ -347,6 +347,7 @@ namespace ufo
       CHCs *getTransformed() { return transformed.get(); }
 
       InvariantTranslator getInvariantTranslator() const;
+      TranslationResult translateGeneralExpression(Expr body);
 
     private:
       int debug = 0;
@@ -369,7 +370,6 @@ namespace ufo
       int getRangeMultiplier(Expr var);
       void mapVarToInt(Expr e);
       Expr translateVar(Expr var);
-      TranslationResult translateGeneralExpression(Expr body);
 
       static bool isBVVar(Expr e) { return isOpX<FAPP>(e) && isBVSort(e->first()->last()); }
       static bool isBVSort(Expr e) { return isOpX<BVSORT>(e); }

@@ -44,7 +44,7 @@ namespace ufo
 
   public:
 
-    AeValSolver (Expr _s, Expr _t, ExprSet &_v) :
+    AeValSolver (Expr _s, Expr _t, ExprSet &_v, bool _debug = false) :
     s(_s), t(_t), v(_v),
     efac(s->getFactory()),
     z3(efac),
@@ -52,7 +52,7 @@ namespace ufo
     u(efac),
     fresh_var_ind(0),
     partitioning_size(0),
-    debug(0)
+    debug(_debug)
     {
       filter (boolop::land(s,t), bind::IsConst (), back_inserter (stVars));
       getConj(t, tConjs);
@@ -107,6 +107,11 @@ namespace ufo
 
         getMBPandSkolem(m);
 
+        if(debug)
+        {
+          outs() << "MBP: " << *projections[partitioning_size] << "\n";
+        }
+
         smt.pop();
         smt.assertExpr(boolop::lneg(projections[partitioning_size++]));
         if (!smt.solve()) { res = false; break; }
@@ -134,8 +139,11 @@ namespace ufo
         ExprMap map;
         ExprSet lits;
         u.getTrueLiterals(pr, m, lits);
-//        pr = z3_qe_model_project_skolem (z3, m, exp, pr, map);
-        pr = z3_qe_model_project_skolem (z3, m, exp, conjoin(lits, efac), map);
+        // TODO: Try this.
+        // convert pr to LIA from BV.
+        // Check the formula for imprecision.
+        pr = z3_qe_model_project_skolem (z3, m, exp, pr, map);
+        // pr = z3_qe_model_project_skolem (z3, m, exp, conjoin(lits, efac), map);
         if (m.eval(exp) != exp) modelMap[exp] = mk<EQ>(exp, m.eval(exp));
         for (auto it = lits.begin(); it != lits.end(); ){
           if (contains(*it, exp)) ++it;

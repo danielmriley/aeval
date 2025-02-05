@@ -148,6 +148,72 @@ namespace ufo
       origVrs = r.origVrs;
     };
 
+    CHCs operator=(CHCs const r)
+    {
+      indeces = r.indeces;
+      failDecl = r.failDecl;
+      chcs = r.chcs;
+      allCHCs = r.allCHCs;
+      wtoCHCs = r.wtoCHCs;
+      dwtoCHCs = r.dwtoCHCs;
+      wtoDecls = r.wtoDecls;
+      decls = r.decls;
+      invVars = r.invVars;
+      invVarsPrime = r.invVarsPrime;
+      outgs = r.outgs;
+      cycleSearchDone = r.cycleSearchDone;
+      loopheads = r.loopheads;
+      cycles = r.cycles;
+      prefixes = r.prefixes;
+      acyclic = r.acyclic;
+      seqPoints = r.seqPoints;
+      hasArrays = r.hasArrays;
+      hasAnyArrays = r.hasAnyArrays;
+      hasBV = r.hasBV;
+      hasQuery = r.hasQuery;
+      debug = r.debug;
+      chcsToCheck1 = r.chcsToCheck1;
+      chcsToCheck2 = r.chcsToCheck2;
+      toEraseChcs = r.toEraseChcs;
+      glob_ind = r.glob_ind;
+      origVrs = r.origVrs;
+
+      return *this;
+    }
+
+    CHCs operator=(CHCs const *r)
+    {
+      indeces = r->indeces;
+      failDecl = r->failDecl;
+      chcs = r->chcs;
+      allCHCs = r->allCHCs;
+      wtoCHCs = r->wtoCHCs;
+      dwtoCHCs = r->dwtoCHCs;
+      wtoDecls = r->wtoDecls;
+      decls = r->decls;
+      invVars = r->invVars;
+      invVarsPrime = r->invVarsPrime;
+      outgs = r->outgs;
+      cycleSearchDone = r->cycleSearchDone;
+      loopheads = r->loopheads;
+      cycles = r->cycles;
+      prefixes = r->prefixes;
+      acyclic = r->acyclic;
+      seqPoints = r->seqPoints;
+      hasArrays = r->hasArrays;
+      hasAnyArrays = r->hasAnyArrays;
+      hasBV = r->hasBV;
+      hasQuery = r->hasQuery;
+      debug = r->debug;
+      chcsToCheck1 = r->chcsToCheck1;
+      chcsToCheck2 = r->chcsToCheck2;
+      toEraseChcs = r->toEraseChcs;
+      glob_ind = r->glob_ind;
+      origVrs = r->origVrs;
+
+      return *this;
+    }
+
     bool isFapp (Expr e)
     {
       if (isOpX<FAPP>(e))
@@ -1636,12 +1702,30 @@ namespace ufo
 
     void strengthenWithInvariants(ExprMap const &invariants)
     {
+      if(debug >= 2)
+      {
+        outs() << "Strengthening CHC system with invariants...\n";
+      }
+      if(debug >= 3)
+      {
+        outs() << "Invariants:\n";
+        for(auto const &inv : invariants)
+        {
+          outs() << "  " << *inv.first << " -> " << *inv.second << "\n";
+        }
+      }
+
       for (auto &chc : this->chcs)
       {
         // inspiration from check CHC
         ExprSet newBody;
         newBody.insert(chc.body);
         Expr rel = chc.srcRelation;
+        outs() << "rel: " << *rel << "\n";
+        if(rel == mk<TRUE>(m_efac) || chc.isQuery)
+        {
+          continue;
+        }
         ExprSet lms = {invariants.at(rel)};
         Expr substInvariants = replaceAll(conjoin(lms, m_efac), this->invVars[rel], chc.srcVars);
         getConj(substInvariants, newBody);
