@@ -124,10 +124,6 @@ namespace ufo
           {
             translateConsts(*arg);
           }
-          // Expr lhs = c->left();
-          // Expr rhs = c->right();
-          // if (lhs != NULL) translateConsts(lhs);
-          // if (rhs != NULL) translateConsts(rhs);
         }
       }
 
@@ -276,14 +272,26 @@ namespace ufo
           ExprVector n_args;
           for(auto it = exp->args_begin(); it != exp->args_end(); ++it) {
             Expr arg = *it;
-            outs() << "arg: " << *arg << "\n";
-            if(isConstant(arg)) {
-              outs() << "adding const to n_args " << arg << "\n";
-              n_args.push_back(constMap.at(arg));
+            if(isConstant(arg))
+            {
+              auto isNegative = [](Expr e) -> bool
+              { return bind::IsHardIntConst{}(e) && getTerm<mpz_class>(e) < 0; };
+              if (isNegative(arg))
+              {
+                outs() << "Neg arg: " << arg << std::endl;
+                outs() << "Neg first: " << arg->first() << std::endl;
+                outs() << "Neg left: " << arg->left() << std::endl;
+                outs() << "Neg right: " << arg->right() << std::endl;
+                Expr negOne = bv::bvnum(getTerm<mpz_class>(arg), bitwidth, exp->getFactory());
+                n_args.push_back(negOne);
+              }
+              else
+              {
+                n_args.push_back(constMap.at(arg));
+              }
             }
             else if(isOpX<UN_MINUS>(arg))
             {
-              outs() << "arg->first(): " << *arg->first() << "\n";
               Expr negOne = bv::bvnum(-1, bitwidth, exp->getFactory());
               n_args.push_back(mk<BMUL>(negOne, translateRecursively(arg->first())));
             } 
@@ -299,14 +307,17 @@ namespace ufo
             { return bind::IsHardIntConst{}(e) && getTerm<mpz_class>(e) == -1; };
             if (isMinusOne(left))
             {
+              outs() << "Minus one right" << std::endl;
               return bv::bvneg(translateRecursively(right));
             }
             if (isMinusOne(right))
             {
+              outs() << "Minus one left" << std::endl;
               return bv::bvneg(translateRecursively(left));
             }
           }
 
+          outs() << "Translating operation: " << *exp << std::endl;
           Expr res = translateOperation(exp, n_args);
           return res;
         }
@@ -322,6 +333,7 @@ namespace ufo
           return mk<ITE>(cond, then, els);
         }
 
+        outs() << "Looking for: " << exp << std::endl;
         Expr bvVar = variableMap[exp];
         if(bvVar != NULL) {
           return bvVar;

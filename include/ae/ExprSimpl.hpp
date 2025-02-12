@@ -1737,6 +1737,8 @@ namespace ufo
       {
         Expr e1 = e->left();
         Expr e2 = e->right();
+        outs() << "Checking bitwidths: ";
+        outs() << "" << e1 << " " << e2 << "\n";
         assert(bitwidths.find(e1) != bitwidths.end() && bitwidths.find(e2) != bitwidths.end() && bitwidths[e1] == bitwidths[e2]);
 
         bitwidths[e] = bitwidths[e1];
