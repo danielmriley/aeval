@@ -884,6 +884,95 @@ namespace ufo {
     {
       if (debug >= 4)
         outs() << "...Inferring...\n";
+
+      ExprVector inferSeeds;
+      // ExprSet tmp;
+      // Expr phi = ev[0];
+      // getConj(phi,tmp);
+
+      // for(auto& d: tmp)
+      // {
+      //   if (isOpX<EQ>(d))
+      //   {
+      //     inferSeeds.push_back(mk<GEQ>(d->left(), d->right()));
+      //     inferSeeds.push_back(mk<LEQ>(d->left(), d->right()));
+      //     if(true /*Put a CLI flag here*/)
+      //     {
+      //       ExprSet replSet;
+      //       Expr repl = replaceAll(ev[0], d->left(), d->right());
+      //       repl = simplifyArithm(repl);
+      //       getConj(repl, replSet);
+      //       inferSeeds.insert(inferSeeds.end(), replSet.begin(), replSet.end());
+      //       replSet.clear();
+
+      //       repl = replaceAll(ev[0], d->right(), d->left());
+      //       repl = simplifyArithm(repl);
+      //       getConj(repl, replSet);
+      //       inferSeeds.insert(inferSeeds.end(), replSet.begin(), replSet.end());
+      //       if(debug >= 3)
+      //         outs() << "inferSeeds is now: " << conjoin(inferSeeds, m_efac) << "\n";
+      //     }
+      //   }
+      //   else if (isOpX<NEQ>(d))
+      //   {
+      //     inferSeeds.push_back(mk<GT>(d->left(), d->right()));
+      //     inferSeeds.push_back(mk<LT>(d->left(), d->right()));
+      //     if (true /*Put a CLI flag here*/)
+      //     {
+      //       ExprSet replSet;
+      //       Expr repl = replaceAll(ev[0], d->left(), d->right());
+      //       repl = simplifyArithm(repl);
+      //       getConj(repl, replSet);
+      //       inferSeeds.insert(inferSeeds.end(), replSet.begin(), replSet.end());
+      //       replSet.clear();
+
+      //       repl = replaceAll(ev[0], d->right(), d->left());
+      //       repl = simplifyArithm(repl);
+      //       getConj(repl, replSet);
+      //       inferSeeds.insert(inferSeeds.end(), replSet.begin(), replSet.end());
+      //       if (debug >= 3) 
+      //         outs() << "inferSeeds is now: " << conjoin(inferSeeds, m_efac) << "\n";
+      //     }
+      //   }
+      //   else
+      //   {
+      //     inferSeeds.push_back(d);
+      //   }
+      // }
+      // inferred.insert(inferSeeds.begin(), inferSeeds.end());
+
+      // for (int i = 1; i < ev.size(); i++)
+      // {
+      //   Expr c = ev[i];
+      //   c = simplifyArithm(c);
+      //   c = u.removeRedundantConjuncts(c);
+      //   // Count how often this message shows up and in how many benchmarks.
+      //   // Add a column in the spreadsheet for this.
+      //   if (debug >= 3 && isOpX<AND>(c))
+      //   {
+      //     outs() << "conjunctive infer " << c << "\n";
+      //   }
+
+      //   for (auto itr = inferred.begin(); itr != inferred.end();)
+      //   {
+      //     if (!u.implies(c, *itr) || (imp && u.implies(*itr, c)))
+      //     {
+      //       if (debug >= 4)
+      //         outs() << "  Erasing: " << *itr << "\n";
+      //       itr = inferred.erase(itr);
+      //     }
+      //     else
+      //       itr++;
+      //   }
+        
+      //   if (debug >= 4)
+      //   {
+      //     outs() << "Current inferred:\n";
+      //     pprint(inferred, 2);
+      //     outs() << "\n";
+      //   }
+      // }
+
       for (int i = 0; i < ev.size(); i++)
       {
         Expr c = ev[i];
@@ -891,7 +980,6 @@ namespace ufo {
         c = u.removeRedundantConjuncts(c);
         if (debug >= 4)
           outs() << "  c: " << c << "\n";
-        ExprVector inferSeeds;
         // Count how often this message shows up and in how many benchmarks.
         // Add a column in the spreadsheet for this.
         if(debug >= 3 && isOpX<AND>(c))
@@ -899,28 +987,28 @@ namespace ufo {
           outs() << "conjunctive infer " << c << "\n";
         }
         // Should this run after i == 0? I don't think so...
-        ExprSet tmp;
-        getConj(c, tmp);
-        for(auto& d: tmp)
-        {
-          if (isOpX<EQ>(d))
-          {
-            inferSeeds.push_back(mk<GEQ>(d->left(), d->right()));
-            inferSeeds.push_back(mk<LEQ>(d->left(), d->right()));
-          }
-          else if (isOpX<NEQ>(d))
-          {
-            inferSeeds.push_back(mk<GT>(d->left(), d->right()));
-            inferSeeds.push_back(mk<LT>(d->left(), d->right()));          
-          }
-          else
-          {
-            inferSeeds.push_back(d);
-          }
-        }
 
         if (i == 0)
         {
+          ExprSet tmp;
+          getConj(c, tmp);
+          for(auto& t: tmp)
+          {
+            if (isOpX<EQ>(t))
+            {
+              inferSeeds.push_back(mk<GEQ>(t->left(), t->right()));
+              inferSeeds.push_back(mk<LEQ>(t->left(), t->right()));
+            }
+            else if (isOpX<NEQ>(t))
+            {
+              inferSeeds.push_back(mk<GT>(t->left(), t->right()));
+              inferSeeds.push_back(mk<LT>(t->left(), t->right()));          
+            }
+            else
+            {
+              inferSeeds.push_back(t);
+            }
+          }
           inferred.insert(inferSeeds.begin(), inferSeeds.end());
         }
         else
