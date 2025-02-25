@@ -1472,17 +1472,22 @@ namespace ufo
         enc_chc << "\n";
       }
 
+      ExprSet varAdded;
       for(auto & c : chcs)
       {
         bool added = false;
         for(auto & l: c.locVars)
         {
-          enc_chc << "(declare-var ";
-          u.print(l, enc_chc);
-          enc_chc << " ";
-          u.print(bind::typeOf(l), enc_chc);
-          enc_chc << ")\n";
-          added = true;
+          if(varAdded.find(l) == varAdded.end())
+          {
+            varAdded.insert(l);
+            enc_chc << "(declare-var ";
+            u.print(l, enc_chc);
+            enc_chc << " ";
+            u.print(bind::typeOf(l), enc_chc);
+            enc_chc << ")\n";
+            added = true;
+          }
         }
         if(added) enc_chc << "\n";
       }

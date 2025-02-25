@@ -627,6 +627,84 @@ namespace ufo
       return conjoin(cnjs, efac);
     }
 
+    Expr quantifierEliminationBV(Expr fla, ExprSet &qVars, bool existential = false)
+    {
+      if (qVars.empty())
+        return fla;
+
+      // Construct the quantified formula for reference
+      Expr quantified;
+      if (existential)
+      {
+        quantified = mknary<EXISTS>(qVars.begin(), qVars.end());
+        quantified = mk<EXISTS>(quantified, fla);
+      }
+      else
+      {
+        quantified = mknary<FORALL>(qVars.begin(), qVars.end());
+        quantified = mk<FORALL>(quantified, fla);
+      }
+
+      // Handle universal quantifiers via duality: ∀x. fla ≡ ¬∃x. ¬fla
+      if (!existential)
+      {
+        Expr neg_fla = mk<NEG>(fla);
+        ExprSet neg_qVars = qVars; // Copy qVars since it’s a reference
+        Expr result = quantifierEliminationBV(neg_fla, neg_qVars, true);
+        return mk<NEG>(result);
+      }
+
+      // For existential quantifiers (∃x. fla):
+      // 1. Gather all variables in fla
+      ExprSet allVars;
+      filter(fla, bind::IsConst(), inserter(allVars, allVars.begin()));
+
+      // 2. Identify free variables (variables not in qVars)
+      ExprSet freeVars;
+      for (auto &v : allVars)
+      {
+        if (qVars.find(v) == qVars.end())
+        {
+          freeVars.insert(v);
+        }
+      }
+
+      // 3. Check if the formula is satisfiable
+      smt.reset();
+      smt.assertExpr(fla);
+      boost::tribool res = smt.solve();
+      if (!res || indeterminate(res))
+      {
+        // If unsat, return false (or an unsat core if needed)
+        return mk<FALSE>(efac);
+      }
+
+      // 4. Project out quantified variables using the model
+      ExprVector constraints;
+      ZSolver<EZ3>::Model *model = getModelPtr();
+      if (model == nullptr)
+      {
+        // If no model is available, return the original formula as a fallback
+        return fla;
+      }
+
+      for (auto &v : freeVars)
+      {
+        Expr val = model->eval(v);
+        if (val && val != v)
+        {
+          constraints.push_back(mk<EQ>(v, val));
+        }
+      }
+
+      // 5. Return the conjunction of constraints over free variables
+      if (constraints.empty())
+      {
+        return mk<TRUE>(efac);
+      }
+      return conjoin(constraints, efac);
+    }
+
     void print (Expr e, std::ostream& out = outs())
     {
       if (isOpX<FORALL>(e) || isOpX<EXISTS>(e))

@@ -63,6 +63,9 @@ namespace ufo
           for(auto& d: decls)
             outs() << "Decl: " << d << "\n";
         } 
+
+        e.clear();
+        outs() << "e.size(): " << e.size() << "\n";
         int invIndex = getVarIndex(invDecl, decls);
         ExprSet llms = getlearnedLemmas(invIndex);
 
@@ -84,14 +87,15 @@ namespace ufo
             outs() << a << "\n";
         } 
         candidates[invDecl].insert(llms.begin(), llms.end());
-        for (auto &a : candidates)
-        {
-          ExprSet sol = a.second;
+        // for (auto &a : llms)
+        // {
+          ExprSet sol = llms;
           if (simplify) // we might need more lemmas from the solution (while generalizing later)
             u.removeRedundantConjuncts(sol);
           Expr tmp = simplifyArithm(conjoin(sol, m_efac));
-          e[a.first] = tmp;
-        }
+          e[invDecl] = tmp;
+        // }
+        outs() << "e.size(): " << e.size() << "\n";
       }
 
       bool checkCHC(HornRuleExt &hr, map<Expr, ExprSet> &annotations)
@@ -230,6 +234,8 @@ namespace ufo
         }
         return true;
       }
+
+      
 
       Expr quantifierElimination(Expr &cond, ExprSet &vars)
       {
@@ -899,9 +905,15 @@ namespace ufo
     }
   }
 
-  ExprSet qeForLemmas(CHCs &lastBVSystem, int printLog)
+  ExprSet qeFromLemmas(CHCs &lastBVSystem, SMTUtils &u, int printLog)
   {
-    Expr qeRes = simpleQE(lastBVSystem.chcs[1].body, lastBVSystem.chcs[1].dstVars);
+    ExprSet varSet;
+    for(auto& v: lastBVSystem.chcs[1].dstVars)
+    {
+      varSet.insert(v);
+    }
+    // Expr qeRes = simpleQE(lastBVSystem.chcs[1].body, lastBVSystem.chcs[1].dstVars);
+    Expr qeRes = u.quantifierEliminationBV(lastBVSystem.chcs[1].body, varSet);
     ExprSet qeConjs;
     getConj(qeRes, qeConjs);
     if(printLog >= 3)
@@ -984,7 +996,7 @@ namespace ufo
   }
 
   //DR: A rewrite of the solve function to use the new BitHorn class.
-  inline void solve(string smt, bool spacer, bool horn, bool serialize, int printLog = 0)
+  inline void solve(string smt, bool spacer, bool horn, bool serialize, SMTUtils& u, int printLog = 0)
   {
     const unsigned timeout_seconds = 5;
     const unsigned timeout_milisecs = timeout_seconds * 1000; // in miliseconds
@@ -1016,6 +1028,7 @@ namespace ufo
       liaSyst.setUp();
       liaSyst.setCandidates(candidates);
       candidates.clear();
+      solution.clear();
       if (printLog >= 3) std::cout << "Running guessAndSolve\n"<< std::endl;
       const bool invariantFound = liaSyst.synth(1000); // MB: not necessarily safe invariant!
       if (printLog >= 3) outs() << "guessAndSolve finished.." << std::endl;
@@ -1040,7 +1053,7 @@ namespace ufo
         s.second = replaceAll(s.second, liaRuleManager.invVars[s.first], current.invVars[s.first]);  
         if (printLog >= 3)
         {
-          outs() << "Solution: ";
+          outs() << "Solution after var replacement: ";
           outs() << *s.first << " - " << *s.second << '\n';
         } 
       }
@@ -1114,7 +1127,7 @@ namespace ufo
 
           // Experiment with QE here.
           ExprMap qeRes;
-          qeRes[*ruleManager.decls.begin()] = conjoin(qeForLemmas(lastBVSystem, printLog), m_efac);
+          qeRes[(*translated.begin()).first->left()] = conjoin(qeFromLemmas(lastBVSystem, u, printLog), m_efac);
 
           passes::BV2LIAPass::InvariantTranslator invariantTranslator = bv2lia.getInvariantTranslator();
           ExprMap qeTranslated = invariantTranslator.translateInvariant(qeRes);
@@ -1189,7 +1202,7 @@ namespace ufo
       ruleManager.print(true);
     
     // Run BitHorn...
-    solve(smt, false, horn, serTrans, debug);
+    solve(smt, false, horn, serTrans, u, debug);
   }
 }
 

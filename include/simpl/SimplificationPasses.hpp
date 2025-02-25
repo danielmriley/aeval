@@ -487,9 +487,19 @@ namespace ufo
 
     std::vector<HornRuleExt> BV2LIAPass::translateClauses(const std::vector<HornRuleExt> &originals)
     {
+      if(debug >= 2)
+      {
+        outs() << "=======================\n";
+        outs() << "= Translate BV to LIA =\n";
+        outs() << "=======================\n";
+      }
       std::vector<HornRuleExt> ret;
       for (const auto &clause : originals)
       {
+        if(debug >= 3)
+        {
+          outs() << "Translating: " << clause.body << "\n";
+        }
         ret.emplace_back();
         HornRuleExt &translated = ret.back();
         // set flags
@@ -500,6 +510,10 @@ namespace ufo
         translateVariables(clause, translated);
 
         translateBody(clause, translated);
+        if(debug >= 3)
+        {
+          outs() << "Translated body: " << translated.body << "\n";
+        }
         translated.dstRelation = clause.dstRelation;
         translated.srcRelation = clause.srcRelation;
       }
@@ -508,11 +522,11 @@ namespace ufo
 
       for(int i = 0; i < ret.size(); i++)
       {
-        if(debug >= 3) outs() << "Translated clause: " << *ret[i].body << "\n";
+        if(debug >= 3) outs() << "Translated clause: " << *ret[i].body << std::endl;
         HornRuleExt &translated = ret[i];
         HornRuleExt clause = originals[i];
         addRangeConstraints(clause, translated);
-        simplifyBody(translated);
+        // simplifyBody(translated);
       }
       return ret;
     }
@@ -526,19 +540,9 @@ namespace ufo
       // outs() << "Simplifying ITEs in the body of the clause.\n";
       // Remove redundant ITEs in the body.
       ExprSet conjs;
-      getConj(body, conjs);
       ExprSet ites, nonites;
-      for (auto &c : conjs)
-      {
-        if (containsOp<ITE>(c))
-        {
-          ites.insert(c);
-        }
-        else
-        {
-          nonites.insert(c);
-        }
-      }
+      getConj(body, conjs);
+      getITEs(body, ites);
 
       ExprSet newBody;
       for(auto &ite : ites) {
@@ -646,10 +650,13 @@ namespace ufo
         Expr varDecl = var->first();
         assert(bind::isFdecl(varDecl));
         Expr varType = bind::type(varDecl);
+
         if (!isBVSort(varType))
         {
           continue;
         }
+        // DR: There is an issue here where the value can't be found due to ITE.
+        // (_FH_3+ite(_FH_2>=5000, 1, 0))
         int width = bv::width(varType);
         auto it = variableMap.find(var);
         assert(it != variableMap.end());
@@ -717,6 +724,7 @@ namespace ufo
         if (bind::isFdecl(predicate))
         {
           auto it = declsMap.find(predicate);
+          outs() << "Predicate: " << *predicate << "\n";
           assert(it != declsMap.end());
           translatedPredicate = it->second;
         }

@@ -223,11 +223,21 @@ namespace ufo
     for (unsigned i = 0; i < a->arity(); i++)
       getArrInds(a->arg(i), inds);
   }
-
+  
   inline static void getITEs (Expr a, ExprVector &ites)
   {
     if (isOpX<ITE>(a)){
       ites.push_back(a);
+    } else {
+      for (unsigned i = 0; i < a->arity(); i++)
+        getITEs(a->arg(i), ites);
+    }
+  }
+  
+  inline static void getITEs (Expr a, ExprSet &ites)
+  {
+    if (isOpX<ITE>(a)){
+      ites.insert(a);
     } else {
       for (unsigned i = 0; i < a->arity(); i++)
         getITEs(a->arg(i), ites);
