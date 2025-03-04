@@ -6,6 +6,7 @@
 #include "RndLearnerV4.hpp"
 #include "ufo/ExprTranslations.h"
 #include "simpl/SimplificationPasses.hpp"
+#include "deep/LIA2BV2.hpp"
 
 using namespace std;
 using namespace boost;
@@ -1168,6 +1169,68 @@ namespace ufo
     // ruleManager.print(true);
   }
 
+  // Test function for LIA2BV2 translations
+  inline void testLIA2BV2Translations(ExprFactory &efac, int debug = 0)
+  {
+    // Create a LIA2BV2 translator instance
+    passes::LIA2BV2 translator(debug);
+
+    // Test different types of expressions
+    std::vector<std::pair<std::string, Expr>> testCases;
+
+    // Create variables for tests
+    Expr x = bind::intConst(mkTerm<string>("x", efac));
+    Expr y = bind::intConst(mkTerm<string>("y", efac));
+    Expr z = bind::intConst(mkTerm<string>("z", efac));
+
+    // Simple arithmetic
+    testCases.emplace_back("x + y", mk<PLUS>(x, y));
+    testCases.emplace_back("x - y", mk<MINUS>(x, y));
+    testCases.emplace_back("x * y", mk<MULT>(x, y));
+    testCases.emplace_back("x / y", mk<IDIV>(x, y));
+
+    // Special cases with negative constants
+    testCases.emplace_back("x * (-1)", mk<MULT>(x, mkMPZ(-1, efac)));
+    testCases.emplace_back("(-1) * y", mk<MULT>(mkMPZ(-1, efac), y));
+    testCases.emplace_back("x - 5", mk<MINUS>(x, mkMPZ(5, efac)));
+    testCases.emplace_back("5 - x", mk<MINUS>(mkMPZ(5, efac), x));
+    testCases.emplace_back("-x", mk<UN_MINUS>(x));
+
+    // Complex expressions
+    testCases.emplace_back("2*x + 3*y - z",
+                           mk<MINUS>(
+                               mk<PLUS>(
+                                   mk<MULT>(mkMPZ(2, efac), x),
+                                   mk<MULT>(mkMPZ(3, efac), y)),
+                               z));
+
+    testCases.emplace_back("x <= y", mk<LEQ>(x, y));
+    testCases.emplace_back("x < y", mk<LT>(x, y));
+    testCases.emplace_back("x >= y", mk<GEQ>(x, y));
+    testCases.emplace_back("x > y", mk<GT>(x, y));
+    testCases.emplace_back("x = y", mk<EQ>(x, y));
+    testCases.emplace_back("x != y", mk<NEQ>(x, y));
+
+    // Boolean combinations
+    testCases.emplace_back("(x <= y) and (z > 0)",
+                           mk<AND>(
+                               mk<LEQ>(x, y),
+                               mk<GT>(z, mkMPZ(0, efac))));
+
+    // Run the tests
+    outs() << "===== LIA2BV2 Translation Tests =====\n";
+    for (const auto &test : testCases)
+    {
+      outs() << "LIA: " << test.first << "\n";
+      outs() << "     " << *test.second << "\n";
+
+      Expr translated = translator.translateExpression(test.second, 8); // Use 8-bit width for tests
+
+      outs() << "BV:  " << *translated << "\n\n";
+    }
+    outs() << "===== Translation Tests Complete =====\n";
+  }
+
   inline void learnInvariants5(string smt, unsigned maxAttempts, unsigned to,
                                bool freqs, bool aggp, int dat, int mut, bool doElim, bool doArithm,
                                bool doDisj, int doProp, int mbpEqs, bool dAllMbp, bool dAddProp,
@@ -1181,7 +1244,10 @@ namespace ufo
     CHCs ruleManager(m_efac, z3, debug - 2);
     ruleManager.parse(smt, doElim, doArithm);
 
-    if(ser)
+    testLIA2BV2Translations(m_efac, debug);
+    exit(0);
+
+    if (ser)
     {
       liaToBv(ruleManager, horn, debug);
       exit(0);
@@ -1204,6 +1270,9 @@ namespace ufo
     // Run BitHorn...
     solve(smt, false, horn, serTrans, u, debug);
   }
-}
 
-#endif
+  
+
+} // Missing closing namespace brace
+
+#endif // BITHORN_HPP

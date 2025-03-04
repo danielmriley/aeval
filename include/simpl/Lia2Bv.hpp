@@ -180,6 +180,8 @@ namespace ufo
           int bw = computeExpressionBitWidth(body);
           if (bw > bitwidth) bitwidth = bw;
         }
+
+        bitwidth < 4 ? bitwidth = 4 : bitwidth;
         if (debug >= 3)
         {
           outs() << "Max bit width found: " << bitwidth << "\n";
@@ -228,8 +230,15 @@ namespace ufo
           }
 
           // // Translate the body.
-          translated.body = translateRecursively(clause.body);
-          if(debug >= 4) outs() << "Translated body: " << *translated.body << "\n";
+          translated.body = translateRecursively(normalize(clause.body));
+          if(debug >= 4) {
+            outs() << "Translated body:\n";
+            ExprSet conjs;
+            getConj(translated.body, conjs);
+            for(auto &c : conjs) {
+              outs() << "    " << *c << "\n";
+            }
+          } 
           // Create new src and dst relations with bv type.
           translated.dstRelation = clause.dstRelation;
           translated.srcRelation = clause.srcRelation;
@@ -282,8 +291,8 @@ namespace ufo
                 outs() << "Neg first: " << arg->first() << std::endl;
                 outs() << "Neg left: " << arg->left() << std::endl;
                 outs() << "Neg right: " << arg->right() << std::endl;
-                Expr negOne = bv::bvnum(getTerm<mpz_class>(arg), bitwidth, exp->getFactory());
-                n_args.push_back(negOne);
+                Expr negOne = bv::bvnum(getTerm<mpz_class>(additiveInverse(arg)), bitwidth, exp->getFactory());
+                n_args.push_back(bv::bvneg(negOne));
               }
               else
               {
@@ -292,8 +301,10 @@ namespace ufo
             }
             else if(isOpX<UN_MINUS>(arg))
             {
-              Expr negOne = bv::bvnum(-1, bitwidth, exp->getFactory());
-              n_args.push_back(mk<BMUL>(negOne, translateRecursively(arg->first())));
+              // This needs to be handled differently. 
+              // We need to handle subtraction directly instead of using negative 1 or 2 or ...
+              Expr negOne = bv::bvnum(1, bitwidth, exp->getFactory());
+              n_args.push_back(mk<BMUL>(bv::bvneg(negOne), translateRecursively(arg->first())));
             } 
             else {
               n_args.push_back(translateRecursively(arg));
