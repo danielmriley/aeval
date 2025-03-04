@@ -1160,13 +1160,13 @@ namespace ufo
     {
       outs() << "LIA 2 BV:\n";
     }
-    passes::LIA2BVPass lia2bv(ruleManager, printLog);
+    // Replace old translator with new LIA2BV2 translator
+    passes::LIA2BV2 lia2bv(printLog);
     lia2bv(ruleManager);
     
     CHCs *current = lia2bv.getTransformed();
     if(printLog >= 1) current->print(true);
     current->serialize(horn);
-    // ruleManager.print(true);
   }
 
   // Test function for LIA2BV2 translations
@@ -1244,12 +1244,12 @@ namespace ufo
     CHCs ruleManager(m_efac, z3, debug - 2);
     ruleManager.parse(smt, doElim, doArithm);
 
-    testLIA2BV2Translations(m_efac, debug);
-    exit(0);
+    // testLIA2BV2Translations(m_efac, debug);
+    // exit(0);
 
     if (ser)
     {
-      liaToBv(ruleManager, horn, debug);
+      liaToBv(ruleManager, horn, debug); // This now uses LIA2BV2
       exit(0);
     }
 
