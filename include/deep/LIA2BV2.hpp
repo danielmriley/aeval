@@ -21,7 +21,6 @@ namespace ufo
       int bitwidth = 0;
       int debug = 0;
       
-      // Compute binary logarithm to determine required bit width
       unsigned int binaryLog(mpz_class v) {
         if(v < 0) {
           v *= -1;
@@ -34,12 +33,10 @@ namespace ufo
           }
           return res;
         }
-        // Fallback for large numbers
         size_t bitCount = mpz_sizeinbase(v.get_mpz_t(), 2);
         return static_cast<unsigned int>(bitCount);
       }
       
-      // Find the maximum bit width needed based on expressions
       int computeExpressionBitWidth(Expr e) {
         int maxBitWidth = 0;
         ExprSet conjs;
@@ -61,7 +58,6 @@ namespace ufo
             }
           }
           
-          // Recursively check operands
           for (auto arg = c->args_begin(); arg != c->args_end(); ++arg) {
             if (*arg) {
               int argBw = computeExpressionBitWidth(*arg);
@@ -72,17 +68,13 @@ namespace ufo
         return maxBitWidth;
       }
       
-      // Prepare constants for translation AND find variables
       void translateConsts(Expr e) {
         ExprSet conjs;
         getConj(e, conjs);
         
-        // Find and collect all variables in the expression - use multiple methods
         ExprSet vars;
         
-        // Collect variables using multiple strategies
         for (auto &c : conjs) {
-          // Find direct variable references
           ExprSet localVars;
           filter(c, bind::IsConst(), inserter(localVars, localVars.begin()));
           
@@ -91,7 +83,6 @@ namespace ufo
               outs() << "Found variable candidate: " << *v << "\n";
             }
             
-            // Check if it's an integer variable (various ways to detect)
             bool isIntVar = false;
             
             if (bind::isIntConst(v)) {
@@ -111,7 +102,6 @@ namespace ufo
               }
             }
             
-            // Add to variables if it's an integer variable
             if (isIntVar) {
               vars.insert(v);
             }
@@ -122,14 +112,12 @@ namespace ufo
           outs() << "Found " << vars.size() << " variables\n";
         }
         
-        // Map all variables to BV variables
         for (auto &var : vars) {
           if (variableMap.count(var) == 0) {
             if (debug >= 3) {
               outs() << "Creating BV var for: " << *var << "\n";
             }
             
-            // Create BV variable with appropriate bit width
             Expr bvVar = bv::bvConst(var, bitwidth);
             variableMap[var] = bvVar;
             
@@ -139,7 +127,6 @@ namespace ufo
           }
         }
         
-        // Now handle numeric constants
         for (auto &c : conjs) {
           if (debug >= 3) {
             outs() << "Converting constant: " << *c << "\n";
@@ -153,7 +140,6 @@ namespace ufo
             }
           }
           
-          // Recursively process all arguments
           for(auto arg = c->args_begin(); arg != c->args_end(); ++arg) {
             if (*arg) {
               translateConsts(*arg);
@@ -162,7 +148,6 @@ namespace ufo
         }
       }
       
-      // Translate LIA variables to BV variables
       ExprVector translateInvVars(const ExprVector &origVars, bool isInvVars = false) {
         ExprVector translatedVars;
         
@@ -171,7 +156,6 @@ namespace ufo
             outs() << "Translating variable: " << *var << "\n";
           }
           
-          // Create BV variable with appropriate bit width
           Expr bvVar = bv::bvConst(var, bitwidth);
           translatedVars.push_back(bvVar);
           
@@ -186,9 +170,7 @@ namespace ufo
         return translatedVars;
       }
       
-      // Translate individual LIA operation to BV operation with correct handling of signs
       Expr translateOperation(Expr e, ExprVector n_args) {
-        // Handle n-ary operations by recursive decomposition
         if (n_args.size() > 2) {
           ExprVector nn_args(n_args.begin() + 1, n_args.end());
           Expr subExpression = translateOperation(e, nn_args);
@@ -196,55 +178,47 @@ namespace ufo
           n_args.push_back(subExpression);
         }
         
-        // Comparison operations
         if (isOpX<EQ>(e)) return mknary<EQ>(n_args);
         if (isOpX<NEQ>(e)) return mknary<NEQ>(n_args);
-        if (isOpX<LEQ>(e)) return mknary<BULE>(n_args); // Unsigned comparison
-        if (isOpX<GEQ>(e)) return mknary<BUGE>(n_args); // Unsigned comparison
-        if (isOpX<LT>(e)) return mknary<BULT>(n_args);  // Unsigned comparison
-        if (isOpX<GT>(e)) return mknary<BUGT>(n_args);  // Unsigned comparison
+        if (isOpX<LEQ>(e)) return mknary<BULE>(n_args); 
+        if (isOpX<GEQ>(e)) return mknary<BUGE>(n_args); 
+        if (isOpX<LT>(e)) return mknary<BULT>(n_args);  
+        if (isOpX<GT>(e)) return mknary<BUGT>(n_args);  
         
-        // Arithmetic operations
         if (isOpX<PLUS>(e)) return mknary<BADD>(n_args);
         
-        // Special handling for subtraction to avoid negative intermediates
         if (isOpX<MINUS>(e)) {
           if (n_args.size() == 2) {
             return mk<BSUB>(n_args[0], n_args[1]);
           } else {
-            // Unary minus becomes a negation in BV context
             return bv::bvneg(n_args[0]);
           }
         }
         
         if (isOpX<MULT>(e)) return mknary<BMUL>(n_args);
-        if (isOpX<IDIV>(e)) return mknary<BUDIV>(n_args); // Unsigned division
-        if (isOpX<MOD>(e)) return mknary<BUREM>(n_args);  // Unsigned remainder
+        if (isOpX<IDIV>(e)) return mknary<BUDIV>(n_args); 
+        if (isOpX<MOD>(e)) return mknary<BUREM>(n_args);  
         
         if (debug >= 1) {
           outs() << "Warning: Unhandled operation in translation: " << *e << "\n";
         }
-        return e; // Return original as fallback
+        return e; 
       }
       
-      // Main recursive translation function
       Expr translateRecursively(Expr exp) {
         if (debug >= 3) outs() << "Translating expression: " << *exp << "\n";
         
-        // Handle constants
         auto isConstant = bind::IsHardIntConst{};
         if (isConstant(exp)) {
           if (constMap.count(exp) > 0) {
             return constMap.at(exp);
           }
-          // If constant wasn't preprocessed, create it now
           mpz_class val = getTerm<mpz_class>(exp);
           Expr bvConst = bv::bvnum(val, bitwidth, exp->getFactory());
           constMap[exp] = bvConst;
           return bvConst;
         }
         
-        // Handle Boolean operations
         if (isOpX<AND>(exp) || isOpX<OR>(exp) || isOpX<IFF>(exp)) {
           ExprVector n_args;
           for (auto it = exp->args_begin(); it != exp->args_end(); ++it) {
@@ -259,24 +233,20 @@ namespace ufo
           return mkNeg(translateRecursively(exp->first()));
         }
         
-        // Handle arithmetic and comparison operations
         if (isOp<ComparissonOp>(exp) || isOp<NumericOp>(exp)) {
           ExprVector n_args;
           
-          // Special handling for unary minus operation
           if (isOpX<UN_MINUS>(exp)) {
             Expr operand = translateRecursively(exp->first());
             return bv::bvneg(operand);
           }
           
-          // Special handling for MINUS operation with negative constant
           if (isOpX<MINUS>(exp) && exp->arity() == 2) {
             Expr left = translateRecursively(exp->left());
             Expr right = translateRecursively(exp->right());
             return mk<BSUB>(left, right);
           }
           
-          // Special handling for multiplication by negative numbers
           if (isOpX<MULT>(exp) && exp->arity() == 2) {
             auto isMinusOne = [](Expr e) -> bool { 
               return bind::IsHardIntConst{}(e) && getTerm<mpz_class>(e) == -1; 
@@ -293,7 +263,6 @@ namespace ufo
             }
           }
           
-          // Process arguments normally for other operations
           for (auto it = exp->args_begin(); it != exp->args_end(); ++it) {
             n_args.push_back(translateRecursively(*it));
           }
@@ -302,7 +271,7 @@ namespace ufo
         }
         
         if (bind::isBoolConst(exp)) {
-          return exp; // Boolean constants remain unchanged
+          return exp; 
         }
         
         if (isOpX<ITE>(exp)) {
@@ -312,7 +281,6 @@ namespace ufo
           return mk<ITE>(cond, then_branch, else_branch);
         }
         
-        // Check if we have already translated this variable
         if (variableMap.count(exp) > 0) {
           return variableMap.at(exp);
         }
@@ -321,17 +289,15 @@ namespace ufo
           outs() << "Warning: Unhandled expression in translation: " << *exp << "\n";
         }
         
-        return exp; // Return original as fallback
+        return exp; 
       }
       
-      // Find required bit width for all expressions in the system
       void findBitWidth(const std::vector<HornRuleExt> &origClauses) {
         for (const auto &clause : origClauses) {
           int bw = computeExpressionBitWidth(clause.body);
           if (bw > bitwidth) bitwidth = bw;
         }
         
-        // Ensure minimum reasonable bit width
         bitwidth = std::max(bitwidth, 4);
         
         if (debug >= 2) {
@@ -339,7 +305,6 @@ namespace ufo
         }
       }
       
-      // Translate CHC declarations
       ExprSet translateDeclarations(const ExprSet &originals) {
         ExprSet ret;
         
@@ -366,9 +331,7 @@ namespace ufo
         return ret;
       }
       
-      // Translate all CHC rules
       std::vector<HornRuleExt> translateClauses(const std::vector<HornRuleExt> &origClauses) {
-        // First pass: collect all constants
         for (const auto &clause : origClauses) {
           translateConsts(clause.body);
         }
@@ -380,18 +343,15 @@ namespace ufo
           }
         }
         
-        // Second pass: translate clauses
         std::vector<HornRuleExt> translatedClauses;
         for (const auto &clause : origClauses) {
           translatedClauses.emplace_back();
           HornRuleExt &translated = translatedClauses.back();
           
-          // Copy non-translatable properties
           translated.isQuery = clause.isQuery;
           translated.isFact = clause.isFact;
           translated.isInductive = clause.isInductive;
           
-          // Translate variables
           translated.srcVars = translateInvVars(clause.srcVars);
           translated.dstVars = translateInvVars(clause.dstVars);
           translated.locVars = translateInvVars(clause.locVars, true);
@@ -411,7 +371,6 @@ namespace ufo
             outs() << "Translated body: " << *translated.body << "\n";
           }
           
-          // Keep relations for now, they will be properly connected later
           translated.dstRelation = clause.dstRelation;
           translated.srcRelation = clause.srcRelation;
         }
@@ -428,18 +387,14 @@ namespace ufo
         transformed.reset(new CHCs{system.m_efac, system.m_z3});
         CHCs &bvSystem = *transformed;
         
-        // Reset state for a clean translation
         variableMap.clear();
         declsMap.clear();
         constMap.clear();
         
-        // Find appropriate bit width for the system
         findBitWidth(system.chcs);
         
-        // Copy fail declaration (used for queries)
         bvSystem.failDecl = system.failDecl;
         
-        // Translate invariant variables
         for (auto &v : system.invVars) {
           if (v.first == mk<TRUE>(v.first->getFactory())) continue;
           bvSystem.invVars[v.first] = translateInvVars(system.invVars.at(v.first), true);
@@ -458,10 +413,8 @@ namespace ufo
           }
         }
         
-        // Translate all clauses to BV domain
         bvSystem.chcs = translateClauses(system.chcs);
         
-        // Translate declarations last to ensure all types are properly inferred
         bvSystem.decls = translateDeclarations(system.decls);
         
         if (debug >= 1) {
@@ -469,13 +422,12 @@ namespace ufo
         }
       }
       
-      // Utility method for testing translations directly
       Expr translateExpression(const Expr &expr, int forceBitWidth = 0) {
         if (forceBitWidth > 0) {
           bitwidth = forceBitWidth;
         } else if (bitwidth == 0) {
           bitwidth = computeExpressionBitWidth(expr);
-          bitwidth = std::max(bitwidth, 4); // Ensure minimum reasonable bit width
+          bitwidth = std::max(bitwidth, 4);
         }
         
         translateConsts(expr);
@@ -486,31 +438,25 @@ namespace ufo
         if (debug > 0) 
             outs() << "Translating expression: " << *expr << "\n";
             
-        // First check if this is a variable we've already mapped
         if (variableMap.count(expr) > 0) {
             if (debug > 1) outs() << "Found variable in map: " << *expr << " -> " << *variableMap[expr] << "\n";
             return variableMap[expr];
         }
         
-        // Special handling for variable patterns
         if (bind::isIntConst(expr) || 
             (isOpX<FAPP>(expr) && expr->arity() > 0 && bind::isFdecl(expr->left()))) {
-            // This is likely a variable
             if (debug > 1) outs() << "Creating BV var for variable: " << *expr << "\n";
             Expr bvVar = bv::bvConst(expr, bitWidth);
             variableMap[expr] = bvVar;
             return bvVar;
         }
         
-        // Handle literals (MPZ)
         if (isOpX<MPZ>(expr)) {
             mpz_class val = getTerm<mpz_class>(expr);
             return bv::bvnum(val, bitWidth, expr->getFactory());
         }
         
-        // Handle operations
         if (expr->arity() >= 1) {
-            // Arithmetic operations
             if (isOpX<PLUS>(expr)) {
                 ExprVector args;
                 for (auto it = expr->args_begin(); it != expr->args_end(); ++it) {
@@ -541,13 +487,11 @@ namespace ufo
                 Expr arg = translateExpression(expr->arg(0), bitWidth);
                 return bv::bvneg(arg);
             }
-            // Comparison operations
             else if (isOpX<EQ>(expr)) {
                 return mk<EQ>(translateExpression(expr->arg(0), bitWidth), 
                             translateExpression(expr->arg(1), bitWidth));
             }
             else if (isOpX<NEQ>(expr)) {
-                // Fixed NEQ translation to use proper negation of equality
                 Expr arg0 = translateExpression(expr->arg(0), bitWidth);
                 Expr arg1 = translateExpression(expr->arg(1), bitWidth);
                 return mk<NEG>(mk<EQ>(arg0, arg1));
@@ -568,7 +512,6 @@ namespace ufo
                 return mk<BUGT>(translateExpression(expr->arg(0), bitWidth), 
                               translateExpression(expr->arg(1), bitWidth));
             }
-            // Boolean operations
             else if (isOpX<AND>(expr)) {
                 ExprVector args;
                 for (auto it = expr->args_begin(); it != expr->args_end(); ++it) {
@@ -584,11 +527,10 @@ namespace ufo
                 return mknary<OR>(args);
             }
             else if (bind::isBoolConst(expr)) {
-                return expr; // Boolean constants remain unchanged
+                return expr; 
             }
         }
         
-        // Last-ditch attempt to handle variables - try treating it as a variable if it's unrecognized
         if (expr->arity() == 0 || (isOpX<FAPP>(expr) && expr->arity() <= 2)) {
             if (debug > 1) outs() << "Treating as variable: " << *expr << "\n";
             

@@ -1527,7 +1527,12 @@ namespace ufo
           }
         }
         enc_chc << "(=> ";
-        u.print(mk<AND>(src, c.body), enc_chc);
+        // Normalize the source and body before printing to convert negative BV constants to subtraction
+        Expr normalizedSrc = u.normalizeNegativeBVConstants(src);
+        Expr normalizedBody = u.normalizeNegativeBVConstants(c.body);
+        outs() << "normalizedSrc: " << normalizedSrc << "\n";
+        outs() << "normalizedBody: " << normalizedBody << "\n";
+        u.print(mk<AND>(normalizedSrc, normalizedBody), enc_chc);
         if(c.isQuery) 
         {
           enc_chc << " " << dst << ")";
@@ -1535,7 +1540,9 @@ namespace ufo
         else
         {
           enc_chc << " ";
-          u.print(dst, enc_chc);
+          // Normalize the destination before printing
+          Expr normalizedDst = u.normalizeNegativeBVConstants(dst);
+          u.print(normalizedDst, enc_chc);
           enc_chc << ")";
         }
         enc_chc << ")\n\n";  

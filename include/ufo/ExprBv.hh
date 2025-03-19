@@ -249,6 +249,16 @@ namespace expr
                             mkTerm<unsigned>(low, v->efac()), v);
       }
 
+      inline Expr rotate_right(unsigned t, Expr v)
+      {
+        return mk<BROTATE_RIGHT>(mkTerm<unsigned>(t, v->efac()), v);
+      }
+
+      inline Expr rotate_left(unsigned t, Expr v)
+      {
+        return mk<BROTATE_LEFT>(mkTerm<unsigned>(t, v->efac()), v);
+      }
+
       /// high bit to extract
       inline unsigned high(Expr v) { return getTerm<unsigned>(v->arg(0)); }
       /// low bit to extract
@@ -442,6 +452,43 @@ namespace expr
         dagVisit(rw, e);
         return comp.getBitWidths();
       }
+
+      inline bool isBvOp(Expr e)
+      {
+        if (!e) return false;
+        
+        return isOpX<BADD>(e) || 
+               isOpX<BSUB>(e) || 
+               isOpX<BMUL>(e) || 
+               isOpX<BNEG>(e) || 
+               isOpX<BUGE>(e) || 
+               isOpX<BULE>(e) || 
+               isOpX<BUGT>(e) || 
+               isOpX<BULT>(e) || 
+               isOpX<BSGE>(e) || 
+               isOpX<BSLE>(e) || 
+               isOpX<BSGT>(e) || 
+               isOpX<BSLT>(e) || 
+               isOpX<BAND>(e) || 
+               isOpX<BOR>(e) || 
+               isOpX<BXOR>(e) || 
+               isOpX<BNOT>(e) || 
+               isOpX<BCONCAT>(e) || 
+               isOpX<BEXTRACT>(e) ||
+               isOpX<BUDIV>(e) || 
+               isOpX<BSDIV>(e) || 
+               isOpX<BUREM>(e) || 
+               isOpX<BSREM>(e) || 
+               isOpX<BSMOD>(e) || 
+               isOpX<BZEXT>(e) || 
+               isOpX<BSEXT>(e) || 
+               isOpX<BSHL>(e) || 
+               isOpX<BLSHR>(e) || 
+               isOpX<BASHR>(e) || 
+               isOpX<BOOL2BV>(e) || 
+               isBVComparison(e);
+      }
+
     }
 
     namespace bind

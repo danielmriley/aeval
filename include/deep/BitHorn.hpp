@@ -7,6 +7,7 @@
 #include "ufo/ExprTranslations.h"
 #include "simpl/SimplificationPasses.hpp"
 #include "deep/LIA2BV2.hpp"
+#include "ae/ExprSimplBv.hpp"
 
 using namespace std;
 using namespace boost;
@@ -822,7 +823,7 @@ namespace ufo
     ExprFactory m_efac;
     EZ3 z3(m_efac);
     CHCs original(ruleManager);
-    // ruleManager.simplifyCHCSystemSyntactically();
+    ruleManager.simplifyCHCSystemSyntactically();
     if (printLog >= 3)
     {
       outs() << "After simplification:\n";
@@ -1160,6 +1161,44 @@ namespace ufo
     {
       outs() << "LIA 2 BV:\n";
     }
+    for(auto& hr: ruleManager.chcs)
+    {
+      if(printLog >= 1)
+      {
+        outs() << "Original:\n";
+        outs() << hr.body << '\n';
+      }
+      ExprSet conjs;
+      getConj(hr.body, conjs);
+      ExprSet newConj;
+      ExprSet vars;
+      for(auto& c: conjs)
+      {
+        filter(c, bind::IsConst(), inserter(vars, vars.begin()));
+        keepOnly(vars, ruleManager.invVarsPrime[hr.srcRelation]);
+        for(auto& v: vars)
+        {
+          outs() << "Var: " << v << '\n';
+        }
+      }
+      for(auto& var: vars)
+      {
+        for(auto& c: conjs)
+        {
+          if(contains(c, var))
+          {
+            newConj.insert(isOpX<OR>(c) ? normalizeDisj(c, ruleManager.invVars[ruleManager.chcs[1].srcRelation]) : normalize(c));
+          }
+        }
+      }
+      outs() << "New conjuncts: " << newConj.size() << '\n';
+      for(auto& c: newConj)
+      {
+        outs() << c << '\n';
+      } 
+    }
+
+    // exit(0);
     // Replace old translator with new LIA2BV2 translator
     passes::LIA2BV2 lia2bv(printLog);
     lia2bv(ruleManager);
@@ -1167,68 +1206,6 @@ namespace ufo
     CHCs *current = lia2bv.getTransformed();
     if(printLog >= 1) current->print(true);
     current->serialize(horn);
-  }
-
-  // Test function for LIA2BV2 translations
-  inline void testLIA2BV2Translations(ExprFactory &efac, int debug = 0)
-  {
-    // Create a LIA2BV2 translator instance
-    passes::LIA2BV2 translator(debug);
-
-    // Test different types of expressions
-    std::vector<std::pair<std::string, Expr>> testCases;
-
-    // Create variables for tests
-    Expr x = bind::intConst(mkTerm<string>("x", efac));
-    Expr y = bind::intConst(mkTerm<string>("y", efac));
-    Expr z = bind::intConst(mkTerm<string>("z", efac));
-
-    // Simple arithmetic
-    testCases.emplace_back("x + y", mk<PLUS>(x, y));
-    testCases.emplace_back("x - y", mk<MINUS>(x, y));
-    testCases.emplace_back("x * y", mk<MULT>(x, y));
-    testCases.emplace_back("x / y", mk<IDIV>(x, y));
-
-    // Special cases with negative constants
-    testCases.emplace_back("x * (-1)", mk<MULT>(x, mkMPZ(-1, efac)));
-    testCases.emplace_back("(-1) * y", mk<MULT>(mkMPZ(-1, efac), y));
-    testCases.emplace_back("x - 5", mk<MINUS>(x, mkMPZ(5, efac)));
-    testCases.emplace_back("5 - x", mk<MINUS>(mkMPZ(5, efac), x));
-    testCases.emplace_back("-x", mk<UN_MINUS>(x));
-
-    // Complex expressions
-    testCases.emplace_back("2*x + 3*y - z",
-                           mk<MINUS>(
-                               mk<PLUS>(
-                                   mk<MULT>(mkMPZ(2, efac), x),
-                                   mk<MULT>(mkMPZ(3, efac), y)),
-                               z));
-
-    testCases.emplace_back("x <= y", mk<LEQ>(x, y));
-    testCases.emplace_back("x < y", mk<LT>(x, y));
-    testCases.emplace_back("x >= y", mk<GEQ>(x, y));
-    testCases.emplace_back("x > y", mk<GT>(x, y));
-    testCases.emplace_back("x = y", mk<EQ>(x, y));
-    testCases.emplace_back("x != y", mk<NEQ>(x, y));
-
-    // Boolean combinations
-    testCases.emplace_back("(x <= y) and (z > 0)",
-                           mk<AND>(
-                               mk<LEQ>(x, y),
-                               mk<GT>(z, mkMPZ(0, efac))));
-
-    // Run the tests
-    outs() << "===== LIA2BV2 Translation Tests =====\n";
-    for (const auto &test : testCases)
-    {
-      outs() << "LIA: " << test.first << "\n";
-      outs() << "     " << *test.second << "\n";
-
-      Expr translated = translator.translateExpression(test.second, 8); // Use 8-bit width for tests
-
-      outs() << "BV:  " << *translated << "\n\n";
-    }
-    outs() << "===== Translation Tests Complete =====\n";
   }
 
   inline void learnInvariants5(string smt, unsigned maxAttempts, unsigned to,
@@ -1242,11 +1219,14 @@ namespace ufo
     SMTUtils u(m_efac);
 
     CHCs ruleManager(m_efac, z3, debug - 2);
+    outs() << "Parsing\n\n";
     ruleManager.parse(smt, doElim, doArithm);
 
-    // testLIA2BV2Translations(m_efac, debug);
-    // exit(0);
-
+    if (debug >= 3)
+    {
+      outs() << "Original system:\n";
+      ruleManager.print(true);
+    }
     if (ser)
     {
       liaToBv(ruleManager, horn, debug); // This now uses LIA2BV2

@@ -705,6 +705,116 @@ namespace ufo
       return conjoin(constraints, efac);
     }
 
+    /**
+     * Normalize expressions containing negative bitvector constants
+     * to use subtraction operations instead of two's complement representation
+     */
+    Expr normalizeNegativeBVConstants(Expr e) {
+        if (isOpX<BIND>(e) && e->arity() == 2 && 
+            isOpX<MPZ>(e->arg(0)) && isOpX<BVSORT>(e->arg(1))) {
+            // This is a bitvector numeral
+            mpz_class val = getTerm<mpz_class>(e->arg(0));
+            if (val < 0) {
+                // Convert negative constant to subtraction of positive value
+                Expr sort = e->arg(1);
+                Expr posVal = mkTerm<mpz_class>(abs(val), e->getFactory());
+                Expr posConst = bv::bvnum(posVal, sort);
+                Expr zeroConst = bv::bvnum(mkTerm<mpz_class>(0, e->getFactory()), sort);
+                return mk<BSUB>(zeroConst, posConst);
+            }
+            return e;
+        } else if (e->arity() == 0) {
+            return e;
+        } else {
+            // Process children recursively
+            ExprVector args;
+            bool changed = false;
+            for (unsigned i = 0; i < e->arity(); i++) {
+                Expr newArg = normalizeNegativeBVConstants(e->arg(i));
+                args.push_back(newArg);
+                if (newArg != e->arg(i)) changed = true;
+            }
+            
+            // If no arguments changed, return the original expression
+            if (!changed) return e;
+            
+            // Create a new expression with the same operator but new arguments
+            // Handle binary operations
+            if (isOpX<BSUB>(e)) return mk<BSUB>(args[0], args[1]);
+            if (isOpX<BSDIV>(e)) return mk<BSDIV>(args[0], args[1]);
+            if (isOpX<BUDIV>(e)) return mk<BUDIV>(args[0], args[1]);
+            if (isOpX<BSREM>(e)) return mk<BSREM>(args[0], args[1]);
+            if (isOpX<BUREM>(e)) return mk<BUREM>(args[0], args[1]);
+            if (isOpX<BNEG>(e)) return mk<BNEG>(args[0]);
+            if (isOpX<BNOT>(e)) return mk<BNOT>(args[0]);
+            if (isOpX<BCONCAT>(e)) return mk<BCONCAT>(args[0], args[1]);
+            if (isOpX<BEXTRACT>(e)) return bv::extract(bv::high(e), bv::low(e), args[0]);
+            if (isOpX<BSEXT>(e)) return mk<BSEXT>(args[0], e->arg(1));
+            if (isOpX<BZEXT>(e)) return mk<BZEXT>(args[0], e->arg(1));
+            if (isOpX<BULE>(e)) return mk<BULE>(args[0], args[1]);
+            if (isOpX<BUGE>(e)) return mk<BUGE>(args[0], args[1]);
+            if (isOpX<BULT>(e)) return mk<BULT>(args[0], args[1]);
+            if (isOpX<BUGT>(e)) return mk<BUGT>(args[0], args[1]);
+            if (isOpX<BSLE>(e)) return mk<BSLE>(args[0], args[1]);
+            if (isOpX<BSGE>(e)) return mk<BSGE>(args[0], args[1]);
+            if (isOpX<BSLT>(e)) return mk<BSLT>(args[0], args[1]);
+            if (isOpX<BSGT>(e)) return mk<BSGT>(args[0], args[1]);
+            
+            // Handle nary operations by constructing them pairwise
+            if (isOpX<BADD>(e)) {
+                if (args.size() == 1) return args[0];
+                Expr result = args[0];
+                for (unsigned i = 1; i < args.size(); i++) {
+                    result = mk<BADD>(result, args[i]);
+                }
+                return result;
+            }
+            if (isOpX<BMUL>(e)) {
+                if (args.size() == 1) return args[0];
+                Expr result = args[0];
+                for (unsigned i = 1; i < args.size(); i++) {
+                    result = mk<BMUL>(result, args[i]);
+                }
+                return result;
+            }
+            if (isOpX<BAND>(e)) {
+                if (args.size() == 1) return args[0];
+                Expr result = args[0];
+                for (unsigned i = 1; i < args.size(); i++) {
+                    result = mk<BAND>(result, args[i]);
+                }
+                return result;
+            }
+            if (isOpX<BOR>(e)) {
+                if (args.size() == 1) return args[0];
+                Expr result = args[0];
+                for (unsigned i = 1; i < args.size(); i++) {
+                    result = mk<BOR>(result, args[i]);
+                }
+                return result;
+            }
+            if (isOpX<BXOR>(e)) {
+                if (args.size() == 1) return args[0];
+                Expr result = args[0];
+                for (unsigned i = 1; i < args.size(); i++) {
+                    result = mk<BXOR>(result, args[i]);
+                }
+                return result;
+            }
+            
+            // For non-BV operators
+            if (isOpX<AND>(e)) return mknary<AND>(args);
+            if (isOpX<OR>(e)) return mknary<OR>(args);
+            if (isOpX<NEG>(e)) return mk<NEG>(args[0]);
+            if (isOpX<EQ>(e)) return mk<EQ>(args[0], args[1]);
+            if (isOpX<NEQ>(e)) return mk<NEQ>(args[0], args[1]);
+            if (isOpX<ITE>(e)) return mk<ITE>(args[0], args[1], args[2]);
+            
+            // If we couldn't handle the operator, return the original expression
+            return e;
+        }
+    }
+
     void print (Expr e, std::ostream& out = outs())
     {
       if (isOpX<FORALL>(e) || isOpX<EXISTS>(e))
