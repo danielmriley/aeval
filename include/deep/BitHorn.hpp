@@ -1046,7 +1046,9 @@ namespace ufo
       if (!invariantFound)
       {
         outs() << "Synthesize failed\n";
-        exit(0);
+        outs() << "Strengthening with lemmas\n";
+        
+        // exit(0);
       }
       liaSyst.getSolution(solution,true);
 

@@ -489,9 +489,9 @@ namespace ufo
     {
       if(debug >= 2)
       {
-        outs() << "=======================\n";
-        outs() << "= Translate BV to LIA =\n";
-        outs() << "=======================\n";
+        outs() << "\n=======================\n";
+        outs() <<  "= Translate BV to LIA =\n";
+        outs() <<  "=======================\n";
       }
       std::vector<HornRuleExt> ret;
       for (const auto &clause : originals)
@@ -688,8 +688,21 @@ namespace ufo
         ExprVector translatedVars;
         for (const auto &var : vars)
         {
-          assert(variableMap.find(var) != variableMap.end());
-          translatedVars.push_back(variableMap.at(var));
+          outs() << "Searching for var: " << var << "\n";
+          outs() << "In:\n";
+          if(variableMap.empty()) outs() << "MAP EMPTY\n";
+          else 
+          {
+            for(auto& v: variableMap)
+            {
+              outs() << "var first: " << v.first << "\n";
+              outs() << "var second: " << v.second << ", ";
+              
+              outs() << "\n";
+            }
+          }
+          assert(this->variableMap.find(var) != this->variableMap.end());
+          translatedVars.push_back(this->variableMap.at(var));
         }
         res.insert(std::make_pair(predicate, translatedVars));
       }

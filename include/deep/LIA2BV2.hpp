@@ -148,6 +148,25 @@ namespace ufo
         }
       }
       
+      bool isBoolVar(Expr var) {
+        if (bind::isBoolConst(var)) {
+          if (debug >= 3) outs() << "  - Direct bool const\n";
+          return true;
+        }
+        else if (isOpX<FAPP>(var) && var->arity() > 0) {
+          Expr decl = var->left();
+          if (bind::isFdecl(decl)) {
+            for (unsigned i = 1; i < decl->arity(); i++) {
+              if (isOpX<BOOL_TY>(decl->arg(i))) {
+                if (debug >= 3) outs() << "  - FAPP with BOOL_TY\n";
+                return true;
+              }
+            }
+          }
+        }
+        return false;
+      }
+      
       ExprVector translateInvVars(const ExprVector &origVars, bool isInvVars = false) {
         ExprVector translatedVars;
         
@@ -156,7 +175,10 @@ namespace ufo
             outs() << "Translating variable: " << *var << "\n";
           }
           
-          Expr bvVar = bv::bvConst(var, bitwidth);
+          // Determine bitwidth based on variable type
+          int varBitwidth = isBoolVar(var) ? 1 : bitwidth;
+          
+          Expr bvVar = bv::bvConst(var, varBitwidth);
           translatedVars.push_back(bvVar);
           
           if (isInvVars) {
@@ -164,7 +186,7 @@ namespace ufo
           }
           
           if (debug >= 3) {
-            outs() << "Translated to BV var: " << *bvVar << "\n";
+            outs() << "Translated to BV var: " << *bvVar << " with width " << varBitwidth << "\n";
           }
         }
         return translatedVars;
@@ -314,7 +336,16 @@ namespace ufo
           ExprVector types;
           for (int i = 1; i < decl->arity(); ++i) {
             Expr arg = decl->arg(i);
-            Expr type = isOpX<INT_TY>(arg) ? bv::bvsort(bitwidth, arg->getFactory()) : arg;
+            Expr type;
+            
+            if (isOpX<INT_TY>(arg)) {
+              type = bv::bvsort(bitwidth, arg->getFactory());
+            } else if (isOpX<BOOL_TY>(arg)) {
+              type = bv::bvsort(1, arg->getFactory());
+            } else {
+              type = arg;
+            }
+            
             types.push_back(type);
           }
           
