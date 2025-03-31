@@ -192,41 +192,134 @@ namespace ufo
         return translatedVars;
       }
       
+      Expr wrapConstant(mpz_class val, ExprFactory &efac) {
+        Expr bvConst = bv::bvnum(val, bitwidth, efac);
+        constMap[bvConst] = bvConst;
+        return bvConst;
+      }
+
+      Expr makeNegativeConstant(mpz_class val, ExprFactory &efac) {
+        // Use subtraction from zero instead of bvneg
+        Expr zero = bv::bvnum(0, bitwidth, efac);
+        Expr posConst = bv::bvnum(val, bitwidth, efac);
+        return mk<BSUB>(zero, posConst);
+      }
+
+      Expr handleConstantMultiplication(mpz_class val, Expr other) {
+        if (val == -1) {
+          return bv::bvneg(other);
+        }
+        if (val < 0) {
+          // Convert -N*x directly to bvneg(bvmul(N,x)) instead of using subtraction
+          val = -val;
+          Expr posConst = bv::bvnum(val, bitwidth, other->getFactory());
+          return bv::bvneg(mk<BMUL>(posConst, other));
+        }
+        return mk<BMUL>(bv::bvnum(val, bitwidth, other->getFactory()), other);
+      }
+
+      Expr handleArithmeticTerm(Expr term) {
+        // Use bb::BVNEG for checking bit-vector negation
+        if (isOpX<BNEG>(term)) {
+          Expr zero = bv::bvnum(0, bitwidth, term->getFactory());
+          return mk<BSUB>(zero, term->arg(0));
+        }
+        return term;
+      }
+
       Expr translateOperation(Expr e, ExprVector n_args) {
+        if (n_args.size() == 0) return nullptr;
+        if (n_args.size() == 1) return n_args[0];
+        
         if (n_args.size() > 2) {
-          ExprVector nn_args(n_args.begin() + 1, n_args.end());
-          Expr subExpression = translateOperation(e, nn_args);
-          n_args.resize(1);
-          n_args.push_back(subExpression);
+          // Build operations in strict binary fashion left-to-right
+          ExprVector bin_args;
+          bin_args.push_back(n_args[0]);
+          
+          for (size_t i = 1; i < n_args.size(); i++) {
+            ExprVector pair = {bin_args[0], n_args[i]};
+            
+            if (isOpX<PLUS>(e)) {
+              // For addition, handle subtractions specially
+              if (isOpX<BSUB>(n_args[i]) && isOpX<MPZ>(n_args[i]->left()) &&
+                  getTerm<mpz_class>(n_args[i]->left()) == 0) {
+                bin_args[0] = mk<BSUB>(bin_args[0], n_args[i]->right());
+              } else {
+                bin_args[0] = mk<BADD>(bin_args[0], n_args[i]);
+              }
+            } else {
+              bin_args[0] = translateOperation(e, pair);
+            }
+          }
+          return bin_args[0];
+        }
+
+        // Now handle the binary case
+        if (isOpX<PLUS>(e)) {
+          // Special case: combining a term with a subtraction
+          if (isOpX<BSUB>(n_args[1]) && isOpX<MPZ>(n_args[1]->left()) &&
+              getTerm<mpz_class>(n_args[1]->left()) == 0) {
+            // Convert (bvadd x (bvsub 0 y)) to (bvsub x y)
+            return mk<BSUB>(n_args[0], n_args[1]->right());
+          }
+          return mk<BADD>(n_args[0], n_args[1]);
+        }
+
+        // For other operations, use direct translation
+        if (isOpX<EQ>(e)) {
+          return mk<EQ>(n_args[0], n_args[1]);
+        }
+        if (isOpX<NEQ>(e)) {
+          return mk<NEQ>(n_args[0], n_args[1]); 
+        }
+        if (isOpX<LEQ>(e)) {
+          return mk<BULE>(n_args[0], n_args[1]);
+        }
+        if (isOpX<GEQ>(e)) {
+          return mk<BUGE>(n_args[0], n_args[1]);
+        }
+        if (isOpX<LT>(e)) {
+          return mk<BULT>(n_args[0], n_args[1]);
+        }
+        if (isOpX<GT>(e)) {
+          return mk<BUGT>(n_args[0], n_args[1]);
         }
         
-        if (isOpX<EQ>(e)) return mknary<EQ>(n_args);
-        if (isOpX<NEQ>(e)) return mknary<NEQ>(n_args);
-        if (isOpX<LEQ>(e)) return mknary<BULE>(n_args); 
-        if (isOpX<GEQ>(e)) return mknary<BUGE>(n_args); 
-        if (isOpX<LT>(e)) return mknary<BULT>(n_args);  
-        if (isOpX<GT>(e)) return mknary<BUGT>(n_args);  
-        
-        if (isOpX<PLUS>(e)) return mknary<BADD>(n_args);
-        
+        if (isOpX<PLUS>(e)) {
+          if (isOpX<BSUB>(n_args[1]) && isOpX<MPZ>(n_args[1]->left()) && 
+              getTerm<mpz_class>(n_args[1]->left()) == 0) {
+            // Convert (bvadd x (bvsub 0 y)) to (bvsub x y)
+            return mk<BSUB>(n_args[0], n_args[1]->right());
+          }
+          return mk<BADD>(n_args[0], n_args[1]);
+        }
+
+        // For other operations, use direct translation
+        if (isOpX<PLUS>(e)) {
+          return mk<BADD>(n_args[0], n_args[1]);
+        }
+        if (isOpX<MULT>(e)) {
+          return mk<BMUL>(n_args[0], n_args[1]);
+        }
         if (isOpX<MINUS>(e)) {
           if (n_args.size() == 2) {
             return mk<BSUB>(n_args[0], n_args[1]);
-          } else {
-            return bv::bvneg(n_args[0]);
           }
+          return bv::bvneg(n_args[0]);
         }
-        
-        if (isOpX<MULT>(e)) return mknary<BMUL>(n_args);
-        if (isOpX<IDIV>(e)) return mknary<BUDIV>(n_args); 
-        if (isOpX<MOD>(e)) return mknary<BUREM>(n_args);  
+        if (isOpX<IDIV>(e)) {
+          return mk<BUDIV>(n_args[0], n_args[1]);
+        }
+        if (isOpX<MOD>(e)) {
+          return mk<BUREM>(n_args[0], n_args[1]);
+        }
         
         if (debug >= 1) {
           outs() << "Warning: Unhandled operation in translation: " << *e << "\n";
         }
-        return e; 
+        return e;
       }
-      
+
       Expr translateRecursively(Expr exp) {
         if (debug >= 3) outs() << "Translating expression: " << *exp << "\n";
         
@@ -236,6 +329,12 @@ namespace ufo
             return constMap.at(exp);
           }
           mpz_class val = getTerm<mpz_class>(exp);
+          if (val < 0) {
+            val = -val; // Make positive
+            Expr result = makeNegativeConstant(val, exp->getFactory());
+            constMap[exp] = result;
+            return result;
+          }
           Expr bvConst = bv::bvnum(val, bitwidth, exp->getFactory());
           constMap[exp] = bvConst;
           return bvConst;
@@ -246,29 +345,33 @@ namespace ufo
           for (auto it = exp->args_begin(); it != exp->args_end(); ++it) {
             n_args.push_back(translateRecursively(*it));
           }
-          return isOpX<AND>(exp) ? conjoin(n_args, exp->getFactory()) : 
-                 isOpX<OR>(exp) ? disjoin(n_args, exp->getFactory()) : 
-                 mknary<IFF>(n_args);
+
+          if (n_args.size() > 2) {
+            Expr result = n_args[0];
+            for (size_t i = 1; i < n_args.size(); ++i) {
+              if (isOpX<AND>(exp)) {
+                result = mk<AND>(result, n_args[i]);
+              } else if (isOpX<OR>(exp)) {
+                result = mk<OR>(result, n_args[i]);
+              } else {
+                result = mk<IFF>(result, n_args[i]);
+              }
+            }
+            return result;
+          }
+          return translateOperation(exp, n_args);
         }
-        
-        if (isOpX<NEG>(exp)) {
-          return mkNeg(translateRecursively(exp->first()));
+
+        // Handle all forms of unary minus in one place
+        if (isOpX<UN_MINUS>(exp)) {
+          Expr operand = translateRecursively(exp->first());
+          return isOpX<NEG>(exp) ? operand : bv::bvneg(operand);
         }
         
         if (isOp<ComparissonOp>(exp) || isOp<NumericOp>(exp)) {
           ExprVector n_args;
           
-          if (isOpX<UN_MINUS>(exp)) {
-            Expr operand = translateRecursively(exp->first());
-            return bv::bvneg(operand);
-          }
-          
-          if (isOpX<MINUS>(exp) && exp->arity() == 2) {
-            Expr left = translateRecursively(exp->left());
-            Expr right = translateRecursively(exp->right());
-            return mk<BSUB>(left, right);
-          }
-          
+          // Special case: multiplication by -1
           if (isOpX<MULT>(exp) && exp->arity() == 2) {
             auto isMinusOne = [](Expr e) -> bool { 
               return bind::IsHardIntConst{}(e) && getTerm<mpz_class>(e) == -1; 
@@ -277,12 +380,16 @@ namespace ufo
             Expr left = exp->left();
             Expr right = exp->right();
             
-            if (isMinusOne(left)) {
-              return bv::bvneg(translateRecursively(right));
+            if (isMinusOne(left) || isMinusOne(right)) {
+              return bv::bvneg(translateRecursively(isMinusOne(left) ? right : left));
             }
-            if (isMinusOne(right)) {
-              return bv::bvneg(translateRecursively(left));
-            }
+          }
+          
+          // Handle binary minus separately from unary minus
+          if (isOpX<MINUS>(exp) && exp->arity() == 2) {
+            Expr left = translateRecursively(exp->left());
+            Expr right = translateRecursively(exp->right());
+            return mk<BSUB>(left, right);
           }
           
           for (auto it = exp->args_begin(); it != exp->args_end(); ++it) {
@@ -395,7 +502,7 @@ namespace ufo
           }
           
           // Translate the body of the clause
-          translated.body = translateRecursively(normalize(clause.body));
+          translated.body = translateRecursively(simplifyArithm(normalize(clause.body)));
           
           if (debug >= 3) {
             outs() << "Original body: " << *clause.body << "\n";
@@ -493,7 +600,12 @@ namespace ufo
                 for (auto it = expr->args_begin(); it != expr->args_end(); ++it) {
                     args.push_back(translateExpression(*it, bitWidth));
                 }
-                return mknary<BADD>(args);
+                // Build PLUS operations left-to-right to ensure binary form
+                Expr result = args[0];
+                for (size_t i = 1; i < args.size(); ++i) {
+                    result = mk<BADD>(result, args[i]);
+                }
+                return result;
             }
             else if (isOpX<MINUS>(expr)) {
                 if (expr->arity() == 1) {
@@ -508,7 +620,7 @@ namespace ufo
                 for (auto it = expr->args_begin(); it != expr->args_end(); ++it) {
                     args.push_back(translateExpression(*it, bitWidth));
                 }
-                return mknary<BMUL>(args);
+                return mk<BMUL>(args[0], args[1]);
             }
             else if (isOpX<IDIV>(expr)) {
                 return mk<BUDIV>(translateExpression(expr->arg(0), bitWidth), 
@@ -548,14 +660,14 @@ namespace ufo
                 for (auto it = expr->args_begin(); it != expr->args_end(); ++it) {
                     args.push_back(translateExpression(*it, bitWidth));
                 }
-                return mknary<AND>(args);
+                return mk<AND>(args[0], args[1]);
             }
             else if (isOpX<OR>(expr)) {
                 ExprVector args;
                 for (auto it = expr->args_begin(); it != expr->args_end(); ++it) {
                     args.push_back(translateExpression(*it, bitWidth));
                 }
-                return mknary<OR>(args);
+                return mk<OR>(args[0], args[1]);
             }
             else if (bind::isBoolConst(expr)) {
                 return expr; 

@@ -439,17 +439,17 @@ namespace ufo
         else
           return M::marshal (e, ctx, cache, seen);
       }
-      else if (isOpX<BMUL>(e) || isOpX<BADD>(e))
-      {
-        assert(e->arity() > 1);
-        z3::ast t1 = marshal(e->arg(0), ctx, cache, seen);
-        z3::ast t2 = marshal(e->arg(1), ctx, cache, seen);
-        res = isOpX<BMUL>(e) ? Z3_mk_bvmul(ctx, t1, t2) : Z3_mk_bvadd(ctx, t1, t2);
-        for (int i = 2; i < e->arity(); i++)
-          res = isOpX<BMUL>(e) ? 
-            Z3_mk_bvmul(ctx, res, marshal(e->arg(i), ctx, cache, seen)) : 
-            Z3_mk_bvadd(ctx, res, marshal(e->arg(i), ctx, cache, seen));
-      }
+      // else if (isOpX<BMUL>(e) || isOpX<BADD>(e))
+      // {
+      //   assert(e->arity() > 1);
+      //   z3::ast t1 = marshal(e->arg(0), ctx, cache, seen);
+      //   z3::ast t2 = marshal(e->arg(1), ctx, cache, seen);
+      //   res = isOpX<BMUL>(e) ? Z3_mk_bvmul(ctx, t1, t2) : Z3_mk_bvadd(ctx, t1, t2);
+      //   for (int i = 2; i < e->arity(); i++)
+      //     res = isOpX<BMUL>(e) ? 
+      //       Z3_mk_bvmul(ctx, res, marshal(e->arg(i), ctx, cache, seen)) : 
+      //       Z3_mk_bvadd(ctx, res, marshal(e->arg(i), ctx, cache, seen));
+      // }
       else if (isOpX<BEXTRACT> (e))
       {
 //        assert (bv::high (e) > bv::low (e));

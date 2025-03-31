@@ -1163,45 +1163,8 @@ namespace ufo
     {
       outs() << "LIA 2 BV:\n";
     }
-    for(auto& hr: ruleManager.chcs)
-    {
-      if(printLog >= 1)
-      {
-        outs() << "Original:\n";
-        outs() << hr.body << '\n';
-      }
-      ExprSet conjs;
-      getConj(hr.body, conjs);
-      ExprSet newConj;
-      ExprSet vars;
-      for(auto& c: conjs)
-      {
-        filter(c, bind::IsConst(), inserter(vars, vars.begin()));
-        keepOnly(vars, ruleManager.invVarsPrime[hr.srcRelation]);
-        for(auto& v: vars)
-        {
-          outs() << "Var: " << v << '\n';
-        }
-      }
-      for(auto& var: vars)
-      {
-        for(auto& c: conjs)
-        {
-          if(contains(c, var))
-          {
-            newConj.insert(isOpX<OR>(c) ? normalizeDisj(c, ruleManager.invVars[ruleManager.chcs[1].srcRelation]) : normalize(c));
-          }
-        }
-      }
-      outs() << "New conjuncts: " << newConj.size() << '\n';
-      for(auto& c: newConj)
-      {
-        outs() << c << '\n';
-      } 
-    }
 
-    // exit(0);
-    // Replace old translator with new LIA2BV2 translator
+    // passes::LIA2BV2 lia2bv(printLog);
     passes::LIA2BV2 lia2bv(printLog);
     lia2bv(ruleManager);
     

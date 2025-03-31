@@ -653,7 +653,6 @@ namespace ufo
         if (debug >= 2)
           outs () << "  Eliminating CHC: " << chcs[*a].srcRelation
                   << " -> " << chcs[*a].dstRelation << "\n";
-        toEraseChcs.insert(*a);
       }
 
       // get rid of CHCs that don't add any _new_ constraints
@@ -1428,6 +1427,82 @@ namespace ufo
       else serializeCHC();
     }
 
+    // Add new helper method for normalizing BV expressions
+    Expr normalizeBVExpr(Expr e) {
+      if (isOp<NumericOp>(e)) {
+        ExprVector args;
+        for (auto it = e->args_begin(); it != e->args_end(); ++it) {
+          args.push_back(normalizeBVExpr(*it));
+        }
+        
+        // Convert n-ary operations to binary
+        if (args.size() > 2) {
+          if (isOpX<BADD>(e)) {
+            // Build chain of binary additions
+            Expr result = args[0];
+            for (size_t i = 1; i < args.size(); ++i) {
+              result = mk<BADD>(result, args[i]);
+            }
+            return result;
+          }
+          else if (isOpX<BMUL>(e)) {
+            // Build chain of binary multiplications
+            Expr result = args[0];
+            for (size_t i = 1; i < args.size(); ++i) {
+              result = mk<BMUL>(result, args[i]);
+            }
+            return result;
+          }
+        }
+        
+        // Handle each operation type explicitly
+        if (isOpX<BADD>(e)) {
+          if (args.size() == 1) return args[0];
+          return mk<BADD>(args[0], args[1]);
+        }
+        else if (isOpX<BMUL>(e)) {
+          if (args.size() == 1) return args[0];
+          return mk<BMUL>(args[0], args[1]);
+        }
+        else if (isOpX<BSUB>(e)) {
+          if (args.size() == 1) return args[0];
+          return mk<BSUB>(args[0], args[1]);
+        }
+        else if (isOpX<BUDIV>(e)) {
+          if (args.size() == 1) return args[0];
+          return mk<BUDIV>(args[0], args[1]);
+        }
+        else if (isOpX<BSDIV>(e)) {
+          if (args.size() == 1) return args[0];
+          return mk<BSDIV>(args[0], args[1]);
+        }
+        else if (isOpX<BUREM>(e)) {
+          if (args.size() == 1) return args[0];
+          return mk<BUREM>(args[0], args[1]);
+        }
+        else if (isOpX<BSREM>(e)) {
+          if (args.size() == 1) return args[0];
+          return mk<BSREM>(args[0], args[1]);
+        }
+        else if (isOpX<BSHL>(e)) {
+          if (args.size() == 1) return args[0];
+          return mk<BSHL>(args[0], args[1]);
+        }
+        else if (isOpX<BLSHR>(e)) {
+          if (args.size() == 1) return args[0];
+          return mk<BLSHR>(args[0], args[1]);
+        }
+        else if (isOpX<BASHR>(e)) {
+          if (args.size() == 1) return args[0];
+          return mk<BASHR>(args[0], args[1]);
+        }
+        else if (isOpX<BNEG>(e)) {
+          return mk<BNEG>(args[0]);
+        }
+      }
+      return e;
+    }
+
     void serializeCHC()
     {
       std::ofstream enc_chc;
@@ -1527,11 +1602,9 @@ namespace ufo
           }
         }
         enc_chc << "(=> ";
-        // Normalize the source and body before printing to convert negative BV constants to subtraction
-        Expr normalizedSrc = u.normalizeNegativeBVConstants(src);
-        Expr normalizedBody = u.normalizeNegativeBVConstants(c.body);
-        outs() << "normalizedSrc: " << normalizedSrc << "\n";
-        outs() << "normalizedBody: " << normalizedBody << "\n";
+        // First normalize all BV operations to binary form
+        Expr normalizedSrc = normalizeBVExpr(src);
+        Expr normalizedBody = normalizeBVExpr(c.body);
         u.print(mk<AND>(normalizedSrc, normalizedBody), enc_chc);
         if(c.isQuery) 
         {
@@ -1540,8 +1613,7 @@ namespace ufo
         else
         {
           enc_chc << " ";
-          // Normalize the destination before printing
-          Expr normalizedDst = u.normalizeNegativeBVConstants(dst);
+          Expr normalizedDst = normalizeBVExpr(dst);
           u.print(normalizedDst, enc_chc);
           enc_chc << ")";
         }
