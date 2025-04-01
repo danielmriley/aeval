@@ -13,6 +13,7 @@ namespace ufo
       ExprFactory &m_efac;
       EZ3 &m_z3;
       unsigned int m_width;
+      int debug;  // Add debug member
       
       // Maps for tracking translations
       std::map<Expr, Expr> m_var_map;      // Maps LIA vars to BV vars  
@@ -64,12 +65,75 @@ namespace ufo
         return translatedVars;
       }
 
+      // Add new helper methods for bitwidth calculation
+      unsigned int binaryLog(mpz_class v)
+      {
+        // Small numbers optimization
+        if (v == 0) return 1;
+        if (v == 1) return 1;
+        
+        // Get absolute value for negative numbers
+        if (v < 0) v = -v;
+        
+        // Calculate log2 rounded up
+        unsigned int width = 1;
+        v = v - 1;
+        while (v > 0) {
+          v = v >> 1;
+          width++;
+        }
+        return width;
+      }
+
+      unsigned int findMinBitWidth(const std::vector<HornRuleExt>& rules)
+      {
+        unsigned int maxWidth = m_width;
+
+        // Helper to process an expression and update maxWidth
+        std::function<void(Expr)> processExpr = [&](Expr e) {
+          if (!e) return;
+          
+          // Check for integer constants
+          if (isOpX<MPZ>(e)) {
+            unsigned int width = binaryLog(getTerm<mpz_class>(e));
+            maxWidth = std::max(maxWidth, width + 1); // +1 for sign bit
+          }
+          
+          // Recursively process all arguments
+          for (unsigned i = 0; i < e->arity(); ++i) {
+            processExpr(e->arg(i));
+          }
+        };
+
+        // Process all rules
+        for (const auto& rule : rules) {
+          processExpr(rule.body);
+          for (const auto& v : rule.srcVars) processExpr(v);
+          for (const auto& v : rule.dstVars) processExpr(v);
+          for (const auto& v : rule.locVars) processExpr(v);
+        }
+
+        // Round up to nearest power of 2 greater than 4
+        maxWidth = std::max(maxWidth, (unsigned int)4);
+        unsigned int pow2 = 4;
+        while (pow2 < maxWidth) pow2 *= 2;
+        
+        return pow2;
+      }
+
     public:
-      Lia2BvTranslator(ExprFactory &efac, EZ3 &z3, unsigned width = 4) : 
-        m_efac(efac), m_z3(z3), m_width(width) {}
+      Lia2BvTranslator(ExprFactory &efac, EZ3 &z3, unsigned width = 4, int _debug = 0) : 
+        m_efac(efac), m_z3(z3), m_width(width), debug(_debug) {}
 
       CHCs translate(CHCs &input)
       {
+        // Calculate minimum required bitwidth
+        m_width = findMinBitWidth(input.chcs);
+
+        if (debug >= 2) {
+          outs() << "Using bit width: " << m_width << "\n";
+        }
+
         CHCs result(m_efac, m_z3);
         
         // 1. Translate declarations and create new variables
@@ -82,6 +146,21 @@ namespace ufo
         result.chcs = translateClauses(input.chcs);
 
         return result;
+      }
+
+      // Add public method to translate individual expressions
+      Expr translateExpr(Expr e, unsigned width = 0)
+      {
+        // Use provided width or default if not specified
+        unsigned w = width > 0 ? width : m_width;
+        
+        // Ensure maps are initialized
+        if (m_var_map.empty() && m_decl_map.empty())
+        {
+          // Create temporary maps if needed
+          return translateExprHelper(e);
+        }
+        return translateExprHelper(e);
       }
 
     private:
@@ -159,7 +238,8 @@ namespace ufo
         rule.locVars = translateInvVars(rule.locVars);
       }
 
-      Expr translateExpr(Expr e)
+      // Rename existing translateExpr to translateExprHelper  
+      Expr translateExprHelper(Expr e)
       {
         if (!e) return e;
 
