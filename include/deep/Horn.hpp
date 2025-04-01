@@ -1503,11 +1503,151 @@ namespace ufo
       return e;
     }
 
+    // Add new helper class for BV printing
+    class BVExprPrinter {
+      private:
+        SMTUtils &u;
+
+      public:
+        BVExprPrinter(SMTUtils &_u) : u(_u) {}
+
+        void print(Expr e, std::ofstream& out) {
+          if (isOp<BADD>(e)) {
+            out << "(bvadd ";
+            print(e->left(), out);
+            out << " ";
+            print(e->right(), out);
+            out << ")";
+          }
+          else if (isOp<BMUL>(e)) {
+            out << "(bvmul ";
+            print(e->left(), out);
+            out << " ";
+            print(e->right(), out);
+            out << ")";
+          }
+          else if (isOp<BSUB>(e)) {
+            out << "(bvsub ";
+            print(e->left(), out);
+            out << " ";
+            print(e->right(), out);
+            out << ")";
+          }
+          else if (isOp<BUDIV>(e)) {
+            out << "(bvudiv ";
+            print(e->left(), out);
+            out << " ";
+            print(e->right(), out);
+            out << ")";
+          }
+          else if (isOp<BSDIV>(e)) {
+            out << "(bvsdiv ";
+            print(e->left(), out);
+            out << " ";
+            print(e->right(), out);
+            out << ")";
+          }
+          else if (isOp<BUREM>(e)) {
+            out << "(bvurem ";
+            print(e->left(), out);
+            out << " ";
+            print(e->right(), out);
+            out << ")";
+          }
+          else if (isOp<BSREM>(e)) {
+            out << "(bvsrem ";
+            print(e->left(), out);
+            out << " ";
+            print(e->right(), out);
+            out << ")";
+          }
+          else if (isOp<BSHL>(e)) {
+            out << "(bvshl ";
+            print(e->left(), out);
+            out << " ";
+            print(e->right(), out);
+            out << ")";
+          }
+          else if (isOp<BLSHR>(e)) {
+            out << "(bvlshr ";
+            print(e->left(), out);
+            out << " ";
+            print(e->right(), out);
+            out << ")";
+          }
+          else if (isOp<BASHR>(e)) {
+            out << "(bvashr ";
+            print(e->left(), out);
+            out << " ";
+            print(e->right(), out);
+            out << ")";
+          }
+          else if (isOp<BNEG>(e)) {
+            out << "(bvneg ";
+            print(e->left(), out);
+            out << ")";
+          }
+          else if (isOpX<AND>(e)) {
+            // Handle n-ary AND as nested binary
+            if (e->arity() > 2) {
+              out << "(and ";
+              print(e->left(), out);
+              out << " (and ";
+              for (unsigned i = 1; i < e->arity()-1; ++i) {
+                print(e->arg(i), out);
+                out << " ";
+              }
+              print(e->last(), out);
+              for (unsigned i = 1; i < e->arity()-1; ++i) {
+                out << ")";
+              }
+              out << ")";
+            } else {
+              out << "(and ";
+              print(e->left(), out);
+              out << " ";
+              print(e->right(), out);
+              out << ")";
+            }
+          }
+          else if (isOpX<OR>(e)) {
+            // Handle n-ary OR as nested binary  
+            if (e->arity() > 2) {
+              out << "(or ";
+              print(e->left(), out);
+              out << " (or ";
+              for (unsigned i = 1; i < e->arity()-1; ++i) {
+                print(e->arg(i), out);
+                out << " ";
+              }
+              print(e->last(), out);
+              for (unsigned i = 1; i < e->arity()-1; ++i) {
+                out << ")";
+              }
+              out << ")";
+            } else {
+              out << "(or ";
+              print(e->left(), out);
+              out << " ";
+              print(e->right(), out);
+              out << ")";
+            }
+          }
+          else {
+            // For non-BV operations or leaf nodes, use standard printing
+            u.print(e, out); 
+          }
+        }
+    };
+
     void serializeCHC()
     {
       std::ofstream enc_chc;
       enc_chc.open("chc.smt2");
       
+      // Create printer
+      BVExprPrinter printer(u);
+
       for (auto & d : decls)
       {
         enc_chc << "(declare-rel " << d->left() << " (";
@@ -1605,7 +1745,13 @@ namespace ufo
         // First normalize all BV operations to binary form
         Expr normalizedSrc = normalizeBVExpr(src);
         Expr normalizedBody = normalizeBVExpr(c.body);
-        u.print(mk<AND>(normalizedSrc, normalizedBody), enc_chc);
+        
+        enc_chc << "(and ";
+        printer.print(normalizedSrc, enc_chc);
+        enc_chc << " ";
+        printer.print(normalizedBody, enc_chc);
+        enc_chc << ")";
+
         if(c.isQuery) 
         {
           enc_chc << " " << dst << ")";
@@ -1614,12 +1760,60 @@ namespace ufo
         {
           enc_chc << " ";
           Expr normalizedDst = normalizeBVExpr(dst);
-          u.print(normalizedDst, enc_chc);
+          printer.print(normalizedDst, enc_chc);
           enc_chc << ")";
         }
         enc_chc << ")\n\n";  
       }
       enc_chc << "(query fail)\n";
+    }
+
+    // Add this new helper method
+    void printBinaryForm(Expr e, std::ofstream& out) {
+      if (isOp<BADD>(e)) {
+        out << "(bvadd ";
+        printBinaryForm(e->left(), out);
+        out << " ";
+        printBinaryForm(e->right(), out);
+        out << ")";
+      }
+      else if (isOp<BMUL>(e)) {
+        out << "(bvmul ";
+        printBinaryForm(e->left(), out);
+        out << " ";
+        printBinaryForm(e->right(), out);
+        out << ")";
+      }
+      else if (isOp<BSUB>(e)) {
+        out << "(bvsub ";
+        printBinaryForm(e->left(), out);
+        out << " ";
+        printBinaryForm(e->right(), out);
+        out << ")";
+      }
+      else if (isOp<BNEG>(e)) {
+        out << "(bvneg ";
+        printBinaryForm(e->left(), out);
+        out << ")";
+      }
+      else if (isOp<BUDIV>(e)) {
+        out << "(bvudiv ";
+        printBinaryForm(e->left(), out);
+        out << " ";
+        printBinaryForm(e->right(), out);
+        out << ")";
+      }
+      else if (isOp<BUREM>(e)) {
+        out << "(bvurem ";
+        printBinaryForm(e->left(), out);
+        out << " ";
+        printBinaryForm(e->right(), out);
+        out << ")";
+      }
+      else {
+        // For non-BV operations or leaf nodes, use standard printing
+        u.print(e, out);
+      }
     }
 
     void serializeHorn ()

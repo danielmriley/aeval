@@ -595,32 +595,63 @@ namespace ufo
         }
         
         if (expr->arity() >= 1) {
+            // Handle n-ary operations by building binary chains
             if (isOpX<PLUS>(expr)) {
                 ExprVector args;
                 for (auto it = expr->args_begin(); it != expr->args_end(); ++it) {
                     args.push_back(translateExpression(*it, bitWidth));
                 }
-                // Build PLUS operations left-to-right to ensure binary form
+                // Convert n-ary PLUS to binary chain
                 Expr result = args[0];
                 for (size_t i = 1; i < args.size(); ++i) {
                     result = mk<BADD>(result, args[i]);
                 }
                 return result;
             }
-            else if (isOpX<MINUS>(expr)) {
-                if (expr->arity() == 1) {
-                    return bv::bvneg(translateExpression(expr->arg(0), bitWidth));
-                } else {
-                    return mk<BSUB>(translateExpression(expr->arg(0), bitWidth), 
-                                   translateExpression(expr->arg(1), bitWidth));
-                }
-            }
             else if (isOpX<MULT>(expr)) {
                 ExprVector args;
                 for (auto it = expr->args_begin(); it != expr->args_end(); ++it) {
                     args.push_back(translateExpression(*it, bitWidth));
                 }
-                return mk<BMUL>(args[0], args[1]);
+                // Convert n-ary MULT to binary chain 
+                Expr result = args[0];
+                for (size_t i = 1; i < args.size(); ++i) {
+                    result = mk<BMUL>(result, args[i]);
+                }
+                return result;
+            }
+            else if (isOpX<AND>(expr)) {
+                ExprVector args;
+                for (auto it = expr->args_begin(); it != expr->args_end(); ++it) {
+                    args.push_back(translateExpression(*it, bitWidth));
+                }
+                // Convert n-ary AND to binary chain
+                Expr result = args[0];
+                for (size_t i = 1; i < args.size(); ++i) {
+                    result = mk<AND>(result, args[i]);
+                }
+                return result;
+            }
+            else if (isOpX<OR>(expr)) {
+                ExprVector args;
+                for (auto it = expr->args_begin(); it != expr->args_end(); ++it) {
+                    args.push_back(translateExpression(*it, bitWidth));
+                }
+                // Convert n-ary OR to binary chain
+                Expr result = args[0];
+                for (size_t i = 1; i < args.size(); ++i) {
+                    result = mk<OR>(result, args[i]);
+                }
+                return result;
+            }
+            // Keep binary operations as-is
+            else if (isOpX<MINUS>(expr)) {
+                if (expr->arity() == 1) {
+                    return bv::bvneg(translateExpression(expr->arg(0), bitWidth));
+                } else {
+                    return mk<BSUB>(translateExpression(expr->arg(0), bitWidth), 
+                                  translateExpression(expr->arg(1), bitWidth));
+                }
             }
             else if (isOpX<IDIV>(expr)) {
                 return mk<BUDIV>(translateExpression(expr->arg(0), bitWidth), 
