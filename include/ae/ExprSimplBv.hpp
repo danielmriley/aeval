@@ -517,6 +517,259 @@ namespace ufo
     RW<TypeRep> rw(new TypeRep());
     return dagVisit(rw, exp);
   }
+
+  // Add new helper method for normalizing BV expressions
+  Expr normalizeBVExpr(Expr e)
+  {
+    if (isOp<NumericOp>(e))
+    {
+      ExprVector args;
+      for (auto it = e->args_begin(); it != e->args_end(); ++it)
+      {
+        args.push_back(normalizeBVExpr(*it));
+      }
+
+      // Convert n-ary operations to binary
+      if (args.size() > 2)
+      {
+        if (isOpX<BADD>(e))
+        {
+          // Build chain of binary additions
+          Expr result = args[0];
+          for (size_t i = 1; i < args.size(); ++i)
+          {
+            result = mk<BADD>(result, args[i]);
+          }
+          return result;
+        }
+        else if (isOpX<BMUL>(e))
+        {
+          // Build chain of binary multiplications
+          Expr result = args[0];
+          for (size_t i = 1; i < args.size(); ++i)
+          {
+            result = mk<BMUL>(result, args[i]);
+          }
+          return result;
+        }
+      }
+
+      // Handle each operation type explicitly
+      if (isOpX<BADD>(e))
+      {
+        if (args.size() == 1)
+          return args[0];
+        return mk<BADD>(args[0], args[1]);
+      }
+      else if (isOpX<BMUL>(e))
+      {
+        if (args.size() == 1)
+          return args[0];
+        return mk<BMUL>(args[0], args[1]);
+      }
+      else if (isOpX<BSUB>(e))
+      {
+        if (args.size() == 1)
+          return args[0];
+        return mk<BSUB>(args[0], args[1]);
+      }
+      else if (isOpX<BUDIV>(e))
+      {
+        if (args.size() == 1)
+          return args[0];
+        return mk<BUDIV>(args[0], args[1]);
+      }
+      else if (isOpX<BSDIV>(e))
+      {
+        if (args.size() == 1)
+          return args[0];
+        return mk<BSDIV>(args[0], args[1]);
+      }
+      else if (isOpX<BUREM>(e))
+      {
+        if (args.size() == 1)
+          return args[0];
+        return mk<BUREM>(args[0], args[1]);
+      }
+      else if (isOpX<BSREM>(e))
+      {
+        if (args.size() == 1)
+          return args[0];
+        return mk<BSREM>(args[0], args[1]);
+      }
+      else if (isOpX<BSHL>(e))
+      {
+        if (args.size() == 1)
+          return args[0];
+        return mk<BSHL>(args[0], args[1]);
+      }
+      else if (isOpX<BLSHR>(e))
+      {
+        if (args.size() == 1)
+          return args[0];
+        return mk<BLSHR>(args[0], args[1]);
+      }
+      else if (isOpX<BASHR>(e))
+      {
+        if (args.size() == 1)
+          return args[0];
+        return mk<BASHR>(args[0], args[1]);
+      }
+      else if (isOpX<BNEG>(e))
+      {
+        return mk<BNEG>(args[0]);
+      }
+    }
+    return e;
+  }
+
+  // Add new helper class for BV printing
+  class BVExprPrinter
+  {
+  private:
+    SMTUtils &u;
+
+  public:
+    BVExprPrinter(SMTUtils &_u) : u(_u) {}
+
+    void print(Expr e, std::ofstream &out)
+    {
+      if (!e) {
+        out << "true";
+        return;
+      }
+
+      if (isOp<BADD>(e))
+      {
+        out << "(bvadd ";
+        print(e->left(), out);
+        out << " ";
+        print(e->right(), out);
+        out << ")";
+      }
+      else if (isOp<BMUL>(e))
+      {
+        out << "(bvmul ";
+        print(e->left(), out);
+        out << " ";
+        print(e->right(), out);
+        out << ")";
+      }
+      else if (isOp<BSUB>(e))
+      {
+        out << "(bvsub ";
+        print(e->left(), out);
+        out << " ";
+        print(e->right(), out);
+        out << ")";
+      }
+      else if (isOp<BUDIV>(e))
+      {
+        out << "(bvudiv ";
+        print(e->left(), out);
+        out << " ";
+        print(e->right(), out);
+        out << ")";
+      }
+      else if (isOp<BSDIV>(e))
+      {
+        out << "(bvsdiv ";
+        print(e->left(), out);
+        out << " ";
+        print(e->right(), out);
+        out << ")";
+      }
+      else if (isOp<BUREM>(e))
+      {
+        out << "(bvurem ";
+        print(e->left(), out);
+        out << " ";
+        print(e->right(), out);
+        out << ")";
+      }
+      else if (isOp<BSREM>(e))
+      {
+        out << "(bvsrem ";
+        print(e->left(), out);
+        out << " ";
+        print(e->right(), out);
+        out << ")";
+      }
+      else if (isOp<BSHL>(e))
+      {
+        out << "(bvshl ";
+        print(e->left(), out);
+        out << " ";
+        print(e->right(), out);
+        out << ")";
+      }
+      else if (isOp<BLSHR>(e))
+      {
+        out << "(bvlshr ";
+        print(e->left(), out);
+        out << " ";
+        print(e->right(), out);
+        out << ")";
+      }
+      else if (isOp<BASHR>(e))
+      {
+        out << "(bvashr ";
+        print(e->left(), out);
+        out << " ";
+        print(e->right(), out);
+        out << ")";
+      }
+      else if (isOp<BNEG>(e))
+      {
+        out << "(bvneg ";
+        print(e->left(), out);
+        out << ")";
+      }
+      else if (isOpX<AND>(e))
+      {
+        if (e->arity() < 2) {
+          // Handle empty AND or single argument
+          if (e->arity() == 0) {
+            out << "true";
+          } else {
+            print(e->arg(0), out);
+          }
+        } else {
+          // Print AND with 2 or more arguments
+          out << "(and";
+          for (unsigned i = 0; i < e->arity(); i++) {
+            out << " ";
+            print(e->arg(i), out);
+          }
+          out << ")";
+        }
+      }
+      else if (isOpX<OR>(e))
+      {
+        out << "(or";
+        for (unsigned i = 0; i < e->arity(); i++) {
+          out << " ";
+          print(e->arg(i), out);
+        }
+        out << ")";
+      }
+      else
+      {
+        // For non-BV operations or leaf nodes, use standard printing
+        u.print(e, out);
+      }
+    }
+  };
+
+  // Helper to normalize AND expressions
+  inline Expr normalizeAND(Expr e) {
+    if (!isOpX<AND>(e)) return e;
+    
+    if (e->arity() == 0) return mk<TRUE>(e->getFactory());
+    if (e->arity() == 1) return e->arg(0);
+    
+    return e;
+  }
 }
 
 #endif

@@ -1,461 +1,236 @@
-// Included in SimplificationPasses.hpp
-#ifndef LIATOBV_HPP
-#define LIATOBV_HPP
+#ifndef LIA2BV__HPP__
+#define LIA2BV__HPP__
 
 #include "deep/Horn.hpp"
-#include "ufo/ExprBv.hh"
-#include "ufo/Expr.hpp"
+
+using namespace std;
 
 namespace ufo
 {
-  namespace passes
+  class Lia2BvTranslator 
   {
-
-    unsigned int binaryLog(mpz_class v)
-    {
-      if(v < 0)
+    private:
+      ExprFactory &m_efac;
+      EZ3 &m_z3;
+      unsigned int m_width;
+      
+      // Maps for tracking translations
+      std::map<Expr, Expr> m_var_map;      // Maps LIA vars to BV vars  
+      std::map<Expr, Expr> m_decl_map;     // Maps LIA decls to BV decls
+      
+      // Translation helpers
+      Expr translateVar(Expr var)
       {
-        v *= -1;
-      }
-      if (v.fits_ulong_p())
-      {
-        unsigned long v_ul = v.get_ui();
-        unsigned int res = 1;
-        while (v_ul >>= 1)
-        {
-          ++res;
-        }
-        return res;
-      }
-      // TODO: implement this
-      throw std::logic_error("Not implemented yet!");
-    }
+        // Replace init-statement in if with traditional lookup
+        auto it = m_var_map.find(var);
+        if (it != m_var_map.end())
+          return it->second;
 
-    class LIA2BVPass
-    {
+        // Only translate integer variables
+        if (!isOpX<INT_TY>(bind::typeOf(var))) 
+          return var;
 
-      private:
-      std::map<Expr, Expr> variableMap;
-      std::map<Expr, Expr> declsMap;
-      std::map<Expr, Expr> constMap;
-
-      std::unique_ptr<CHCs> transformed;
-      CHCs& liaSystem;
-
-      int bitwidth = 0;
-      int debug = 0;
-
-      public:
-      LIA2BVPass(CHCs& _r, int _debug = 0) : liaSystem(_r), debug(_debug) {}
-
-      CHCs *getTransformed() { return transformed.get(); }
-
-      void operator()(const CHCs &system)
-      {
-        transformed.reset(new CHCs{system.m_efac, system.m_z3});
-        CHCs &bvSystem = *transformed;
-        findBitWitdth(system.chcs);
-        bvSystem.failDecl = system.failDecl;
-        // Translate the vars and find the upper bound for the var bitwidth.
-        for (auto &v : system.invVars)
-        {
-          if (v.first == mk<TRUE>(v.first->getFactory())) continue;
-
-        }
-        if (debug >= 3) outs() << "Translating invVars.\n";
-        for (auto &d : system.decls)
-        {
-          if (d == mk<TRUE>(d->getFactory())) continue;
-          if (debug >= 4) outs() << "Decl: " << *d << "\n";
-
-          bvSystem.invVars[d->left()] = translateInvVars(system.invVars.at(d->left()), true);
-          bvSystem.invVarsPrime[d->left()] = translateInvVars(system.invVarsPrime.at(d->left()), true);
-        }
-        // Translate the clauses and find the upper bound for the bitwidth.
-        bvSystem.chcs = translateClauses(system.chcs);
-        // // Now translate the decls.
-        bvSystem.decls = translateDeclarations(system.decls);
+        // Create new BV variable with same name but BV sort
+        Expr name = bind::name(var); 
+        Expr sort = bv::bvsort(m_width, m_efac);
+        Expr newVar = bind::mkConst(name, sort);
+        
+        m_var_map[var] = newVar;
+        return newVar;
       }
 
-      ExprSet translateDeclarations(const ExprSet &originals)
+      ExprVector translateInvVars(const ExprVector &origVars, bool cacheVars = false)
       {
-        ExprSet ret;
-        for (const auto &decl : originals)
+        ExprVector translatedVars;
+        
+        for (const auto &var : origVars) 
         {
-          assert(bind::isFdecl(decl));
-          ExprVector types;
-          for (int i = 1; i < decl->arity(); ++i)
+          // Skip if not an integer variable
+          if (!isOpX<INT_TY>(bind::typeOf(var)))
           {
-            Expr arg = decl->arg(i);
-            Expr type = isOpX<INT_TY>(arg) ? bv::bvsort(bitwidth, arg->getFactory()) : arg;
-            types.push_back(type);
-          }
-          Expr name = bind::fname(decl);
-          Expr translated = bind::fdecl(name, types);
-          declsMap[decl] = translated;
-          ret.insert(translated);
-          if (debug >= 4)
-            outs() << "Translated " << *decl << " to " << *translated << "\n";
-        }
-
-        return ret;
-      }
-
-      void translateConsts(Expr e)
-      {
-        ExprSet conjs;
-        getConj(e, conjs);
-        for (auto &c : conjs)
-        {
-          if(debug >= 3)
-          {
-            outs() << "Consts translation expr: " << c << "\n";
+            translatedVars.push_back(var);
+            continue;
           }
 
-          if (isOpX<MPZ>(c))
-          {
-            if (debug >= 4)
-              outs() << "Constant: " << c << "\n";
-            // constMap[c] = bv::bvConst(c, bitwidth);
-            constMap[c] = bv::bvnum(getTerm<mpz_class>(c), bitwidth, c->getFactory());
-          }
-
-          for(auto arg = c->args_begin(); arg != c->args_end(); ++arg)
-          {
-            translateConsts(*arg);
-          }
-        }
-      }
-
-      int computeExpressionBitWidth(Expr e)
-      {
-        int maxBitWidth = 0;
-        ExprSet conjs;
-        getConj(e, conjs);
-        for (auto &c : conjs)
-        {
-          if (debug >= 4)
-          {
-            outs() << "Expr: " << c << "\n";
-          }
-          if (isOpX<MPZ>(c))
-          {
-            mpz_class val = getTerm<mpz_class>(c);
-            int bw = binaryLog(val);
-            if (debug >= 4)
-            {
-              outs() << "BW: " << bw << "\n";
-            }
-            if (bw > maxBitWidth)
-            {
-              maxBitWidth = bw;
-            }
-          }
-
-          Expr lhs = c->left();
-          Expr rhs = c->right();
-          int lhsbw, rhsbw;
-          if (lhs != NULL)
-          {
-            lhsbw = computeExpressionBitWidth(lhs);
-            if (lhsbw > maxBitWidth)
-              maxBitWidth = lhsbw;
-          }
-          if (rhs != NULL)
-          {
-            rhsbw = computeExpressionBitWidth(rhs);
-            if (rhsbw > maxBitWidth)
-              maxBitWidth = rhsbw;
-          }
-        }
-        return maxBitWidth;
-      }
-
-      void findBitWitdth(const std::vector<HornRuleExt> &origClauses)
-      {
-        // Find the largest constant in the body of the clauses.
-        for (const auto &clause : origClauses)
-        {
-          Expr body = clause.body;
-          int bw = computeExpressionBitWidth(body);
-          if (bw > bitwidth) bitwidth = bw;
-        }
-
-        bitwidth < 4 ? bitwidth = 4 : bitwidth;
-        if (debug >= 3)
-        {
-          outs() << "Max bit width found: " << bitwidth << "\n";
-        } 
-      }
-
-      std::vector<HornRuleExt> translateClauses(const std::vector<HornRuleExt> &origClauses)
-      {
-
-        // Now, translate the constants and put them in a map for later.
-        for (const auto &clause : origClauses)
-        {
-          translateConsts(clause.body);
-        }
-
-        if (debug >= 3)
-        {
-          outs() << "Constants translation:\n";
-          for (auto const &entry : constMap)
-          {
-            outs() << *entry.first << " -> " << *entry.second << "\n";
-          }
-        }
-
-        std::vector<HornRuleExt> translatedClauses;
-        for (const auto &clause : origClauses)
-        {
-          translatedClauses.emplace_back();
-          HornRuleExt &translated = translatedClauses.back();
-          translated.isQuery = clause.isQuery;
-          translated.isFact = clause.isFact;
-          translated.isInductive = clause.isInductive;
-
-          // Translate the variables.
-          translated.srcVars = translateInvVars(clause.srcVars);
-          translated.dstVars = translateInvVars(clause.dstVars);
-          translated.locVars = translateInvVars(clause.locVars, true);
+          // Create new BV variable
+          Expr bvVar = bv::bvConst(var, m_width);
+          outs() << "bvVar: " << bvVar << "\n";
+          translatedVars.push_back(bvVar);
           
-          if(debug >= 3)
-          {
-            outs() << "var mapping:\n";
-            for(auto const &entry: variableMap)
-            {
-              outs() << *entry.first << " -> " << *entry.second << "\n";
-            }
-          }
-
-          // // Translate the body.
-          translated.body = translateRecursively(normalize(clause.body));
-          if(debug >= 4) {
-            outs() << "Translated body:\n";
-            ExprSet conjs;
-            getConj(translated.body, conjs);
-            for(auto &c : conjs) {
-              outs() << "    " << *c << "\n";
-            }
-          } 
-          // Create new src and dst relations with bv type.
-          translated.dstRelation = clause.dstRelation;
-          translated.srcRelation = clause.srcRelation;
+          // Cache the translation if requested
+          if (cacheVars)
+            m_var_map[var] = bvVar;
         }
-
-        if(debug >= 3)
-        {
-          outs() << "Translated clauses:\n";
-        }
-
-        return translatedClauses;
+        return translatedVars;
       }
 
-      Expr translateRecursively(Expr exp)
+    public:
+      Lia2BvTranslator(ExprFactory &efac, EZ3 &z3, unsigned width = 4) : 
+        m_efac(efac), m_z3(z3), m_width(width) {}
+
+      CHCs translate(CHCs &input)
       {
-        if (debug >= 3) outs() << "Translating: " << *exp << "\n";
+        CHCs result(m_efac, m_z3);
+        
+        // 1. Translate declarations and create new variables
+        result.decls = translateDeclarations(input.decls);
 
-        auto isConstant = bind::IsHardIntConst{};
-        if(isConstant(exp)) {
-          outs() << "Finding const" << std::endl;
-          return constMap.at(exp);
-        }
-        if (isOpX<AND>(exp) || isOpX<OR>(exp) || isOpX<IFF>(exp))
+        // 2. Create new variable maps
+        translateVariableMaps(input, result);
+
+        // 3. Translate CHC rules
+        result.chcs = translateClauses(input.chcs);
+
+        return result;
+      }
+
+    private:
+      ExprSet translateDeclarations(const ExprSet &decls)
+      {
+        ExprSet result;
+        for (Expr decl : decls)
         {
-          ExprVector n_args;
-          for (auto it = exp->args_begin(); it != exp->args_end(); ++it)
+          if (decl == NULL) continue;
+          
+          // Create new type list with BV sorts instead of INT
+          ExprVector sorts;
+          for (unsigned i = 1; i < decl->arity()-1; i++)
           {
-            n_args.push_back(translateRecursively(*it));
+            Expr sort = decl->arg(i);
+            if (isOpX<INT_TY>(sort))
+              sorts.push_back(bv::bvsort(m_width, m_efac));
+            else
+              sorts.push_back(sort);
           }
-          return isOpX<AND>(exp) ? conjoin(n_args, exp->getFactory()) : disjoin(n_args, exp->getFactory());
+          sorts.push_back(mk<BOOL_TY>(m_efac)); // Return type
+          
+          // Create new declaration
+          Expr newDecl = bind::fdecl(decl->arg(0), sorts);
+          m_decl_map[decl] = newDecl;
+          result.insert(newDecl);
         }
-        if (isOpX<NEG>(exp))
-        {
-          return mkNeg(translateRecursively(exp->first()));
-        }
-        if (isOp<ComparissonOp>(exp) || isOp<NumericOp>(exp))
-        {
-          auto isConstant = bind::IsHardIntConst{};
-          // The meat of the translation from BV to LIA.
-          ExprVector n_args;
-          for(auto it = exp->args_begin(); it != exp->args_end(); ++it) {
-            Expr arg = *it;
-            if(isConstant(arg))
-            {
-              auto isNegative = [](Expr e) -> bool
-              { return bind::IsHardIntConst{}(e) && getTerm<mpz_class>(e) < 0; };
-              if (isNegative(arg))
-              {
-                outs() << "Neg arg: " << arg << std::endl;
-                outs() << "Neg first: " << arg->first() << std::endl;
-                outs() << "Neg left: " << arg->left() << std::endl;
-                outs() << "Neg right: " << arg->right() << std::endl;
-                Expr negOne = bv::bvnum(getTerm<mpz_class>(additiveInverse(arg)), bitwidth, exp->getFactory());
-                n_args.push_back(bv::bvneg(negOne));
-              }
-              else
-              {
-                n_args.push_back(constMap.at(arg));
-              }
-            }
-            else if(isOpX<UN_MINUS>(arg))
-            {
-              // This needs to be handled differently. 
-              // We need to handle subtraction directly instead of using negative 1 or 2 or ...
-              Expr negOne = bv::bvnum(1, bitwidth, exp->getFactory());
-              n_args.push_back(mk<BMUL>(bv::bvneg(negOne), translateRecursively(arg->first())));
-            } 
-            else {
-              n_args.push_back(translateRecursively(arg));
-            }
-          }
-          if (isOpX<MULT>(exp) && exp->arity() == 2)
-          {
-            Expr left = exp->left();
-            Expr right = exp->right();
-            auto isMinusOne = [](Expr e) -> bool
-            { return bind::IsHardIntConst{}(e) && getTerm<mpz_class>(e) == -1; };
-            if (isMinusOne(left))
-            {
-              outs() << "Minus one right" << std::endl;
-              return bv::bvneg(translateRecursively(right));
-            }
-            if (isMinusOne(right))
-            {
-              outs() << "Minus one left" << std::endl;
-              return bv::bvneg(translateRecursively(left));
-            }
-          }
+        return result;
+      }
 
-          outs() << "Translating operation: " << *exp << std::endl;
-          Expr res = translateOperation(exp, n_args);
-          return res;
-        }
-        if (bind::isBoolConst(exp))
+      void translateVariableMaps(const CHCs &input, CHCs &output)
+      {
+        // Translate regular variables using translateInvVars
+        for (const auto &kv : input.invVars)
         {
-          return exp;
-        }
-        if (isOpX<ITE>(exp))
-        {
-          Expr cond = translateRecursively(exp->arg(0));
-          Expr then = translateRecursively(exp->arg(1));
-          Expr els = translateRecursively(exp->arg(2));
-          return mk<ITE>(cond, then, els);
+          output.invVars[kv.first] = translateInvVars(kv.second, true);
         }
 
-        outs() << "Looking for: " << exp << std::endl;
-        Expr bvVar = variableMap[exp];
-        if(bvVar != NULL) {
-          return bvVar;
+        // Translate prime variables using translateInvVars
+        for (const auto &kv : input.invVarsPrime) 
+        {
+          output.invVarsPrime[kv.first] = translateInvVars(kv.second, true);
         }
+      }
 
-        std::cerr << "Unhandled case when translating LIA invariant to BV: " << *exp << std::endl;
-        assert(false);
+      std::vector<HornRuleExt> translateClauses(const std::vector<HornRuleExt> &rules)
+      {
+        std::vector<HornRuleExt> result;
+        for (const auto &rule : rules)
+        {
+          HornRuleExt newRule = rule;
+          
+          // Translate source/destination relations
+          if (m_decl_map.count(rule.srcRelation))
+            newRule.srcRelation = m_decl_map[rule.srcRelation];
+          if (m_decl_map.count(rule.dstRelation))  
+            newRule.dstRelation = m_decl_map[rule.dstRelation];
+
+          // Translate variables
+          translateRuleVariables(newRule);
+
+          // Translate body constraints and fix formatting
+          newRule.body = fixFormatting(translateExpr(rule.body));
+          
+          result.push_back(newRule);
+        }
+        return result;
+      }
+
+      void translateRuleVariables(HornRuleExt &rule)
+      {
+        // Translate source, destination and local variables using translateInvVars
+        rule.srcVars = translateInvVars(rule.srcVars);
+        rule.dstVars = translateInvVars(rule.dstVars);  
+        rule.locVars = translateInvVars(rule.locVars);
       }
 
       Expr translateExpr(Expr e)
       {
-        return translateRecursively(e);
-      }
+        if (!e) return e;
 
-      Expr translateOperation(Expr e, ExprVector n_args)
-      {
-        if (n_args.size() > 2)
+        // Handle variables
+        if (bind::IsConst()(e))
+          return translateVar(e);
+
+        // Handle integer literals 
+        if (isOpX<MPZ>(e))
         {
-          ExprVector nn_args(n_args.begin() + 1, n_args.end());
-          Expr subExpression = translateOperation(e, nn_args);
-          n_args.erase(n_args.begin() + 1, n_args.end());
-          n_args.push_back(subExpression);
-        }
-        if (isOpX<EQ>(e))
-        {
-          return mknary<EQ>(n_args);
+          mpz_class val = getTerm<mpz_class>(e);
+          return bv::bvnum(val, m_width, m_efac);
         }
 
-        if (isOpX<NEQ>(e))
-        {
-          return mknary<NEQ>(n_args);
-        }
-
-        // MB: This transformation is meant for translating candidate invariants, that's why we translate with AND: to get both candidates
-        if (isOpX<LEQ>(e))
-        {
-          return mknary<BULE>(n_args);
-        }
-
-        if (isOpX<GEQ>(e))
-        {
-          return mknary<BUGE>(n_args);
-        }
-
-        if (isOpX<LT>(e))
-        {
-          return mknary<BULT>(n_args);
-        }
-
-        if (isOpX<GT>(e))
-        {
-          return mknary<BUGT>(n_args);
-        }
-
+        // Handle operations
         if (isOpX<PLUS>(e))
+          return bv::bvadd(translateExpr(e->left()), translateExpr(e->right()));
+        else if (isOpX<MINUS>(e))
+          return mk<BSUB>(translateExpr(e->left()), translateExpr(e->right()));
+        else if (isOpX<MULT>(e))
+          return mk<BMUL>(translateExpr(e->left()), translateExpr(e->right()));
+        else if (isOpX<DIV>(e))
+          return mk<BSDIV>(translateExpr(e->left()), translateExpr(e->right()));
+        else if (isOpX<MOD>(e))
+          return mk<BSREM>(translateExpr(e->left()), translateExpr(e->right()));
+        else if (isOpX<UN_MINUS>(e))
+          return bv::bvneg(translateExpr(e->left()));
+        else if (isOpX<LEQ>(e))
+          return bv::bvsle(translateExpr(e->left()), translateExpr(e->right()));
+        else if (isOpX<LT>(e))
+          return bv::bvslt(translateExpr(e->left()), translateExpr(e->right()));
+        else if (isOpX<GEQ>(e))
+          return bv::bvsge(translateExpr(e->left()), translateExpr(e->right()));
+        else if (isOpX<GT>(e))
+          return bv::bvsgt(translateExpr(e->left()), translateExpr(e->right()));
+          
+        // Keep boolean operations untranslated
+        else if (isOp<BoolOp>(e))
         {
-          return mknary<BADD>(n_args);
+          ExprVector args;
+          for (unsigned i = 0; i < e->arity(); i++)
+            args.push_back(translateExpr(e->arg(i)));
+          return e->efac().mkNary(e->op(), args);
         }
 
-        if (isOpX<MINUS>(e))
-        {
-          return mknary<BSUB>(n_args);
-        }
-
-        if (isOpX<MULT>(e))
-        {
-          return mknary<BMUL>(n_args);
-        }
-
-        if (isOpX<IDIV>(e))
-        {
-          return mknary<BUDIV>(n_args);
-        }
-
-        if(isOpX<MOD>(e))
-        {
-          return mknary<BUREM>(n_args);
-        }
-
-        std::cerr << "Case not covered when translating operation from LIA to BV " << *e << std::endl;
-        assert(false);
-        throw std::logic_error("Case not covered when translating operation from LIA to BV");
+        // Any other operation - recursively translate args
+        ExprVector args;
+        for (unsigned i = 0; i < e->arity(); i++)
+          args.push_back(translateExpr(e->arg(i)));
+        return e->efac().mkNary(e->op(), args);
       }
 
-      ExprVector translateInvVars(const ExprVector &origVars, bool isInvVars = false)
+      Expr fixFormatting(Expr e)
       {
-        // Translate from INT to BV vars.
-        ExprVector translatedVars;
-        for (const auto &var : origVars)
+        // Fix rules that end with NULL
+        if (e == NULL) 
         {
-          if (debug >= 3)
-          {
-            outs() << "Var: " << *var << "\n";
-            outs() << "Var type: " << *var->left() << "\n";
-            outs() << "var->left()->left(): " << *var->left()->left() << "\n";
-          }
-          // translate INT var to BV var.
-          Expr bvVar = bv::bvConst(var, bitwidth);
-          if (debug >= 3)
-          {
-            outs() << "BV var: " << *bvVar << "\n";
-            outs() << "BV var type: " << *bvVar->left() << "\n";
-          }
-          translatedVars.push_back(bvVar);
-          if (isInvVars)
-            variableMap[var] = bvVar;
+          return mk<FALSE>(m_efac);
         }
-        return translatedVars;
+
+        // Fix rule formatting
+        ExprVector args;
+        for (unsigned i = 0; i < e->arity(); i++)
+        {
+          args.push_back(fixFormatting(e->arg(i)));
+        }
+
+        if (args.empty()) return e;
+        return e->efac().mkNary(e->op(), args);
       }
-    };
-  }
+  };
 }
 
 #endif
