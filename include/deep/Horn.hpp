@@ -723,7 +723,7 @@ namespace ufo
             }
           }
         }
-        if (found)
+        if (found && false)
         {
           if (debug >= 2)
             outs () << "  Eliminating CHC: " << h->srcRelation

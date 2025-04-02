@@ -255,27 +255,42 @@ namespace ufo
           return bv::bvnum(val, m_width, m_efac);
         }
 
-        // Handle operations - prefer unsigned operations
+        // Handle operations - all LIA operations are signed
         if (isOpX<PLUS>(e))
           return bv::bvadd(translateExpr(e->left()), translateExpr(e->right()));
         else if (isOpX<MINUS>(e))
           return mk<BSUB>(translateExpr(e->left()), translateExpr(e->right()));
         else if (isOpX<MULT>(e))
           return mk<BMUL>(translateExpr(e->left()), translateExpr(e->right()));
-        else if (isOpX<DIV>(e))
-          return mk<BUDIV>(translateExpr(e->left()), translateExpr(e->right()));
-        else if (isOpX<MOD>(e))
-          return mk<BUREM>(translateExpr(e->left()), translateExpr(e->right()));
+        else if (isOpX<DIV>(e)) {
+          // LIA division is always signed integer division
+          Expr left = translateExpr(e->left());
+          Expr right = translateExpr(e->right());
+          // Optionally add check for division by zero
+          return mk<BSDIV>(left, right); 
+        }
+        else if (isOpX<IDIV>(e)) {
+          // Floor division in LIA also maps to signed BV division
+          Expr left = translateExpr(e->left());
+          Expr right = translateExpr(e->right());
+          return mk<BSDIV>(left, right);
+        }
+        else if (isOpX<MOD>(e)) {
+          // LIA mod becomes signed remainder
+          Expr left = translateExpr(e->left());
+          Expr right = translateExpr(e->right());
+          return mk<BSREM>(left, right);
+        }
         else if (isOpX<UN_MINUS>(e))
           return bv::bvneg(translateExpr(e->left()));
         else if (isOpX<LEQ>(e))
-          return bv::bvule(translateExpr(e->left()), translateExpr(e->right()));
+          return bv::bvsle(translateExpr(e->left()), translateExpr(e->right())); // Changed to signed
         else if (isOpX<LT>(e))
-          return bv::bvult(translateExpr(e->left()), translateExpr(e->right()));
+          return bv::bvslt(translateExpr(e->left()), translateExpr(e->right())); // Changed to signed
         else if (isOpX<GEQ>(e))
-          return bv::bvuge(translateExpr(e->left()), translateExpr(e->right()));
+          return bv::bvsge(translateExpr(e->left()), translateExpr(e->right())); // Changed to signed 
         else if (isOpX<GT>(e))
-          return bv::bvugt(translateExpr(e->left()), translateExpr(e->right()));
+          return bv::bvsgt(translateExpr(e->left()), translateExpr(e->right())); // Changed to signed
           
         // Keep boolean operations untranslated
         else if (isOp<BoolOp>(e))

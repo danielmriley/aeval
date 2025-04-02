@@ -282,10 +282,16 @@ namespace ufo
             return mk<MINUS>(translateExpr(e->left()), translateExpr(e->right()));
           else if (isOpX<BMUL>(e))
             return mk<MULT>(translateExpr(e->left()), translateExpr(e->right()));
-          else if (isOpX<BUDIV>(e) || isOpX<BSDIV>(e)) 
-            return mk<DIV>(translateExpr(e->left()), translateExpr(e->right()));
-          else if (isOpX<BUREM>(e) || isOpX<BSREM>(e))
-            return mk<MOD>(translateExpr(e->left()), translateExpr(e->right()));
+          else if (isOpX<BUDIV>(e))
+            return mk<DIV>(translateExpr(e->left()), translateExpr(e->right())); // Keep as DIV for unsigned
+          else if (isOpX<BSDIV>(e))
+            return mk<DIV>(translateExpr(e->left()), translateExpr(e->right())); // Keep as DIV for signed
+          else if (isOpX<BUREM>(e))
+            return mk<MOD>(translateExpr(e->left()), translateExpr(e->right())); // Keep as MOD for unsigned
+          else if (isOpX<BSREM>(e))
+            return mk<MOD>(translateExpr(e->left()), translateExpr(e->right())); // Keep as MOD for signed
+          else if (isOpX<BSMOD>(e))
+            return mk<MOD>(translateExpr(e->left()), translateExpr(e->right())); // Handle BSMOD too
           
           // Comparisons - both signed/unsigned translate to same LIA ops
           else if (isOpX<BULE>(e) || isOpX<BSLE>(e))
