@@ -255,7 +255,7 @@ namespace ufo
           return bv::bvnum(val, m_width, m_efac);
         }
 
-        // Handle operations
+        // Handle operations - prefer unsigned operations
         if (isOpX<PLUS>(e))
           return bv::bvadd(translateExpr(e->left()), translateExpr(e->right()));
         else if (isOpX<MINUS>(e))
@@ -263,19 +263,19 @@ namespace ufo
         else if (isOpX<MULT>(e))
           return mk<BMUL>(translateExpr(e->left()), translateExpr(e->right()));
         else if (isOpX<DIV>(e))
-          return mk<BSDIV>(translateExpr(e->left()), translateExpr(e->right()));
+          return mk<BUDIV>(translateExpr(e->left()), translateExpr(e->right()));
         else if (isOpX<MOD>(e))
-          return mk<BSREM>(translateExpr(e->left()), translateExpr(e->right()));
+          return mk<BUREM>(translateExpr(e->left()), translateExpr(e->right()));
         else if (isOpX<UN_MINUS>(e))
           return bv::bvneg(translateExpr(e->left()));
         else if (isOpX<LEQ>(e))
-          return bv::bvsle(translateExpr(e->left()), translateExpr(e->right()));
+          return bv::bvule(translateExpr(e->left()), translateExpr(e->right()));
         else if (isOpX<LT>(e))
-          return bv::bvslt(translateExpr(e->left()), translateExpr(e->right()));
+          return bv::bvult(translateExpr(e->left()), translateExpr(e->right()));
         else if (isOpX<GEQ>(e))
-          return bv::bvsge(translateExpr(e->left()), translateExpr(e->right()));
+          return bv::bvuge(translateExpr(e->left()), translateExpr(e->right()));
         else if (isOpX<GT>(e))
-          return bv::bvsgt(translateExpr(e->left()), translateExpr(e->right()));
+          return bv::bvugt(translateExpr(e->left()), translateExpr(e->right()));
           
         // Keep boolean operations untranslated
         else if (isOp<BoolOp>(e))

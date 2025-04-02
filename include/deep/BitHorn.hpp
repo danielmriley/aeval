@@ -316,9 +316,38 @@ namespace ufo
       }
 
       // Bootstrap and calculate initial statistics
-      if (solver->bootstrap()) {
-        if (debug >= 2) outs() << "Bootstrap successful\n";
-        return true;
+      bool bootstrap = solver->bootstrap();
+      if (bootstrap) {
+        if (debug >= 2)
+          outs() << "Bootstrap successful\n";
+
+        // Get lemmas safely
+        ExprSet lemmas = solver->getlearnedLemmas(0);
+        if (lemmas.empty())
+        {
+          if (debug >= 1)
+            outs() << "Warning: No lemmas found\n";
+          return false;
+        }
+
+        if (debug >= 3)
+        {
+          outs() << "Lemmas found:\n";
+          for (auto &lemma : lemmas)
+          {
+            outs() << "  " << lemma << "\n";
+          }
+        }
+
+        // Validate and normalize lemmas
+        ExprSet validLemmas;
+        for (auto &lemma : lemmas)
+        {
+          validLemmas.insert(normalizeExpr(lemma));
+        }
+
+        m_liaSolution = validLemmas;
+        return !m_liaSolution.empty();
       }
 
       solver->calculateStatistics();
@@ -338,6 +367,14 @@ namespace ufo
           return false;
         }
 
+        if(debug >= 3)
+        {
+          outs() << "Lemmas found:\n";
+          for (auto &lemma : lemmas) {
+            outs() << "  " << lemma << "\n";
+          }
+        }
+
         // Validate and normalize lemmas
         ExprSet validLemmas;
         for (auto &lemma : lemmas) {
@@ -352,9 +389,63 @@ namespace ufo
     }
 
     bool translateSolutionToBv() {
-      // Translate m_liaSolution to BV using m_Lia2BvTranslator
-      // Store in m_bvSolution  
-      return false; // TODO
+      if (debug >= 2) {
+        outs() << "Translating LIA solution to BV...\n";
+      }
+
+      // Clear any previous solution
+      m_bvSolution.clear();
+
+      // Create fresh Lia2BvTranslator for this translation
+      Lia2BvTranslator translator(m_efac, m_z3, 4, debug);
+
+      // Print original LIA solution
+      if (debug >= 3) {
+        outs() << "\nLIA Solution:\n";
+        for (auto& expr : m_liaSolution) {
+          outs() << "  " << *expr << "\n";
+        }
+        outs() << "\n";
+      }
+
+      // Translate each expression in the solution
+      for (auto& expr : m_liaSolution) {
+        try {
+          Expr bvExpr = translator.translateExpr(expr);
+          if (bvExpr) {
+            if (debug >= 3) {
+              outs() << "Translated: " << *expr << "\n";
+              outs() << "      To: " << *bvExpr << "\n";
+            }
+            m_bvSolution[expr] = bvExpr;
+          }
+        }
+        catch (const std::exception& e) {
+          if (debug >= 1) {
+            outs() << "Error translating expr: " << *expr << "\n";
+            outs() << "Error: " << e.what() << "\n";
+          }
+          continue;
+        }
+      }
+
+      // Print full translation results
+      if (debug >= 2) {
+        outs() << "\nTranslated BV Solution:\n";
+        for (auto& kv : m_bvSolution) {
+          outs() << "Original: " << *kv.first << "\n";
+          outs() << "     BV: " << *kv.second << "\n";
+        }
+        outs() << "\n";
+      }
+
+      // For now, just exit after printing
+      if (debug >= 1) {
+        outs() << "Exiting after translation demonstration\n";
+      }
+      exit(0);
+
+      return !m_bvSolution.empty();
     }
 
     bool checkSafetyInBV() {

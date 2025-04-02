@@ -282,16 +282,12 @@ namespace ufo
             return mk<MINUS>(translateExpr(e->left()), translateExpr(e->right()));
           else if (isOpX<BMUL>(e))
             return mk<MULT>(translateExpr(e->left()), translateExpr(e->right()));
-          else if (isOpX<BUDIV>(e)) 
-            return mk<IDIV>(translateExpr(e->left()), translateExpr(e->right())); 
-          else if (isOpX<BSDIV>(e))
+          else if (isOpX<BUDIV>(e) || isOpX<BSDIV>(e)) 
             return mk<DIV>(translateExpr(e->left()), translateExpr(e->right()));
-          else if (isOpX<BUREM>(e))
-            return mk<REM>(translateExpr(e->left()), translateExpr(e->right()));
-          else if (isOpX<BSREM>(e)) 
+          else if (isOpX<BUREM>(e) || isOpX<BSREM>(e))
             return mk<MOD>(translateExpr(e->left()), translateExpr(e->right()));
           
-          // Comparisons - note both signed/unsigned translate to same LIA ops
+          // Comparisons - both signed/unsigned translate to same LIA ops
           else if (isOpX<BULE>(e) || isOpX<BSLE>(e))
             return mk<LEQ>(translateExpr(e->left()), translateExpr(e->right()));
           else if (isOpX<BUGE>(e) || isOpX<BSGE>(e))
