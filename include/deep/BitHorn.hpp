@@ -233,7 +233,7 @@ namespace ufo
       
     }
 
-    bool solveLIA(unsigned int to = 10000) {
+    bool solveLIA(unsigned int to = 10) {
       if (debug >= 2) {
         outs() << "Attempting to solve LIA system\n";  
       }
@@ -280,21 +280,16 @@ namespace ufo
       BndExpl bnd(*m_liaChcs, to, debug);
 
       // Process each cycle to generate candidates
-      outs() << "CYCLES: " << m_liaChcs->cycles.size() << "\n";
       for (auto& cyc : m_liaChcs->cycles) {
         Expr rel = cyc.first;
-        if(debug >= 3)
-        {
-          outs() << "Generating cands for rel: " << rel << "\n";
-        }
         for (int i = 0; i < cyc.second.size(); i++) {
           assert(rel == m_liaChcs->chcs[cyc.second[i][0]].srcRelation);
           
-          if (solver->initializedDecl(rel)) continue; // Fixed method name
+          if (solver->initializedDecl(rel)) continue;
           solver->initializeDecl(rel);
 
           // Process prefix for candidates
-          Expr pref = bnd.compactPrefix(rel, i);  // Use bnd instead
+          Expr pref = bnd.compactPrefix(rel, i);
           ExprSet tmp;
           getConj(pref, tmp);
           
@@ -305,7 +300,6 @@ namespace ufo
             }
           }
 
-          // Initialize with correct signature
           solver->initializeAux(cands[rel], bnd, rel, i, pref);
         }
       }
@@ -324,6 +318,7 @@ namespace ufo
       // Bootstrap and calculate initial statistics
       if (solver->bootstrap()) {
         if (debug >= 2) outs() << "Bootstrap successful\n";
+        return true;
       }
 
       solver->calculateStatistics();
@@ -346,9 +341,7 @@ namespace ufo
         // Validate and normalize lemmas
         ExprSet validLemmas;
         for (auto &lemma : lemmas) {
-          if (!containsOp<IDIV>(lemma) && !containsOp<MOD>(lemma)) {
-            validLemmas.insert(normalizeExpr(lemma));
-          }
+          validLemmas.insert(normalizeExpr(lemma));
         }
 
         m_liaSolution = validLemmas;
@@ -421,7 +414,7 @@ namespace ufo
     }
 
     // For non-serialization case, check if input is BV format
-    if (!ruleManager.hasBV)
+    if (!ruleManager.hasBV && !ser)
     {
       outs() << "Input is not in BV format\n";
       return;
@@ -431,7 +424,11 @@ namespace ufo
     BitHorn bh(efac, z3, ruleManager, debug);
 
     if (ser) {
-      // When ser is true, just translate and serialize
+      // Just translate and serialize
+      if(debug >= 2) 
+      {
+        outs() << "Translating LIA to BV.\n";
+      }
       if (!bh.translateToBv()) {
         outs() << "Error translating LIA to BV\n"; 
         return;
