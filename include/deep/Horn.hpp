@@ -89,6 +89,45 @@ namespace ufo
     string varname = "_FH_";
     SMTUtils u;
 
+    void initializeCHC(const CHCs& other) {
+      indeces = other.indeces;
+      failDecl = other.failDecl;
+      chcs = other.chcs;
+      allCHCs = other.allCHCs;
+      wtoCHCs = other.wtoCHCs;
+      dwtoCHCs = other.dwtoCHCs;
+      wtoDecls = other.wtoDecls;
+      decls = other.decls;
+      invVars = other.invVars;
+      invVarsPrime = other.invVarsPrime;
+      outgs = other.outgs;
+      cycleSearchDone = other.cycleSearchDone;
+      loopheads = other.loopheads;
+      cycles = other.cycles;
+      prefixes = other.prefixes;
+      acyclic = other.acyclic;  
+      seqPoints = other.seqPoints;
+      hasArrays = other.hasArrays;
+      hasAnyArrays = other.hasAnyArrays;
+      hasBV = other.hasBV;
+      hasQuery = other.hasQuery;
+      debug = other.debug;
+      chcsToCheck1 = other.chcsToCheck1;
+      chcsToCheck2 = other.chcsToCheck2;
+      toEraseChcs = other.toEraseChcs;
+      glob_ind = other.glob_ind;
+      origVrs = other.origVrs;
+      
+      // Rebuild outgoing edges map
+      outgs.clear();
+      for (int i = 0; i < chcs.size(); i++) {
+        outgs[chcs[i].srcRelation].push_back(i);
+      }
+      
+      // Reset cycle detection
+      cycleSearchDone = false;
+    }
+
     public:
 
     ExprFactory &m_efac;
@@ -120,99 +159,25 @@ namespace ufo
       u(efac), m_efac(efac), m_z3(z3), hasAnyArrays(false), debug(d) {};
     CHCs(CHCs const &r) : CHCs(r.m_efac, r.m_z3, r.debug) 
     {
-      indeces = r.indeces;
-      failDecl = r.failDecl;
-      chcs = r.chcs;
-      allCHCs = r.allCHCs;
-      wtoCHCs = r.wtoCHCs;
-      dwtoCHCs = r.dwtoCHCs;
-      wtoDecls = r.wtoDecls;
-      decls = r.decls;
-      invVars = r.invVars;
-      invVarsPrime = r.invVarsPrime;
-      outgs = r.outgs;
-      cycleSearchDone = r.cycleSearchDone;
-      loopheads = r.loopheads;
-      cycles = r.cycles;
-      prefixes = r.prefixes;
-      acyclic = r.acyclic;
-      seqPoints = r.seqPoints;
-      hasArrays = r.hasArrays;
-      hasAnyArrays = r.hasAnyArrays;
-      hasBV = r.hasBV;
-      hasQuery = r.hasQuery;
-      debug = r.debug;
-      chcsToCheck1 = r.chcsToCheck1;
-      chcsToCheck2 = r.chcsToCheck2;
-      toEraseChcs = r.toEraseChcs;
-      glob_ind = r.glob_ind;
-      origVrs = r.origVrs;
+      initializeCHC(r);
     };
 
     CHCs operator=(CHCs const r)
     {
-      indeces = r.indeces;
-      failDecl = r.failDecl;
-      chcs = r.chcs;
-      allCHCs = r.allCHCs;
-      wtoCHCs = r.wtoCHCs;
-      dwtoCHCs = r.dwtoCHCs;
-      wtoDecls = r.wtoDecls;
-      decls = r.decls;
-      invVars = r.invVars;
-      invVarsPrime = r.invVarsPrime;
-      outgs = r.outgs;
-      cycleSearchDone = r.cycleSearchDone;
-      loopheads = r.loopheads;
-      cycles = r.cycles;
-      prefixes = r.prefixes;
-      acyclic = r.acyclic;
-      seqPoints = r.seqPoints;
-      hasArrays = r.hasArrays;
-      hasAnyArrays = r.hasAnyArrays;
-      hasBV = r.hasBV;
-      hasQuery = r.hasQuery;
-      debug = r.debug;
-      chcsToCheck1 = r.chcsToCheck1;
-      chcsToCheck2 = r.chcsToCheck2;
-      toEraseChcs = r.toEraseChcs;
-      glob_ind = r.glob_ind;
-      origVrs = r.origVrs;
-
+      initializeCHC(r);
       return *this;
     }
 
     CHCs operator=(CHCs const *r)
     {
-      indeces = r->indeces;
-      failDecl = r->failDecl;
-      chcs = r->chcs;
-      allCHCs = r->allCHCs;
-      wtoCHCs = r->wtoCHCs;
-      dwtoCHCs = r->dwtoCHCs;
-      wtoDecls = r->wtoDecls;
-      decls = r->decls;
-      invVars = r->invVars;
-      invVarsPrime = r->invVarsPrime;
-      outgs = r->outgs;
-      cycleSearchDone = r->cycleSearchDone;
-      loopheads = r->loopheads;
-      cycles = r->cycles;
-      prefixes = r->prefixes;
-      acyclic = r->acyclic;
-      seqPoints = r->seqPoints;
-      hasArrays = r->hasArrays;
-      hasAnyArrays = r->hasAnyArrays;
-      hasBV = r->hasBV;
-      hasQuery = r->hasQuery;
-      debug = r->debug;
-      chcsToCheck1 = r->chcsToCheck1;
-      chcsToCheck2 = r->chcsToCheck2;
-      toEraseChcs = r->toEraseChcs;
-      glob_ind = r->glob_ind;
-      origVrs = r->origVrs;
-
+      if (r != nullptr) {
+        initializeCHC(*r);
+      }
       return *this;
+    }
+
+    void reinitialize(const CHCs& other) {
+      initializeCHC(other);
     }
 
     bool isFapp (Expr e)

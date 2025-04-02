@@ -22,45 +22,46 @@ namespace ufo
       // Translation helpers
       Expr translateVar(Expr var)
       {
-        // Replace init-statement in if with traditional lookup
         auto it = m_var_map.find(var);
         if (it != m_var_map.end())
-          return it->second;
+            return it->second;
 
-        // Only translate integer variables
-        if (!isOpX<INT_TY>(bind::typeOf(var))) 
-          return var;
-
-        // Create new BV variable with same name but BV sort
-        Expr name = bind::name(var); 
-        Expr sort = bv::bvsort(m_width, m_efac);
-        Expr newVar = bind::mkConst(name, sort);
+        if (!isOpX<INT_TY>(bind::typeOf(var)))
+            return var;
+            
+        // Create BV variable using bv::bvConst
+        Expr name = bind::fname(bind::fname(var));
+        Expr bvVar = bv::bvConst(name, m_width);
+        m_var_map[var] = bvVar;
         
-        m_var_map[var] = newVar;
-        return newVar;
+        if (debug >= 3) {
+            outs() << "Mapped " << *var << " to " << *bvVar << "\n";
+        }
+        return bvVar;
       }
 
       ExprVector translateInvVars(const ExprVector &origVars, bool cacheVars = false)
       {
         ExprVector translatedVars;
         
-        for (const auto &var : origVars) 
+        for (const auto &var : origVars)
         {
-          // Skip if not an integer variable
-          if (!isOpX<INT_TY>(bind::typeOf(var)))
-          {
-            translatedVars.push_back(var);
-            continue;
-          }
+            if (!isOpX<INT_TY>(bind::typeOf(var))) {
+                translatedVars.push_back(var);
+                continue;
+            }
 
-          // Create new BV variable
-          Expr bvVar = bv::bvConst(var, m_width);
-          outs() << "bvVar: " << bvVar << "\n";
-          translatedVars.push_back(bvVar);
-          
-          // Cache the translation if requested
-          if (cacheVars)
-            m_var_map[var] = bvVar;
+            // Use same translation logic as translateVar
+            Expr name = bind::fname(bind::fname(var));
+            Expr bvVar = bv::bvConst(name, m_width);
+            translatedVars.push_back(bvVar);
+            
+            if (cacheVars) {
+                m_var_map[var] = bvVar;
+                if (debug >= 3) {
+                    outs() << "Cached mapping: " << *var << " -> " << *bvVar << "\n";
+                }
+            }
         }
         return translatedVars;
       }
