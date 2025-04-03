@@ -1395,14 +1395,18 @@ namespace ufo
 
     void serializeCHC()
     {
+      if (debug >= 2) outs() << "Serializing CHC system to SMT2 format...\n";
+      
       std::ofstream enc_chc;
       enc_chc.open("chc.smt2");
       
       // Create printer
       BVExprPrinter printer(u);
 
+      if (debug >= 3) outs() << "Writing relation declarations...\n";
       for (auto & d : decls)
       {
+        if (debug >= 4) outs() << "  Declaring relation: " << *d->left() << "\n";
         enc_chc << "(declare-rel " << d->left() << " (";
         for (int i = 1; i < d->arity()-1; i++)
         {
@@ -1414,8 +1418,10 @@ namespace ufo
 
       enc_chc << "(declare-rel fail ())\n\n";
 
+      if (debug >= 3) outs() << "Writing variable declarations...\n";
       for(auto& v: invVars)
       {
+        if (debug >= 4) outs() << "  Writing vars for relation: " << *v.first << "\n";
         for(auto& a: v.second)
         {
           enc_chc << "(declare-var ";
@@ -1460,8 +1466,13 @@ namespace ufo
         if(added) enc_chc << "\n";
       }
 
+      if (debug >= 3) outs() << "Writing Horn rules...\n";
       for (auto & c : chcs)
       {
+        if (debug >= 4) {
+          outs() << "  Writing rule: " << *c.srcRelation;
+          outs() << " -> " << *c.dstRelation << "\n";
+        }
         enc_chc << "(rule ";
         Expr src, dst;
         if (c.isFact)
@@ -1519,6 +1530,7 @@ namespace ufo
         enc_chc << ")\n\n";  
       }
       enc_chc << "(query fail)\n";
+      if (debug >= 2) outs() << "Finished writing CHC system to " << "chc.smt2\n";
     }
 
     void serializeHorn ()

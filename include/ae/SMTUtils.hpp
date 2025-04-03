@@ -20,6 +20,7 @@ namespace ufo
     ZSolver<EZ3>::Model* m;
 
   public:
+    int debug = 0;  // Add debug member
 
     SMTUtils (ExprFactory& _efac) :
       efac(_efac), z3(efac), smt (z3), can_get_model(0), m(NULL) {}

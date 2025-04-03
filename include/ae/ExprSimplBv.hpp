@@ -634,13 +634,26 @@ namespace ufo
 
     void print(Expr e, std::ofstream &out)
     {
+      static int depth = 0;
+      auto printDebug = [&](const char* op) {
+        if (u.debug >= 5) {
+          // Use spaces instead of indent()
+          for (int i = 0; i < depth * 2; ++i) outs() << " ";
+          outs() << "BVPrinter: " << op << " expression: " << *e << "\n";
+        }
+      };
+
       if (!e) {
+        printDebug("null");
         out << "true";
         return;
       }
 
+      depth++;
+
       if (isOp<BADD>(e))
       {
+        printDebug("BADD");
         out << "(bvadd ";
         print(e->left(), out);
         out << " ";
@@ -649,6 +662,7 @@ namespace ufo
       }
       else if (isOp<BMUL>(e))
       {
+        printDebug("BMUL"); 
         out << "(bvmul ";
         print(e->left(), out);
         out << " ";
@@ -756,8 +770,11 @@ namespace ufo
       else
       {
         // For non-BV operations or leaf nodes, use standard printing
+        printDebug("default");
         u.print(e, out);
       }
+
+      depth--;
     }
   };
 
