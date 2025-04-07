@@ -21,6 +21,10 @@ namespace ufo
     int dFwd;
     int mbpEqs;
 
+    bool reorder;
+    map<int, map<int, deque<Expr>>> deferredEqualities;
+    map<int, map<int, deque<Expr>>> deferredOther;
+
     map<int, ExprSet> mbps;
     map<int, ExprTree> mbpDt, strenDt;
 
@@ -32,11 +36,11 @@ namespace ufo
     RndLearnerV4 (ExprFactory &_e, EZ3 &_z3, CHCs& _r, unsigned _to, bool _freqs,
                   bool _aggp, int _mu, int _da, bool _d, int _m, bool _dAllMbp,
                   bool _dAddProp, bool _dAddDat, bool _dStrenMbp, int _dFwd,
-                  bool _dR, bool _dG, int _debug) :
+                  bool _dR, bool _dG, bool _reorder, int _debug) :
       RndLearnerV3 (_e, _z3, _r, _to, _freqs, _aggp, _mu, _da, _debug),
                   dDisj(_d), mbpEqs(_m), dAllMbp(_dAllMbp),
                   dAddProp(_dAddProp), dAddDat(_dAddDat), dStrenMbp(_dStrenMbp),
-                  dFwd(_dFwd), dRecycleCands(_dR), dGenerous(_dG) {}
+                  dFwd(_dFwd), dRecycleCands(_dR), dGenerous(_dG), reorder(_reorder) {}
 
     bool simplLemmas() { return !dDisj; }
 
@@ -556,15 +560,57 @@ namespace ufo
       }
     }
 
+    void sortDeferredCands()
+    {
+      for(auto& d: deferredCandidates)
+      {
+        for(auto& c: d.second)
+        {
+          if(isOpX<EQ>(c))
+            deferredEqualities[d.first][c->arity()].push_back(c);
+        }
+      }
+    }
+
+    int ar = 0;
+    Expr getCand(int invNum)
+    {
+      if(!deferredEqualities.empty())
+      {
+        if(deferredEqualities[invNum][ar].empty())
+        {
+          ar++;
+        }
+        Expr cand = deferredEqualities[invNum][ar].back();
+        if(printLog >= 3) outs() << "Picked eqCand " << cand << "\n";
+        deferredEqualities[invNum][ar].pop_back();
+        return cand;
+      }
+      else
+      {
+        Expr cand = deferredCandidates[invNum].back();
+        if(printLog >= 3) outs() << "Picked defCand " << cand << "\n";
+        deferredCandidates[invNum].pop_back();
+        return cand;
+      }
+    }
+
     // currently, largely based on V3's version
     bool synthesize(unsigned maxAttempts)
     {
       if (printLog) outs () << "\nSAMPLING\n========\n";
-      if (printLog >= 3)
+      if(reorder) sortDeferredCands();
+
+      if (printLog >= 2) {
+        for (auto & a : deferredEqualities)
+          for (auto & b : a.second)
+            for (auto & c : b.second)
+              outs () << "  Deferred equality for " << a.first << ": " << c << "\n";
 
         for (auto & a : deferredCandidates)
           for (auto & b : a.second)
             outs () << "  Deferred cand for " << a.first << ": " << b << "\n";
+      }
 
       map<int, int> defSz;
       for (auto & a : deferredCandidates) defSz[a.first] = a.second.size();
@@ -964,7 +1010,7 @@ namespace ufo
        bool freqs, bool aggp, int dat, int mut, bool doElim, bool doArithm,
        bool doDisj, int doProp, int mbpEqs, bool dAllMbp, bool dAddProp,
        bool dAddDat, bool dStrenMbp, int dFwd, bool dRec, bool dGenerous,
-       bool dSee, bool ser, int debug)
+       bool dSee, bool ser, bool reorder, int debug)
   {
     ExprFactory m_efac;
     EZ3 z3(m_efac);
@@ -991,7 +1037,7 @@ namespace ufo
 
     RndLearnerV4 ds(m_efac, z3, ruleManager, to, freqs, aggp, mut, dat,
                     doDisj, mbpEqs, dAllMbp, dAddProp, dAddDat, dStrenMbp,
-                    dFwd, dRec, dGenerous, debug);
+                    dFwd, dRec, dGenerous, reorder, debug);
 
     map<Expr, ExprSet> cands;
     for (int i = 0; i < ruleManager.cycles.size(); i++)

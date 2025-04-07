@@ -82,6 +82,7 @@ int main (int argc, char ** argv)
   const char *OPT_REC = "--re";
   const char *OPT_MBP = "--eqs-mbp";
   const char *OPT_SER = "--serialize";
+  const char *OPT_REORD = "--reorder";
   const char *OPT_DEBUG = "--debug";
 
   if (getBoolValue(OPT_HELP, false, argc, argv) || argc == 1){
@@ -170,6 +171,7 @@ int main (int argc, char ** argv)
   bool d_g = !getBoolValue(OPT_D6, false, argc, argv);
   bool d_r = getBoolValue(OPT_REC, false, argc, argv);
   bool d_ser = getBoolValue(OPT_SER, false, argc, argv);
+  bool reorder = getBoolValue(OPT_REORD, false, argc, argv);
   int debug = getIntValue(OPT_DEBUG, 0, argc, argv);
 
   if (d_m || d_p || d_d || d_s) do_disj = true;
@@ -194,7 +196,7 @@ int main (int argc, char ** argv)
   if (vers4)      // MBP-based, path-sensitive algorithms
     learnInvariants4(string(argv[argc-1]), max_attempts, to, densecode, aggressivepruning,
                    do_dl, do_mu, do_elim, do_arithm, do_disj, do_prop, mbp_eqs,
-                   d_m, d_p, d_d, d_s, d_f, d_r, d_g, d_se, d_ser, debug);
+                   d_m, d_p, d_d, d_s, d_f, d_r, d_g, d_se, d_ser, reorder, debug);
   else if (vers3) // FMCAD'18 + CAV'19 + experiments with data
     learnInvariants3(string(argv[argc-1]), max_attempts, to, densecode, aggressivepruning,
                      do_dl, do_mu, do_elim, do_arithm, do_prop, d_se, d_ser, debug);
