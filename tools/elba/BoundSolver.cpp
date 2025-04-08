@@ -59,6 +59,7 @@ void printHelpMessage()
 {
   std::cout << "Usage: elba [flags] <filename.smt2>\n";
   std::cout << "Options:\n";
+  std::cout << "  --version <int>   Choose the version of ELBA to run(default: 2)\n";
   std::cout << "  --learn <int>     Invariant synthesis limit (default: 50)\n";
   std::cout << "  --limit <int>     Unrolling limit (default: 3)\n";
   std::cout << "  --cex <int>       Counterexample level (default: 0)\n";
@@ -86,6 +87,7 @@ int main (int argc, char ** argv)
     return 0;
   }
 
+  int version = getIntValue("--version", 2, argc, argv); // Limit for invariant synthesize.
   int learn = getIntValue("--learn", 50, argc, argv); // Limit for invariant synthesize.
   int limit = getIntValue("--limit", 3, argc, argv); // unrolling limit
   int cex = getIntValue("--cex", 0, argc, argv);
@@ -111,9 +113,12 @@ int main (int argc, char ** argv)
     return 0;
   }
 
+  if(version == 1) outs() << "Version 1 is deprecated and does not function. Using ELBA version 2.\n\n";
+  version = 2;
+
   if(!dc && !gj) dc = true;
 
-  if(learn == 1) 
+  if(version == 1) 
     learnBounds(string(argv[argc-1]), cex, str, useDataGrds, data2, doPhases, debug);
   else
     learnBoundsV2(string(argv[argc-1]), cex, str, useDataGrds, learn, data2, doPhases, limit,

@@ -493,9 +493,9 @@ namespace ufo {
             lastLoophead = *l;
 
             bool ranOnceAlready = false;
-            elbas[*l] = new BoundSolverV2(*rms[*l], stren, dg, data2, doPhases, limit,
-                                          doGJ, doConnect, absConsts, dataInfer, imp, 
-                                          mutateInferred, sepOps, checkProj, mut, debug);
+            // elbas[*l] = new BoundSolverV2(*rms[*l], stren, dg, data2, doPhases, limit,
+            //                               doGJ, doConnect, absConsts, dataInfer, imp, 
+            //                               mutateInferred, sepOps, checkProj, mut, debug);
             int counter = 0;
             // From here hide the preprocessing.
             for (auto &bnd : prevBounds)
@@ -717,6 +717,10 @@ namespace ufo {
                                   bool imp, bool mi, bool so, bool tk,
                                   int md, int debug)
   {
+
+    outs() << "multielba is under construction.\n";
+    outs() << "Please use elba for single loops instead.\n";
+    return;
     ExprFactory m_efac;
     EZ3 z3(m_efac);
     CHCs ruleManager(m_efac, z3, debug);
