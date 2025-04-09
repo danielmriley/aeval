@@ -95,7 +95,7 @@ namespace ufo
 
       CHCs translate(CHCs &input)
       {
-        CHCs result(m_efac, m_z3);
+        CHCs result(m_efac, m_z3, input.debug);
         
         // 1. Translate declarations and create new variables
         result.decls = translateDeclarations(input.decls);
@@ -215,7 +215,21 @@ namespace ufo
         if (!e) return e;
 
         try {
-          // Handle safe cases first
+          // Handle ITE expressions
+          if (isOpX<ITE>(e)) {
+            Expr cond = translateExpr(e->arg(0));
+            Expr thenBranch = translateExpr(e->arg(1));
+            Expr elseBranch = translateExpr(e->arg(2));
+            
+            // Handle potential BV1 to bool conversion in condition
+            if (bv::is_bvnum(e->arg(0)) && width(typeOf(e->arg(0))) == 1) {
+              cond = mkTerm(toMpz(e->arg(0)) == 1, m_efac);
+            }
+            
+            return mk<ITE>(cond, thenBranch, elseBranch);
+          }
+
+          // Handle remaining cases...
           if (bind::IsConst()(e))
             return translateVar(e);
 

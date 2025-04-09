@@ -135,7 +135,7 @@ namespace ufo
           outs() << "Using bit width: " << m_width << "\n";
         }
 
-        CHCs result(m_efac, m_z3);
+        CHCs result(m_efac, m_z3, input.debug);
         
         // 1. Translate declarations and create new variables
         result.decls = translateDeclarations(input.decls);
@@ -244,6 +244,20 @@ namespace ufo
       {
         if (!e) return e;
 
+        // Handle ITE expressions 
+        if (isOpX<ITE>(e)) {
+          Expr cond = translateExpr(e->arg(0));
+          Expr thenBranch = translateExpr(e->arg(1));
+          Expr elseBranch = translateExpr(e->arg(2));
+          
+          // If condition is a BV1, convert to boolean
+          if (isOpX<BVSORT>(typeOf(cond)) && width(typeOf(cond)) == 1) {
+            cond = bv::tobool(cond);
+          }
+          
+          return mk<ITE>(cond, thenBranch, elseBranch);
+        }
+        
         // Handle variables
         if (bind::IsConst()(e))
           return translateVar(e);

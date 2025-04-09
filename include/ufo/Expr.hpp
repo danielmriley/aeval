@@ -813,6 +813,24 @@ namespace expr
     }
   };
 
+  // Add before other TerminalTrait specializations
+  template<> struct TerminalTrait<bool>
+  {
+    static inline void print (std::ostream &OS, bool v, int depth, bool brkt)
+    { OS << (v ? "true" : "false"); }
+
+    static inline bool less (const bool &v1, const bool &v2)
+    { return !v1 && v2; } // false < true
+
+    static inline bool equal_to (bool v1, bool v2)
+    { return v1 == v2; }
+
+    static inline size_t hash (bool v)
+    {
+      std::hash<bool> hasher;
+      return hasher(v);
+    }
+  };
 
   namespace op
   {
@@ -1794,7 +1812,7 @@ namespace expr
 	  if (topg < topf || topg == topf)
 	    {
 	      top = topg;
-	      restG = isOpX<AND> (g) ? g->right () : trueE;
+	      restG = isOpX<AND> (g) ? g->right () : falseE;
 	    }
 	  else
 	    restG = g;

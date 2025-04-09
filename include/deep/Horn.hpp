@@ -1395,7 +1395,8 @@ namespace ufo
 
     void serializeCHC()
     {
-      if (debug >= 2) outs() << "Serializing CHC system to SMT2 format...\n";
+      // if (debug >= 2) 
+        outs() << "Serializing CHC system to SMT2 format..." << std::endl;
       
       std::ofstream enc_chc;
       enc_chc.open("chc.smt2");
@@ -1403,10 +1404,14 @@ namespace ufo
       // Create printer
       BVExprPrinter printer(u);
 
-      if (debug >= 3) outs() << "Writing relation declarations...\n";
+      // if (debug >= 3) 
+        outs() << "Writing relation declarations...\n";
       for (auto & d : decls)
       {
-        if (debug >= 4) outs() << "  Declaring relation: " << *d->left() << "\n";
+        
+        if (debug >= 4) 
+          outs() << "  Declaring relation: " << d->arg(0) << "\n";
+
         enc_chc << "(declare-rel " << d->left() << " (";
         for (int i = 1; i < d->arity()-1; i++)
         {
@@ -1419,6 +1424,7 @@ namespace ufo
       enc_chc << "(declare-rel fail ())\n\n";
 
       if (debug >= 3) outs() << "Writing variable declarations...\n";
+      enc_chc << "; srcVars\n";
       for(auto& v: invVars)
       {
         if (debug >= 4) outs() << "  Writing vars for relation: " << *v.first << "\n";
@@ -1432,7 +1438,8 @@ namespace ufo
         }
         enc_chc << "\n";
       }
-      
+
+      enc_chc << "; dstVars\n";
       for (auto &v : invVarsPrime)
       {
         for (auto &a : v.second)
@@ -1447,7 +1454,7 @@ namespace ufo
       }
 
       ExprSet varAdded;
-      for(auto & c : chcs)
+      for (auto &c : chcs)
       {
         bool added = false;
         for(auto & l: c.locVars)
@@ -1509,6 +1516,11 @@ namespace ufo
         // First normalize all BV operations to binary form
         Expr normalizedSrc = normalizeBVExpr(src);
         Expr normalizedBody = normalizeBVExpr(c.body);
+        if(debug >= 4)
+        {
+          outs() << "  Normalized src: " << normalizedSrc << "\n";
+          outs() << "  Normalized body: " << normalizedBody << "\n";
+        }
         
         enc_chc << "(and ";
         printer.print(normalizedSrc, enc_chc);

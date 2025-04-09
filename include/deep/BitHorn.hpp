@@ -16,6 +16,7 @@ namespace ufo
     EZ3 &m_z3;
     CHCs* m_liaChcs;  // Changed to pointer
     CHCs m_bvChcs;   
+    SMTUtils u;
     Lia2BvTranslator m_Lia2BvTranslator;
     Bv2LiaTranslator m_Bv2LiaTranslator; 
     int debug; 
@@ -24,12 +25,18 @@ namespace ufo
     ExprSet m_liaSolution;  // Solution found in LIA as set of expressions
     ExprMap m_bvSolution;   // Translated solution in BV
 
-    public:
+    map<Expr, ExprVector> origBvVars;  // Original BV variables in the program
+    map<Expr, ExprVector> origBvVarsPrime;  // Original primed BV variables in the program
+    map<Expr, ExprVector> origLiaVars; // Original LIA variables in the program
+    map<Expr, ExprVector> origLiaVarsPrime; // Original primed LIA variables in the program
+
+  public:
     BitHorn(ExprFactory &efac, EZ3 &z3, CHCs &input, int _debug = 0) : 
       m_efac(efac), 
       m_z3(z3),
       m_liaChcs(new CHCs(input)), // Create new CHCs object
       m_bvChcs(input),
+      u(efac),
       m_Lia2BvTranslator(efac, z3, 4, _debug),
       m_Bv2LiaTranslator(efac, z3, 4, _debug),
       debug(_debug),
@@ -37,6 +44,34 @@ namespace ufo
     { 
       if (debug >= 1) {
         outs() << "Initializing BitHorn solver\n";
+      }
+      for (auto dd : m_bvChcs.decls)
+      {
+        outs() << "Decl: " << dd->left() << "\n";
+        Expr d = dd->left();
+        // Copy vectors directly
+        origBvVars[d] = m_bvChcs.invVars[d];
+        origBvVarsPrime[d] = m_bvChcs.invVarsPrime[d];
+        outs() << "origBvVars: " << origBvVars[d].size() << "\n";
+        outs() << "origBvVarsPrime: " << origBvVarsPrime[d].size() << "\n";
+      }
+      for(auto v: origBvVars)
+      {
+        outs() << "origBvVars: " << v.first << "\n";
+        for(auto a: v.second)
+        {
+          outs() << "  Var: " << a << "\n";
+          outs() << "  Type: " << bind::typeOf(a) << "\n";
+        }
+      }
+      for(auto v: origBvVarsPrime)
+      {
+        outs() << "origBvVarsPrime: " << v.first << "\n";
+        for(auto a: v.second)
+        {
+          outs() << "  Var: " << a << "\n";
+          outs() << "  Type: " << bind::typeOf(a) << "\n";
+        }
       }
     }
 
@@ -62,6 +97,12 @@ namespace ufo
       
       // Create temporary CHCs for the translation
       CHCs translatedChcs = m_Lia2BvTranslator.translate(m_bvChcs);
+      for(auto d: translatedChcs.decls)
+      {
+        // Copy vectors directly
+        origBvVars[d] = translatedChcs.invVars[d];
+        origBvVarsPrime[d] = translatedChcs.invVarsPrime[d];
+      }
       
       // Properly reinitialize m_bvChcs from translated version
       m_bvChcs.reinitialize(translatedChcs);
@@ -89,18 +130,23 @@ namespace ufo
       CHCs translatedChcs = m_Bv2LiaTranslator.translate(m_bvChcs);
       for (auto d : translatedChcs.decls)
       {
-        outs() << "Decl: " << d->left() << "\n";
-        outs() << "Decl: " << d->right() << "\n";
-        outs() << "Decl: " << d->left() << "\n";
+        // Copy vectors directly
+        origLiaVars[d] = translatedChcs.invVars[d];
+        origLiaVarsPrime[d] = translatedChcs.invVarsPrime[d];
       }
 
+      // Debug output using safe accessors
       for (auto v : translatedChcs.invVars)
       {
-        outs() << "InvVar: " << v.first << "\n";
-        for (auto a : v.second)
-        {
-          outs() << "  Var: " << a << "\n";
-          outs() << "  Type: " << bind::typeOf(a) << "\n";
+        if (v.first) {
+          outs() << "InvVar: " << *v.first << "\n";
+          for (auto a : v.second)
+          {
+            if (a) {
+              outs() << "  Var: " << *a << "\n";
+              outs() << "  Type: " << bind::typeOf(a) << "\n";
+            }
+          }
         }
       }
       for (auto v : translatedChcs.invVarsPrime)
@@ -112,8 +158,7 @@ namespace ufo
           outs() << "  Type: " << bind::typeOf(a) << "\n";
         }
       }
-      // Reset and reinitialize liaChcs
-      resetLiaChcs();
+
       m_liaChcs->reinitialize(translatedChcs);
 
       for(auto d: m_liaChcs->decls)
@@ -142,7 +187,19 @@ namespace ufo
         }
       }
 
+      if(debug >= 3)
+      {
+        outs() << "Ending translation\n";
+        m_liaChcs->print(true);
+      }
+      // Serialize the translated program
       m_liaChcs->serialize(false);
+
+      if(debug >= 3)
+      {
+        outs() << "Serialized LIA program\n";
+      }
+
       delete m_liaChcs;
       m_liaChcs = new CHCs(m_efac, m_z3, debug);
       m_liaChcs->parse("chc.smt2");
@@ -203,9 +260,18 @@ namespace ufo
         }
 
         // 4. Check if solution is safe in BV
-        if (checkSafetyInBV()) {
+        map<Expr, ExprSet> candidates;
+        if (!applySolutionToBvSystem(candidates)) {
+          if (debug >= 1) outs() << "Failed to apply BV solution\n";
+          return false;
+        }
+
+        bool isSafe = checkSafetyInBV(candidates);
+        
+        if (isSafe) {
           if (debug >= 1) {
             outs() << "Found safe BV solution after " << (i+1) << " iterations!\n";
+            printSolution();
           }
           return true;
         }
@@ -393,8 +459,16 @@ namespace ufo
         outs() << "Translating LIA solution to BV...\n";
       }
 
-      // Clear any previous solution
+      // Clear any previous solution 
       m_bvSolution.clear();
+
+      // Safety check - ensure we have declarations
+      if (m_bvChcs.decls.empty()) {
+        if (debug >= 1) {
+          outs() << "Error: No declarations found in BV CHCs\n";
+        }
+        return false;
+      }
 
       // Create fresh Lia2BvTranslator for this translation
       Lia2BvTranslator translator(m_efac, m_z3, 4, debug);
@@ -408,24 +482,45 @@ namespace ufo
         outs() << "\n";
       }
 
+      // Get first relation and ensure it exists
+      auto firstDecl = m_bvChcs.decls.begin();
+      if (firstDecl == m_bvChcs.decls.end() || !*firstDecl) {
+        if (debug >= 1) {
+          outs() << "Error: Invalid first declaration\n";
+        }
+        return false;
+      }
+      
+      Expr rel = (*firstDecl)->left();
+      if (!rel) {
+        if (debug >= 1) {
+          outs() << "Error: Invalid relation expression\n";
+        }
+        return false;
+      }
+
       // Translate each expression in the solution
       for (auto& expr : m_liaSolution) {
-        try {
-          Expr bvExpr = translator.translateExpr(expr);
-          if (bvExpr) {
-            if (debug >= 3) {
-              outs() << "Translated: " << *expr << "\n";
-              outs() << "      To: " << *bvExpr << "\n";
-            }
-            m_bvSolution[expr] = bvExpr;
-          }
-        }
-        catch (const std::exception& e) {
-          if (debug >= 1) {
-            outs() << "Error translating expr: " << *expr << "\n";
-            outs() << "Error: " << e.what() << "\n";
+        if (!expr) continue; // Skip invalid expressions
+        
+        Expr bvExpr = translator.translateExpr(expr);
+        if (!bvExpr) {
+          if (debug >= 2) {
+            outs() << "Warning: Failed to translate expression: " << *expr << "\n";
           }
           continue;
+        }
+
+        // Replace variables and add to solution if successful
+        outs() << "m_bvChcs.invVars[rel].size(): " << m_bvChcs.invVars[rel].size() << "\n"; 
+        outs() << "origBvVars[rel].size(): " << origBvVars[rel].size() << "\n";
+         bvExpr = replaceAll(bvExpr, origBvVars[rel], m_bvChcs.invVars[rel]);
+        if (bvExpr) {
+          if (debug >= 3) {
+            outs() << "Translated: " << *expr << "\n";
+            outs() << "      To: " << *bvExpr << "\n";
+          }
+          m_bvSolution[expr] = bvExpr;
         }
       }
 
@@ -439,28 +534,124 @@ namespace ufo
         outs() << "\n";
       }
 
-      // For now, just exit after printing
-      if (debug >= 1) {
-        outs() << "Exiting after translation demonstration\n";
-      }
-      exit(0);
-
       return !m_bvSolution.empty();
     }
 
-    bool checkSafetyInBV() {
-      // Check if m_bvSolution satisfies safety in m_bvChcs
-      return false; // TODO
+    bool checkSafetyInBV(map<Expr, ExprSet>& candidates) {
+      if (debug >= 2) {
+        outs() << "Checking safety of BV solution\n"; 
+      }
+
+      // Check each query rule with the current solution
+      for (auto& hr : m_bvChcs.chcs) {
+        if (!hr.isQuery) continue;
+
+        // Get solution for source relation
+        ExprSet solnSet = candidates[hr.srcRelation];
+        if (solnSet.empty()) continue;
+
+        // Build formula to check: soln /\ body is UNSAT
+        ExprSet checkSet;
+        checkSet.insert(hr.body);
+        
+        // Add solution constraints
+        for (auto& soln : solnSet) {
+          checkSet.insert(soln);
+        }
+
+        // Check if conjunction is satisfiable
+        SMTUtils u(m_efac);
+        if (u.isSat(checkSet)) {
+          if (debug >= 2) {
+            outs() << "Solution not safe for query:\n";
+            outs() << hr.body << "\n"; 
+          }
+          return false;
+        }
+      }
+
+      return true;
     }
 
     bool strengthenTransitionRelation() {
-      // Add constraints from m_bvSolution to m_bvChcs transition relation
-      return false; // TODO
+      if (debug >= 2) {
+        outs() << "Strengthening transition relation\n";
+      }
+
+      // Get lemmas for strengthening from current solution
+      for (auto& hr : m_bvChcs.chcs) {
+        if (hr.isQuery) continue;
+
+        // Get solution for dst relation 
+        auto it = m_bvSolution.find(hr.dstRelation);
+        if (it == m_bvSolution.end()) continue;
+
+        // Convert single expression to set
+        ExprSet dstSoln;
+        dstSoln.insert(it->second);
+
+        // Add solution to body as constraints
+        ExprSet newBody;
+        newBody.insert(hr.body);
+        for (auto& soln : dstSoln) {
+          newBody.insert(soln);
+        }
+
+        // Update CHC body with strengthened version
+        hr.body = conjoin(newBody, m_efac);
+      }
+
+      if (debug >= 3) {
+        outs() << "Strengthened BV system:\n";
+        m_bvChcs.print(true);
+      }
+
+      return true;
     }
 
     void printSolution() {
-      outs() << "BV Solution: \n";
-      // Print m_bvSolution
+      // For each declaration in the BV CHCs
+      for (auto& decl : m_bvChcs.decls) {
+        Expr rel = decl->left();
+        
+        // Get all BV solutions - m_bvSolution maps LIA expr -> BV expr
+        ExprSet bvSolutions;
+        for(auto v: m_liaChcs->invVars[rel])
+        {
+          outs() << "inv var liaChcs: " << v->left() << "\n";
+        }
+        for (auto v : m_bvChcs.invVars[rel])
+        {
+          outs() << "inv var bvChcs: " << v->left() << "\n";
+        }
+        for (auto& kv : m_bvSolution) {
+          outs() << "kv.second: " << kv.second << "\n";
+          // Replace LIA vars with corresponding BV vars before adding to solution set
+          Expr bvSoln = replaceAll(kv.second, 
+                                 m_liaChcs->invVars[rel], 
+                                 m_bvChcs.invVars[rel]);
+          outs() << "bvSoln: " << bvSoln << "\n"; 
+          bvSolutions.insert(bvSoln);
+        }
+
+        // Print function definition header 
+        outs() << "(define-fun " << *rel << " (";
+        for (auto& var : m_bvChcs.invVars[rel]) {
+          outs() << "(" << *var << " ";
+          u.print(typeOf(var));
+          outs() << ")";
+        }
+        outs() << ") Bool\n  ";
+
+        // Print conjunction of all BV solution expressions
+        Expr solution = simplifyArithm(conjoin(bvSolutions, m_efac));
+        u.print(solution);
+        outs() << ")\n";
+
+        // Verify solution only uses allowed variables
+        bool valid = hasOnlyVars(solution, m_bvChcs.invVars[rel]);
+        assert(valid);
+      }
     }
 
     // Add helper to normalize expressions
@@ -482,6 +673,21 @@ namespace ufo
       }
 
       return e;
+    }
+
+    // Add new method to apply solution to CHC system
+    bool applySolutionToBvSystem(map<Expr, ExprSet>& cands) {
+      if (debug >= 3) {
+        outs() << "Applying solution to BV system\n";
+        outs() << "Solution size: " << m_bvSolution.size() << "\n";
+      }
+
+      // Convert ExprMap solution to map<Expr,ExprSet> format
+      for (auto& kv : m_bvSolution) {
+        cands[kv.first] = ExprSet{kv.second};
+      }
+
+      return true;
     }
   };
 

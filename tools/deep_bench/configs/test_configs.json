@@ -1,0 +1,18 @@
+{
+  "configs": [
+    {
+      "name": "base",
+      "tool": "./tools/deep/freqhorn",
+      "flags": "--bv",
+      "benchmarks": "../bench_horn_bv_translated/",
+      "timeout": 2
+    },
+    {
+      "name": "optimized",
+      "tool": "./tools/deep/freqhorn",
+      "flags": "--bv --optimize",
+      "benchmarks": "../bench_horn_bv/",
+      "timeout": 2
+    }
+  ]
+}
