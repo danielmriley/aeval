@@ -34,7 +34,7 @@ namespace ufo
     BitHorn(ExprFactory &efac, EZ3 &z3, CHCs &input, int _debug = 0) : 
       m_efac(efac), 
       m_z3(z3),
-      m_liaChcs(new CHCs(input)), // Create new CHCs object
+      m_liaChcs(new CHCs(efac,z3,_debug)), // Create new CHCs object
       m_bvChcs(input),
       u(efac),
       m_Lia2BvTranslator(efac, z3, 4, _debug),
@@ -192,17 +192,17 @@ namespace ufo
         outs() << "Ending translation\n";
         m_liaChcs->print(true);
       }
-      // Serialize the translated program
-      m_liaChcs->serialize(false);
+      // // Serialize the translated program
+      // m_liaChcs->serialize(false);
 
-      if(debug >= 3)
-      {
-        outs() << "Serialized LIA program\n";
-      }
+      // if(debug >= 3)
+      // {
+      //   outs() << "Serialized LIA program\n";
+      // }
 
-      delete m_liaChcs;
-      m_liaChcs = new CHCs(m_efac, m_z3, debug);
-      m_liaChcs->parse("chc.smt2");
+      // delete m_liaChcs;
+      // m_liaChcs = new CHCs(m_efac, m_z3, debug);
+      // m_liaChcs->parse("chc.smt2");
 
       return true;
     }
