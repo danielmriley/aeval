@@ -709,6 +709,14 @@ namespace ufo
     {
       if (printLog >= 3) outs () << "MultiHoudini\n";
       if (printLog >= 4) printCands();
+      if (printLog >= 5) 
+      {
+        outs() << "MH worklist.size(): " << worklist.size() << "\n";
+        for(auto wl : worklist)
+        {
+          outs() << "  " << wl->srcRelation << " -> " << wl->dstRelation << "\n";
+        }
+      }
 
       // HACK to aviod mod, since we can't convert back to BV yet.
       for(auto &c: candidates)
@@ -764,7 +772,10 @@ namespace ufo
       }
       if (!recur) return false;
       if (res1) return anyProgress(worklist);
-      else return multiHoudini(worklist);
+      else {
+        if(printLog >= 5) outs() << " Recursive MH, worklist.size(): " << worklist.size() << "\n";
+        return multiHoudini(worklist);
+      }
     }
 
     bool findInvVar(int invNum, Expr expr, ExprVector& ve)
@@ -942,6 +953,9 @@ namespace ufo
 
     bool anyProgress(vector<HornRuleExt*> worklist)
     {
+      if(printLog >= 3) outs () << "Any progress\n";
+      if (printLog >= 4) printCands();
+      if (printLog >= 5) outs() << "worklist.size(): " << worklist.size() << "\n";
       for (int i = 0; i < invNumber; i++)
         // subsumption check
         for (auto & hr : worklist)
@@ -1226,6 +1240,11 @@ namespace ufo
             }
             break;
           }
+        }
+        if(printLog >= 5)
+        {
+          outs() << "Second bootstrapping run.\n";
+          outs() << "worklist size(): " << ruleManager.wtoCHCs.size() << "\n";
         }
         if (multiHoudini(ruleManager.dwtoCHCs))
         {

@@ -987,6 +987,99 @@ namespace ufo
       return;
     }
 
+    // Add debug prints before creating RndLearnerV4
+    if (debug >= 3) {
+      ruleManager.print(true);
+      outs() << "\n=== Debug dump of parsed CHCs ===\n";
+      
+      outs() << "Declarations:\n";
+      for (auto decl : ruleManager.decls) {
+        outs() << "decl: " << *decl << "\n";
+        if (decl && decl->left()) {
+          outs() << "decl->left(): " << *decl->left() << "\n";
+        }
+      }
+
+      outs() << "\nVariables per declaration:\n";
+      for (auto& kv : ruleManager.invVars) {
+        if (kv.first) {
+          outs() << "For declaration " << *kv.first << ":\n";
+          for (auto& var : kv.second) {
+            outs() << "  var: " << *var << "\n";
+            if (var && var->left()) {
+              outs() << "  var->left(): " << *var->left() << "\n";
+            }
+          }
+        }
+      }
+
+      outs() << "\nHorn Rules:\n";
+      for (auto& rule : ruleManager.chcs) {
+        outs() << "Rule:\n";
+        if (rule.srcRelation) {
+          outs() << "  src: " << *rule.srcRelation << "\n";
+          if (rule.srcRelation->left()) {
+            outs() << "  src->left(): " << *rule.srcRelation->left() << "\n"; 
+          }
+        }
+        if (rule.dstRelation) {
+          outs() << "  dst: " << *rule.dstRelation << "\n";
+          if (rule.dstRelation->left()) {
+            outs() << "  dst->left(): " << *rule.dstRelation->left() << "\n";
+          }
+        }
+        if (rule.body) {
+          outs() << "  body: " << *rule.body << "\n";
+          if (rule.body->left()) {
+            outs() << "  body->left(): " << *rule.body->left() << "\n";
+          }
+        }
+        
+        outs() << "  Source vars:\n";
+        for (auto& v : rule.srcVars) {
+          outs() << "    var: " << *v << "\n";
+          if (v && v->left()) {
+            outs() << "    var->left(): " << *v->left() << "\n";
+          }
+        }
+
+        outs() << "  Destination vars:\n";
+        for (auto& v : rule.dstVars) {
+          outs() << "    var: " << *v << "\n";
+          if (v && v->left()) {
+            outs() << "    var->left(): " << *v->left() << "\n";
+          }
+        }
+      }
+
+      outs() << "\nWTO Declarations:\n";
+      for (auto& decl : ruleManager.wtoDecls) {
+        outs() << "decl: " << *decl << "\n";
+        if (decl && decl->left()) {
+          outs() << "decl->left(): " << *decl->left() << "\n";
+        }
+      }
+
+      outs() << "\nWTO CHCs:\n";
+      for (auto& wto : ruleManager.wtoCHCs) {
+        outs() << "WTO rule:\n";
+        if (wto && wto->srcRelation) {
+          outs() << "  src: " << *wto->srcRelation << "\n";
+          if (wto->srcRelation->left()) {
+            outs() << "  src->left(): " << *wto->srcRelation->left() << "\n";
+          }
+        }
+        if (wto && wto->dstRelation) {
+          outs() << "  dst: " << *wto->dstRelation << "\n";
+          if (wto->dstRelation->left()) {
+            outs() << "  dst->left(): " << *wto->dstRelation->left() << "\n";
+          }
+        }
+      }
+
+      outs() << "=== End debug dump ===\n\n";
+    }
+
     BndExpl bnd(ruleManager, to, debug);
     if (!ruleManager.hasCycles())
       return (void)bnd.exploreTraces(1, ruleManager.chcs.size(), true);

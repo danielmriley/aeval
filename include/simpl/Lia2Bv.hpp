@@ -128,23 +128,77 @@ namespace ufo
 
       CHCs translate(CHCs &input)
       {
-        // Calculate minimum required bitwidth
+        // Calculate minimum required bitwidth 
         m_width = findMinBitWidth(input.chcs);
-
+        
         if (debug >= 2) {
           outs() << "Using bit width: " << m_width << "\n";
         }
 
         CHCs result(m_efac, m_z3, input.debug);
+
+        // Copy basic fields first
+        result.failDecl = input.failDecl;
+        result.debug = input.debug;
+        result.hasQuery = input.hasQuery;
+        result.hasArrays = input.hasArrays;
+        result.hasAnyArrays = input.hasAnyArrays;
+        result.hasBV = true; // Set to true since we're translating to BV
+        result.glob_ind = input.glob_ind;
+
+        // Copy checking sets
+        result.chcsToCheck1 = input.chcsToCheck1; 
+        result.chcsToCheck2 = input.chcsToCheck2;
+        result.toEraseChcs = input.toEraseChcs;
         
         // 1. Translate declarations and create new variables
         result.decls = translateDeclarations(input.decls);
 
-        // 2. Create new variable maps
+        // 2. Create new variable maps 
         translateVariableMaps(input, result);
 
         // 3. Translate CHC rules
         result.chcs = translateClauses(input.chcs);
+
+        // 4. Copy cycle information
+        result.cycleSearchDone = input.cycleSearchDone;
+        result.loopheads = input.loopheads;
+        result.cycles = input.cycles;
+        result.prefixes = input.prefixes;
+        result.acyclic = input.acyclic;
+        result.seqPoints = input.seqPoints;
+
+        // 5. Handle WTO information 
+        result.wtoDecls.clear();
+        
+        // First translate all declarations and ensure they exist in the map
+        for (auto decl : input.wtoDecls) {
+          if (decl && !isOpX<TRUE>(decl)) {  // Only process valid declarations
+            auto it = m_decl_map.find(decl);
+            if (it != m_decl_map.end()) {
+              result.wtoDecls.push_back(it->second);
+            }
+          }
+        }
+
+        // Now carefully rebuild wtoCHCs
+        result.wtoCHCs.clear();
+        for (auto wto : input.wtoCHCs) {
+          if (!wto) continue;
+          // Find corresponding translated CHC using indices instead of pointers
+          for (size_t i = 0; i < result.chcs.size(); i++) {
+            if (wto->srcRelation && wto->dstRelation &&  // Validate relations
+                result.chcs[i].srcRelation == m_decl_map[wto->srcRelation] && 
+                result.chcs[i].dstRelation == m_decl_map[wto->dstRelation]) {
+              result.wtoCHCs.push_back(&result.chcs[i]);
+              break;
+            }
+          }
+        }
+
+        // Re-run cycle detection to ensure consistency  
+        result.cycleSearchDone = false;
+        result.findCycles();
 
         return result;
       }
@@ -172,21 +226,37 @@ namespace ufo
         {
           if (decl == NULL) continue;
           
-          // Create new type list with BV sorts instead of INT
           ExprVector sorts;
           for (unsigned i = 1; i < decl->arity()-1; i++)
           {
             Expr sort = decl->arg(i);
-            if (isOpX<INT_TY>(sort))
+            // Handle INT_TY sorts - convert to BVSORT
+            if (isOpX<INT_TY>(sort)) {
               sorts.push_back(bv::bvsort(m_width, m_efac));
-            else
+            }
+            // Handle other sorts
+            else {
               sorts.push_back(sort);
+            }
+            
+            if (debug >= 3) {
+              outs() << "Translating sort: " << *sort 
+                     << " to: " << *sorts.back() << "\n";
+            }
           }
-          sorts.push_back(mk<BOOL_TY>(m_efac)); // Return type
           
-          // Create new declaration
+          // Add boolean return type
+          sorts.push_back(mk<BOOL_TY>(m_efac));
+          
+          // Create new declaration with translated types
           Expr newDecl = bind::fdecl(decl->arg(0), sorts);
           m_decl_map[decl] = newDecl;
+
+          if (debug >= 3) {
+            outs() << "Translated declaration " << *decl 
+                   << " to " << *newDecl << "\n";
+          }
+
           result.insert(newDecl);
         }
         return result;
