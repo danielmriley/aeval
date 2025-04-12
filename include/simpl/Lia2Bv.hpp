@@ -181,19 +181,30 @@ namespace ufo
           }
         }
 
-        // Now carefully rebuild wtoCHCs
+        // Clear both pointer lists before rebuilding
         result.wtoCHCs.clear();
+        result.dwtoCHCs.clear();
+
+        // First rebuild wtoCHCs 
         for (auto wto : input.wtoCHCs) {
-          if (!wto) continue;
-          // Find corresponding translated CHC using indices instead of pointers
+          // if (!wto) continue;
           for (size_t i = 0; i < result.chcs.size(); i++) {
-            if (wto->srcRelation && wto->dstRelation &&  // Validate relations
+            if (wto->srcRelation && wto->dstRelation &&
                 result.chcs[i].srcRelation == m_decl_map[wto->srcRelation] && 
                 result.chcs[i].dstRelation == m_decl_map[wto->dstRelation]) {
               result.wtoCHCs.push_back(&result.chcs[i]);
+              // Also add to dwtoCHCs if not a query
+              if (!wto->isQuery) {
+                result.dwtoCHCs.push_back(&result.chcs[i]);
+              }
               break;
             }
           }
+        }
+
+        if (debug >= 3) {
+          outs() << "Lia2Bv: Built wtoCHCs with " << result.wtoCHCs.size() << " rules\n";
+          outs() << "Lia2Bv: Built dwtoCHCs with " << result.dwtoCHCs.size() << " rules\n";
         }
 
         // Re-run cycle detection to ensure consistency  

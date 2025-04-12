@@ -204,6 +204,149 @@ namespace ufo
       // m_liaChcs = new CHCs(m_efac, m_z3, debug);
       // m_liaChcs->parse("chc.smt2");
 
+      // Debug dump of CHCs contents
+      if (debug >= 3)
+      {
+        outs() << "\n=== Debug dump of LIA CHCs ===\n";
+
+        // Print declarations
+        outs() << "Declarations:\n";
+        for (auto decl : m_liaChcs->decls)
+        {
+          outs() << "decl: " << *decl << "\n";
+          if (decl && decl->left())
+          {
+            outs() << "decl->left(): " << *decl->left() << "\n";
+          }
+        }
+
+        // Print variables per declaration
+        outs() << "\nVariables per declaration:\n";
+        for (auto &kv : m_liaChcs->invVars)
+        {
+          if (kv.first)
+          {
+            outs() << "For declaration " << *kv.first << ":\n";
+            for (auto &var : kv.second)
+            {
+              outs() << "  var: " << *var << "\n";
+              if (var && var->left())
+              {
+                outs() << "  var->left(): " << *var->left() << "\n";
+              }
+            }
+          }
+        }
+
+        // Print Horn rules
+        outs() << "\nHorn Rules:\n";
+        for (auto &rule : m_liaChcs->chcs)
+        {
+          outs() << "Rule:\n";
+          if (rule.srcRelation)
+          {
+            outs() << "  src: " << *rule.srcRelation << "\n";
+            if (rule.srcRelation->left())
+            {
+              outs() << "  src->left(): " << *rule.srcRelation->left() << "\n";
+            }
+          }
+          if (rule.dstRelation)
+          {
+            outs() << "  dst: " << *rule.dstRelation << "\n";
+            if (rule.dstRelation->left())
+            {
+              outs() << "  dst->left(): " << *rule.dstRelation->left() << "\n";
+            }
+          }
+          if (rule.body)
+          {
+            outs() << "  body: " << *rule.body << "\n";
+            if (rule.body->left())
+            {
+              outs() << "  body->left(): " << *rule.body->left() << "\n";
+            }
+          }
+
+          outs() << "  Source vars:\n";
+          for (auto &v : rule.srcVars)
+          {
+            outs() << "    var: " << *v << "\n";
+            if (v && v->left())
+            {
+              outs() << "    var->left(): " << *v->left() << "\n";
+            }
+          }
+
+          outs() << "  Destination vars:\n";
+          for (auto &v : rule.dstVars)
+          {
+            outs() << "    var: " << *v << "\n";
+            if (v && v->left())
+            {
+              outs() << "    var->left(): " << *v->left() << "\n";
+            }
+          }
+        }
+
+        // Print WTO info
+        outs() << "\nWTO Declarations:\n";
+        for (auto &decl : m_liaChcs->wtoDecls)
+        {
+          outs() << "decl: " << *decl << "\n";
+          if (decl && decl->left())
+          {
+            outs() << "decl->left(): " << *decl->left() << "\n";
+          }
+        }
+
+        outs() << "\nWTO CHCs:\n";
+        for (auto &wto : m_liaChcs->wtoCHCs)
+        {
+          outs() << "WTO rule:\n";
+          if (wto && wto->srcRelation)
+          {
+            outs() << "  src: " << *wto->srcRelation << "\n";
+            if (wto->srcRelation->left())
+            {
+              outs() << "  src->left(): " << *wto->srcRelation->left() << "\n";
+            }
+          }
+          if (wto && wto->dstRelation)
+          {
+            outs() << "  dst: " << *wto->dstRelation << "\n";
+            if (wto->dstRelation->left())
+            {
+              outs() << "  dst->left(): " << *wto->dstRelation->left() << "\n";
+            }
+          }
+        }
+
+        outs() << "\ndWTO CHCs:\n";
+        for (auto &wto : m_liaChcs->dwtoCHCs)
+        {
+          outs() << "WTO rule:\n";
+          if (wto && wto->srcRelation)
+          {
+            outs() << "  src: " << *wto->srcRelation << "\n";
+            if (wto->srcRelation->left())
+            {
+              outs() << "  src->left(): " << *wto->srcRelation->left() << "\n";
+            }
+          }
+          if (wto && wto->dstRelation)
+          {
+            outs() << "  dst: " << *wto->dstRelation << "\n";
+            if (wto->dstRelation->left())
+            {
+              outs() << "  dst->left(): " << *wto->dstRelation->left() << "\n";
+            }
+          }
+        }
+
+        outs() << "=== End debug dump ===\n\n";
+      }
+
       return true;
     }
 
@@ -302,102 +445,6 @@ namespace ufo
     bool solveLIA(unsigned int to = 10) {
       if (debug >= 2) {
         outs() << "Attempting to solve LIA system\n";  
-      }
-
-      // Debug dump of CHCs contents
-      if (debug >= 3) {
-        outs() << "\n=== Debug dump of LIA CHCs ===\n";
-        
-        // Print declarations
-        outs() << "Declarations:\n";
-        for (auto decl : m_liaChcs->decls) {
-          outs() << "decl: " << *decl << "\n";
-          if (decl && decl->left()) {
-            outs() << "decl->left(): " << *decl->left() << "\n";
-          }
-        }
-
-        // Print variables per declaration
-        outs() << "\nVariables per declaration:\n";
-        for (auto& kv : m_liaChcs->invVars) {
-          if (kv.first) {
-            outs() << "For declaration " << *kv.first << ":\n";
-            for (auto& var : kv.second) {
-              outs() << "  var: " << *var << "\n";
-              if (var && var->left()) {
-                outs() << "  var->left(): " << *var->left() << "\n";
-              }
-            }
-          }
-        }
-
-        // Print Horn rules
-        outs() << "\nHorn Rules:\n";
-        for (auto& rule : m_liaChcs->chcs) {
-          outs() << "Rule:\n";
-          if (rule.srcRelation) {
-            outs() << "  src: " << *rule.srcRelation << "\n";
-            if (rule.srcRelation->left()) {
-              outs() << "  src->left(): " << *rule.srcRelation->left() << "\n";
-            }
-          }
-          if (rule.dstRelation) {
-            outs() << "  dst: " << *rule.dstRelation << "\n";
-            if (rule.dstRelation->left()) {
-              outs() << "  dst->left(): " << *rule.dstRelation->left() << "\n";
-            }
-          }
-          if (rule.body) {
-            outs() << "  body: " << *rule.body << "\n";
-            if (rule.body->left()) {
-              outs() << "  body->left(): " << *rule.body->left() << "\n";
-            }
-          }
-          
-          outs() << "  Source vars:\n";
-          for (auto& v : rule.srcVars) {
-            outs() << "    var: " << *v << "\n";
-            if (v && v->left()) {
-              outs() << "    var->left(): " << *v->left() << "\n";
-            }
-          }
-
-          outs() << "  Destination vars:\n"; 
-          for (auto& v : rule.dstVars) {
-            outs() << "    var: " << *v << "\n";
-            if (v && v->left()) {
-              outs() << "    var->left(): " << *v->left() << "\n";
-            }
-          }
-        }
-
-        // Print WTO info
-        outs() << "\nWTO Declarations:\n";
-        for (auto& decl : m_liaChcs->wtoDecls) {
-          outs() << "decl: " << *decl << "\n";
-          if (decl && decl->left()) {
-            outs() << "decl->left(): " << *decl->left() << "\n";
-          }
-        }
-
-        outs() << "\nWTO CHCs:\n";
-        for (auto& wto : m_liaChcs->wtoCHCs) {
-          outs() << "WTO rule:\n";
-          if (wto && wto->srcRelation) {
-            outs() << "  src: " << *wto->srcRelation << "\n";
-            if (wto->srcRelation->left()) {
-              outs() << "  src->left(): " << *wto->srcRelation->left() << "\n";
-            }
-          }
-          if (wto && wto->dstRelation) {
-            outs() << "  dst: " << *wto->dstRelation << "\n";
-            if (wto->dstRelation->left()) {
-              outs() << "  dst->left(): " << *wto->dstRelation->left() << "\n";
-            }
-          }
-        }
-
-        outs() << "=== End debug dump ===\n\n";
       }
 
       // Before creating solver, normalize and validate all expressions

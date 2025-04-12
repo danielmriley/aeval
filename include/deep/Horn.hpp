@@ -126,6 +126,31 @@ namespace ufo
       
       // Reset cycle detection
       cycleSearchDone = false;
+
+      // Clear existing pointers
+      wtoCHCs.clear();
+      dwtoCHCs.clear();
+
+      // Rebuild wtoCHCs by matching source/destination relations
+      for (size_t i = 0; i < chcs.size(); i++) {
+        // Try to find corresponding rule in original wtoCHCs
+        for (auto wto : other.wtoCHCs) {
+          if (wto && wto->srcRelation == chcs[i].srcRelation && 
+              wto->dstRelation == chcs[i].dstRelation) {
+            wtoCHCs.push_back(&chcs[i]);
+            // Also add to dwtoCHCs if not a query
+            if (!chcs[i].isQuery) {
+              dwtoCHCs.push_back(&chcs[i]);
+            }
+            break;
+          }
+        }
+      }
+
+      if (debug >= 3) {
+        outs() << "Rebuilt wtoCHCs with " << wtoCHCs.size() << " rules\n";
+        outs() << "Rebuilt dwtoCHCs with " << dwtoCHCs.size() << " rules\n";
+      }
     }
 
     public:
