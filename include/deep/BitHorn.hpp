@@ -630,40 +630,94 @@ namespace ufo
       return !m_bvSolution.empty();
     }
 
+    bool multiHoudini(vector<HornRuleExt*> worklist, bool recur = true) 
+    {
+      if (debug >= 3) outs() << "MultiHoudini\n";
+
+      bool res1 = true;
+      for (auto &hr : worklist) 
+      {
+        if (debug >= 3) {
+          outs() << "  Doing CHC check (" << hr->srcRelation << " -> "
+                 << hr->dstRelation << ")\n";
+        }
+        
+        if (hr->isQuery) continue;
+
+        // Build candidates map for this check
+        map<int, ExprVector> cands;
+        for (auto& kv : m_bvSolution) {
+          int idx = getVarIndex(hr->dstRelation, m_bvChcs.decls);
+          if (idx >= 0) {
+            cands[idx].push_back(kv.second);
+          }
+        }
+
+        ExprSet exprs = {hr->body};
+        
+        if (!hr->isFact) {
+          // Add source solution constraints
+          ExprSet srcCnjs;
+          auto srcSolnIt = m_bvSolution.find(hr->srcRelation); 
+          if (srcSolnIt != m_bvSolution.end()) {
+            Expr srcSoln = replaceAll(srcSolnIt->second, 
+                                    m_bvChcs.invVars[hr->srcRelation],
+                                    hr->srcVars);
+            exprs.insert(srcSoln);
+          }
+        }
+
+        if (!hr->isQuery) {
+          // Add destination solution constraints
+          ExprSet dstCnjs;
+          auto dstSolnIt = m_bvSolution.find(hr->dstRelation);
+          if (dstSolnIt != m_bvSolution.end()) {
+            Expr dstSoln = replaceAll(dstSolnIt->second,
+                                    m_bvChcs.invVars[hr->dstRelation], 
+                                    hr->dstVars);
+            dstCnjs.insert(mkNeg(dstSoln));
+          }
+          exprs.insert(disjoin(dstCnjs, m_efac));
+        }
+
+        if (u.isSat(exprs)) {
+          if (debug >= 3) outs() << "    CHC check failed\n";
+          if (recur) {
+            res1 = false;
+            break;
+          }
+        }
+        else if (debug >= 3) outs() << "    CHC check succeeded\n";
+      }
+
+      if (!recur) return false;
+      if (res1) return true;
+      return multiHoudini(worklist);
+    }
+
     bool checkSafetyInBV(map<Expr, ExprSet>& candidates) {
       if (debug >= 2) {
-        outs() << "Checking safety of BV solution\n"; 
+        outs() << "Checking safety of BV solution\n";
       }
 
-      // Check each query rule with the current solution
+      vector<HornRuleExt*> worklist;
+
+      // Add all query rules to the worklist
       for (auto& hr : m_bvChcs.chcs) {
-        if (!hr.isQuery) continue;
-
-        // Get solution for source relation
-        ExprSet solnSet = candidates[hr.srcRelation];
-        if (solnSet.empty()) continue;
-
-        // Build formula to check: soln /\ body is UNSAT
-        ExprSet checkSet;
-        checkSet.insert(hr.body);
-        
-        // Add solution constraints
-        for (auto& soln : solnSet) {
-          checkSet.insert(soln);
-        }
-
-        // Check if conjunction is satisfiable
-        SMTUtils u(m_efac);
-        if (u.isSat(checkSet)) {
-          if (debug >= 2) {
-            outs() << "Solution not safe for query:\n";
-            outs() << hr.body << "\n"; 
-          }
-          return false;
+        if (hr.isQuery) {
+          worklist.push_back(&hr);
         }
       }
 
-      return true;
+      if (worklist.empty()) {
+        if (debug >= 2) {
+          outs() << "No queries to check\n";
+        }
+        return true;
+      }
+
+      // Call multiHoudini to check safety
+      return !multiHoudini(worklist, true);
     }
 
     bool strengthenTransitionRelation() {
