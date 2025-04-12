@@ -1241,11 +1241,6 @@ namespace ufo
             break;
           }
         }
-        if(printLog >= 5)
-        {
-          outs() << "Second bootstrapping run.\n";
-          outs() << "worklist size(): " << ruleManager.wtoCHCs.size() << "\n";
-        }
         if (multiHoudini(ruleManager.dwtoCHCs))
         {
           assignPrioritiesForLearned();

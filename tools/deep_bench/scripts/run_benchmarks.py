@@ -88,8 +88,12 @@ def setup_output_dirs(timestamp):
 
 def run_benchmark(args):
     tool, bench_file, timeout, tool_flags = args
-    output_file = f"output_{os.path.basename(bench_file)}"
-    err_file = f"stderr_{os.path.basename(bench_file)}"
+    result = BenchmarkResult(bench_file, "Unknown", 0)
+    result.tool_info = {
+        'tool': tool,
+        'flags': tool_flags,
+        'benchmarks': str(Path(bench_file).parent)
+    }
     
     try:
         start_time = time.time()
@@ -100,25 +104,32 @@ def run_benchmark(args):
         
         # Analyze output
         output = proc.stdout
-        if "Success!" in output:
-            status = "Success!"
-            result = "\n".join(output.split("Success!")[1].strip().split("\n")[-10:])
+        if "Success" in output:
+            result.status = "Success"
+            result.result = "\n".join(output.split("Success")[1].strip().split("\n")[-10:])
         elif "unknown" in output:
-            status = "unknown"
-            result = ""
+            result.status = "unknown"
+            result.result = ""
         elif "unsupported" in output:
-            status = "unsupported"
-            result = ""
+            result.status = "unsupported"
+            result.result = ""
         else:
-            status = "Error"
-            result = "\n".join(re.findall(r"ERROR.*(?:\n.*){0,9}", output)[-10:])
-            
-        return BenchmarkResult(bench_file, status, runtime, result, proc.stderr)
+            result.status = "Error"
+            result.result = "\n".join(re.findall(r"ERROR.*(?:\n.*){0,9}", output)[-10:])
+        
+        result.runtime = runtime
+        result.error = proc.stderr
+        return result
         
     except subprocess.TimeoutExpired:
-        return BenchmarkResult(bench_file, "Timeout", timeout)
+        result.status = "Timeout"
+        result.runtime = timeout
+        return result
     except Exception as e:
-        return BenchmarkResult(bench_file, "Crash", 0, error=str(e))
+        result.status = "Crash"
+        result.runtime = 0
+        result.error = str(e)
+        return result
 
 def run_config(config, dirs, timestamp):
     bench_dir = Path(config['benchmarks'])
@@ -136,7 +147,11 @@ def run_config(config, dirs, timestamp):
     results = []
     with concurrent.futures.ProcessPoolExecutor() as executor:
         for result in tqdm(executor.map(run_benchmark, run_args),
-                          total=len(bench_files), unit="test"):
+                          total=len(bench_files), 
+                          unit="test",
+                          desc=f"Config {config['name']}",
+                          position=0,
+                          leave=True):
             results.append(result)
             
             # Save detailed output
@@ -154,77 +169,91 @@ def run_config(config, dirs, timestamp):
 def write_comparative_results(all_results, dirs, timestamp):
     results_file = dirs['results'] / f'results_{timestamp}.csv'
     
+    # Group configs by benchmark directory
+    configs_by_benchdir = {}
+    for config_name, results in all_results.items():
+        if not results:
+            continue
+        bench_dir = results[0].tool_info['benchmarks']
+        if bench_dir not in configs_by_benchdir:
+            configs_by_benchdir[bench_dir] = {}
+        configs_by_benchdir[bench_dir][config_name] = results
+
     with open(results_file, 'w', newline='') as f:
         writer = csv.writer(f)
         
-        # Write header with configuration names
-        header = ["Benchmark"]
-        for config_name in all_results.keys():
-            header.extend([f"{config_name} Status", f"{config_name} Time"])
-        writer.writerow(header)
-        
-        # Get unified set of benchmarks
-        all_benchmarks = set()
-        for results in all_results.values():
-            all_benchmarks.update(os.path.basename(r.filename) for r in results)
-        
-        # Write results for each benchmark
-        for bench in sorted(all_benchmarks):
-            row = [bench]
-            for config_name, results in all_results.items():
-                result = next((r for r in results 
-                             if os.path.basename(r.filename) == bench), None)
-                if result:
-                    row.extend([result.status, f"{result.runtime:.2f}"])
-                else:
-                    row.extend(["N/A", "N/A"])
-            writer.writerow(row)
-        
-        # Write statistics for each configuration
-        writer.writerow([])
-        writer.writerow(["Statistics"])
-        
-        stat_rows = {
-            "Total": lambda rs: len(rs),
-            "Successful": lambda rs: sum(1 for r in rs if r.status == "Success!"),
-            "Timeouts": lambda rs: sum(1 for r in rs if r.status == "Timeout"),
-            "Crashes": lambda rs: sum(1 for r in rs if r.status == "Crash"),
-            "Avg Runtime": lambda rs: f"{sum(r.runtime for r in rs)/len(rs):.2f}s"
-        }
-        
-        for stat_name, stat_func in stat_rows.items():
-            row = [stat_name]
-            for results in all_results.values():
-                row.extend([stat_func(results), ""])
-            writer.writerow(row)
+        # Process each benchmark directory group
+        for bench_dir, grouped_configs in configs_by_benchdir.items():
+            writer.writerow([])
+            writer.writerow([f"Benchmark Directory: {bench_dir}"])
+            writer.writerow([])
+            
+            # Write config metadata
+            writer.writerow(["Configuration"] + list(grouped_configs.keys()))
+            writer.writerow(["Tool"] + [results[0].tool_info['tool'] for results in grouped_configs.values()])
+            writer.writerow(["Flags"] + [results[0].tool_info['flags'] for results in grouped_configs.values()])
+            writer.writerow([])
+            
+            # Get all benchmarks for this directory
+            all_benchmarks = set()
+            for results in grouped_configs.values():
+                all_benchmarks.update(os.path.basename(r.filename) for r in results)
+            
+            # Write header
+            header = ["Benchmark"]
+            for config_name in grouped_configs.keys():
+                header.extend([f"{config_name} Status", f"{config_name} Time"])
+            writer.writerow(header)
+            
+            # Write results side by side
+            for bench in sorted(all_benchmarks):
+                row = [bench]
+                for results in grouped_configs.values():
+                    result = next((r for r in results if os.path.basename(r.filename) == bench), None)
+                    if result:
+                        row.extend([result.status, f"{result.runtime:.2f}"])
+                    else:
+                        row.extend(["N/A", "N/A"])
+                writer.writerow(row)
+            
+            # Write statistics
+            writer.writerow([])
+            writer.writerow(["Statistics"])
+            
+            stats_rows = {
+                "Total Benchmarks": lambda rs: len(rs),
+                "Successful": lambda rs: sum(1 for r in rs if r.status == "Success"),
+                "Timeouts": lambda rs: sum(1 for r in rs if r.status == "Timeout"), 
+                "Crashes": lambda rs: sum(1 for r in rs if r.status == "Crash"),
+                "Avg Runtime": lambda rs: f"{sum(r.runtime for r in rs)/len(rs):.2f}s"
+            }
+            
+            for stat_name, stat_func in stats_rows.items():
+                row = [stat_name]
+                for results in grouped_configs.values():
+                    row.append(stat_func(results))
+                writer.writerow(row)
+            
+            # Add separator between benchmark directories
+            writer.writerow([])
+            writer.writerow(["=" * 50])
 
 def main():
     args = parse_args()
     timestamp = datetime.datetime.now().strftime('%m-%d-%Y_%H-%M-%S')
     
-    # Load test configurations
     configs = load_configs(args.config, args)
-    
-    # Setup output directories
     dirs = setup_output_dirs(timestamp)
     
-    # Run all configurations in parallel
+    # Run configurations sequentially
     all_results = {}
-    with concurrent.futures.ThreadPoolExecutor(max_workers=len(configs)) as executor:
-        future_to_config = {
-            executor.submit(run_config, config, dirs, timestamp): config
-            for config in configs
-        }
-        
-        for future in concurrent.futures.as_completed(future_to_config):
-            config = future_to_config[future]
-            try:
-                results = future.result()
-                all_results[config['name']] = results
-            except Exception as e:
-                print(f"Config '{config['name']}' failed: {e}")
+    for config in configs:
+        try:
+            results = run_config(config, dirs, timestamp)
+            all_results[config['name']] = results
+        except Exception as e:
+            print(f"Config '{config['name']}' failed: {e}")
     
-    # Write comparative results
     write_comparative_results(all_results, dirs, timestamp)
     
     print(f"\nResults saved to {dirs['results']}")

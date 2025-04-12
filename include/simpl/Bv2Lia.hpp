@@ -50,7 +50,6 @@ namespace ufo
       ExprVector translateInvVars(const ExprVector &origVars, bool cacheVars = false)
       {
         ExprVector translatedVars;
-        outs() << "Translating invariant variables...\n";
         for (const auto &var : origVars)
         {
           if(m_debug >= 3) {
@@ -155,7 +154,6 @@ namespace ufo
               result.wtoCHCs.push_back(&result.chcs[i]);
               // Also add to dwtoCHCs if not a query
               if (!wto->isQuery) {
-                outs() << "ADDING DWTOCHC: " << *result.chcs[i].srcRelation << "\n";
                 result.dwtoCHCs.push_back(&result.chcs[i]);
               }
               break;
@@ -238,29 +236,9 @@ namespace ufo
           output.invVars[kv.first] = translateInvVars(kv.second, true);
         }
 
-        for(auto v: output.invVars)
-        {
-          outs() << "InvVar: " << v.first << "\n";
-          for(auto a: v.second)
-          {
-            outs() << "  Var: " << a << "\n";
-            outs() << "  Type: " << bind::typeOf(a) << "\n";
-          }
-        }
-
         for (const auto &kv : input.invVarsPrime) 
         {
           output.invVarsPrime[kv.first] = translateInvVars(kv.second, true);
-        }
-
-        for (auto v : output.invVarsPrime)
-        {
-          outs() << "InvVar: " << v.first << "\n";
-          for (auto a : v.second)
-          {
-            outs() << "  Var: " << a << "\n";
-            outs() << "  Type: " << bind::typeOf(a) << "\n";
-          }
         }
       }
 

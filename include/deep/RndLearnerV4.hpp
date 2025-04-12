@@ -618,10 +618,13 @@ namespace ufo
           generalizeArrInvars(invNum, sf);
           if (checkAllLemmas())
           {
-            outs () << "Success after " << (i+1) << " iterations "
-                    << (rndStarted ? "(+ rnd)" :
-                       (i > defSz[invNum]) ? "(+ rec)" : "" ) << "\n";
-            printSolution();
+            if(printLog >= 1)
+            {
+              outs () << "Success after " << (i+1) << " iterations "
+                      << (rndStarted ? "(+ rnd)" :
+                         (i > defSz[invNum]) ? "(+ rec)" : "" ) << "\n";
+              printSolution();
+            }
             return true;
           }
         }
@@ -1120,12 +1123,24 @@ namespace ufo
       ds.prepareSeeds(dcl, cands[dcl]);
     }
 
-    if (ds.bootstrap()) return;
+    if (ds.bootstrap()) {
+      outs() << "Success after bootstrapping\n";
+      ds.printSolution();
+      return;
+    }
 
     ds.calculateStatistics();
     ds.deferredPriorities();
     std::srand(std::time(0));
-    ds.synthesize(maxAttempts);
+    if(ds.synthesize(maxAttempts))
+    {
+      outs() << "Success!\n";
+      ds.printSolution();
+    }
+    else
+    {
+      outs() << "unknown\n";
+    }
   }
 }
 

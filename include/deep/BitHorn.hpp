@@ -47,30 +47,31 @@ namespace ufo
       }
       for (auto dd : m_bvChcs.decls)
       {
-        outs() << "Decl: " << dd->left() << "\n";
         Expr d = dd->left();
         // Copy vectors directly
         origBvVars[d] = m_bvChcs.invVars[d];
         origBvVarsPrime[d] = m_bvChcs.invVarsPrime[d];
-        outs() << "origBvVars: " << origBvVars[d].size() << "\n";
-        outs() << "origBvVarsPrime: " << origBvVarsPrime[d].size() << "\n";
       }
       for(auto v: origBvVars)
       {
-        outs() << "origBvVars: " << v.first << "\n";
-        for(auto a: v.second)
-        {
-          outs() << "  Var: " << a << "\n";
-          outs() << "  Type: " << bind::typeOf(a) << "\n";
+        if (debug >= 3) {
+          outs() << "origBvVars: " << v.first << "\n";
+          for(auto a: v.second)
+          {
+            outs() << "  Var: " << a << "\n";
+            outs() << "  Type: " << bind::typeOf(a) << "\n";
+          }
         }
       }
       for(auto v: origBvVarsPrime)
       {
-        outs() << "origBvVarsPrime: " << v.first << "\n";
-        for(auto a: v.second)
-        {
-          outs() << "  Var: " << a << "\n";
-          outs() << "  Type: " << bind::typeOf(a) << "\n";
+        if (debug >= 3) {
+          outs() << "origBvVarsPrime: " << v.first << "\n";
+          for(auto a: v.second)
+          {
+            outs() << "  Var: " << a << "\n";
+            outs() << "  Type: " << bind::typeOf(a) << "\n";
+          }
         }
       }
     }
@@ -135,57 +136,7 @@ namespace ufo
         origLiaVarsPrime[d] = translatedChcs.invVarsPrime[d];
       }
 
-      // Debug output using safe accessors
-      for (auto v : translatedChcs.invVars)
-      {
-        if (v.first) {
-          outs() << "InvVar: " << *v.first << "\n";
-          for (auto a : v.second)
-          {
-            if (a) {
-              outs() << "  Var: " << *a << "\n";
-              outs() << "  Type: " << bind::typeOf(a) << "\n";
-            }
-          }
-        }
-      }
-      for (auto v : translatedChcs.invVarsPrime)
-      {
-        outs() << "InvVarPrime: " << v.first << "\n";
-        for (auto a : v.second)
-        {
-          outs() << "  Var: " << a << "\n";
-          outs() << "  Type: " << bind::typeOf(a) << "\n";
-        }
-      }
-
       m_liaChcs->reinitialize(translatedChcs);
-
-      for(auto d: m_liaChcs->decls)
-      {
-        outs() << "Decl: " << d->left() << "\n";
-        outs() << "Decl: " << d->right() << "\n";
-        outs() << "Decl: " << d->left() << "\n";
-      }
-
-      for(auto v: m_liaChcs->invVars)
-      {
-        outs() << "InvVar: " << v.first << "\n";
-        for(auto a: v.second)
-        {
-          outs() << "  Var: " << a << "\n";
-          outs() << "  Type: " << bind::typeOf(a) << "\n";
-        }
-      }
-      for(auto v: m_liaChcs->invVarsPrime)
-      {
-        outs() << "InvVarPrime: " << v.first << "\n";
-        for(auto a: v.second)
-        {
-          outs() << "  Var: " << a << "\n";
-          outs() << "  Type: " << bind::typeOf(a) << "\n";
-        }
-      }
 
       if(debug >= 3)
       {
@@ -205,7 +156,7 @@ namespace ufo
       // m_liaChcs->parse("chc.smt2");
 
       // Debug dump of CHCs contents
-      if (debug >= 3)
+      if (debug >= 5)
       {
         outs() << "\n=== Debug dump of LIA CHCs ===\n";
 
@@ -656,9 +607,7 @@ namespace ufo
         }
 
         // Replace variables and add to solution if successful
-        outs() << "m_bvChcs.invVars[rel].size(): " << m_bvChcs.invVars[rel].size() << "\n"; 
-        outs() << "origBvVars[rel].size(): " << origBvVars[rel].size() << "\n";
-         bvExpr = replaceAll(bvExpr, origBvVars[rel], m_bvChcs.invVars[rel]);
+        bvExpr = replaceAll(bvExpr, origBvVars[rel], m_bvChcs.invVars[rel]);
         if (bvExpr) {
           if (debug >= 3) {
             outs() << "Translated: " << *expr << "\n";
@@ -762,19 +711,27 @@ namespace ufo
         ExprSet bvSolutions;
         for(auto v: m_liaChcs->invVars[rel])
         {
-          outs() << "inv var liaChcs: " << v->left() << "\n";
+          if (debug >= 3) {
+            outs() << "inv var liaChcs: " << v->left() << "\n";
+          }
         }
         for (auto v : m_bvChcs.invVars[rel])
         {
-          outs() << "inv var bvChcs: " << v->left() << "\n";
+          if (debug >= 3) {
+            outs() << "inv var bvChcs: " << v->left() << "\n";
+          }
         }
         for (auto& kv : m_bvSolution) {
-          outs() << "kv.second: " << kv.second << "\n";
+          if (debug >= 3) {
+            outs() << "kv.second: " << kv.second << "\n";
+          }
           // Replace LIA vars with corresponding BV vars before adding to solution set
           Expr bvSoln = replaceAll(kv.second, 
                                  m_liaChcs->invVars[rel], 
                                  m_bvChcs.invVars[rel]);
-          outs() << "bvSoln: " << bvSoln << "\n"; 
+          if (debug >= 3) {
+            outs() << "bvSoln: " << bvSoln << "\n"; 
+          }
           bvSolutions.insert(bvSoln);
         }
 

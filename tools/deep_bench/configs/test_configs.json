@@ -1,18 +1,25 @@
 {
   "configs": [
     {
-      "name": "base",
+      "name": "bv",
       "tool": "./tools/deep/freqhorn",
       "flags": "--bv",
       "benchmarks": "../bench_horn_bv_translated/",
-      "timeout": 2
+      "timeout": 5
     },
     {
-      "name": "optimized",
+      "name": "lia",
       "tool": "./tools/deep/freqhorn",
-      "flags": "--bv --optimize",
-      "benchmarks": "../bench_horn_bv/",
-      "timeout": 2
+      "flags": "--data",
+      "benchmarks": "../bench_horn/",
+      "timeout": 5
+    },
+    {
+      "name": "bv10",
+      "tool": "./tools/deep/freqhorn",
+      "flags": "--bv",
+      "benchmarks": "../bench_horn_bv_translated/",
+      "timeout": 10
     }
   ]
 }
