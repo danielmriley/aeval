@@ -21,6 +21,7 @@ namespace ufo
     Bv2LiaTranslator m_Bv2LiaTranslator; 
     int debug; 
     std::vector<ExprSet> m_learnedLemmas;  // Stores learned lemmas per iteration
+    unsigned m_original_bv_width = 0; // Store original BV width
 
     ExprSet m_liaSolution;  // Solution found in LIA as set of expressions
     ExprMap m_bvSolution;   // Translated solution in BV
@@ -45,6 +46,30 @@ namespace ufo
       if (debug >= 1) {
         outs() << "Initializing BitHorn solver\n";
       }
+      // --- Modification: Detect and store original BV width ---
+      if (m_bvChcs.hasBV) {
+          for (auto decl : m_bvChcs.decls) {
+              if (decl && decl->arity() > 1) {
+                  for (unsigned i = 1; i < decl->arity() - 1; ++i) {
+                      Expr sort = decl->arg(i);
+                      if (isOpX<BVSORT>(sort)) {
+                          m_original_bv_width = bv::width(sort);
+                          if (debug >= 2) {
+                              outs() << "BitHorn: Detected original BV width " << m_original_bv_width << " from decl " << *decl << "\n";
+                          }
+                          goto width_detected_constructor; // Found it
+                      }
+                  }
+              }
+          }
+          width_detected_constructor:; 
+          // Pass the detected width to the LIA->BV translator instance
+          if (m_original_bv_width > 0) {
+              m_Lia2BvTranslator.setOriginalBvWidth(m_original_bv_width);
+          }
+      }
+      // --- End Modification ---
+
       for (auto dd : m_bvChcs.decls)
       {
         Expr d = dd->left();
@@ -565,14 +590,14 @@ namespace ufo
         return false;
       }
 
-      // Create fresh Lia2BvTranslator for this translation
-      Lia2BvTranslator translator(m_efac, m_z3, 4, debug);
+      // --- Modification: Use the member translator directly ---
+      // Lia2BvTranslator translator(m_efac, m_z3, 4, debug); // Don't create a new one
 
       // Print original LIA solution
       if (debug >= 3) {
         outs() << "\nLIA Solution:\n";
         for (auto& expr : m_liaSolution) {
-          outs() << "  " << *expr << "\n";
+          outs() << "  " << ineqReverter(expr) << "\n";
         }
         outs() << "\n";
       }
@@ -598,7 +623,10 @@ namespace ufo
       for (auto& expr : m_liaSolution) {
         if (!expr) continue; // Skip invalid expressions
         
-        Expr bvExpr = translator.translateExpr(expr);
+        // --- Modification: Pass the stored original BV width ---
+        Expr bvExpr = m_Lia2BvTranslator.translateExpr(expr, m_original_bv_width); 
+        // --- End Modification ---
+
         if (!bvExpr) {
           if (debug >= 2) {
             outs() << "Warning: Failed to translate expression: " << *expr << "\n";
@@ -827,7 +855,7 @@ namespace ufo
         return e->efac().mkNary(e->op(), safeArgs);
       }
 
-      return e;
+      return ineqReverter(e);
     }
 
     // Add new method to apply solution to CHC system
