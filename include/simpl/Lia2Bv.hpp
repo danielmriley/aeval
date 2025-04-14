@@ -18,6 +18,7 @@ namespace ufo
       EZ3 &m_z3;
       unsigned int m_width;
       int debug;  // Add debug member
+      unsigned int m_original_bv_width = 0; // Store original BV width if applicable
       
       // Maps for tracking translations
       std::map<Expr, Expr> m_var_map;      // Maps LIA vars to BV vars  
@@ -112,8 +113,20 @@ namespace ufo
           
           // Check for integer constants (MPZ)
           if (isOpX<MPZ>(e)) {
-            unsigned int width = binaryLog(getTerm<mpz_class>(e));
+            mpz_class val = getTerm<mpz_class>(e); // Get value for debugging
+            unsigned int width = binaryLog(val);
+            // --- Debugging Added ---
+            if (debug >= 3) { 
+                outs() << "Lia2Bv::findMinBitWidth(rules): Found constant " << val.get_str() 
+                       << ", requires width " << width << ". Current maxWidth = " << maxWidth << "\n";
+            }
+            // --- End Debugging ---
             maxWidth = std::max(maxWidth, width); 
+            // --- Debugging Added ---
+            if (debug >= 3) { 
+                outs() << "Lia2Bv::findMinBitWidth(rules): Updated maxWidth = " << maxWidth << "\n";
+            }
+            // --- End Debugging ---
           }
           
           // Recursively process all arguments
@@ -143,21 +156,92 @@ namespace ufo
         return maxWidth;
       }
 
+      // --- New Overload Added ---
+      // Calculate minimum bit width required for a single expression
+      unsigned int findMinBitWidth(Expr e)
+      {
+          unsigned int exprMaxWidth = 1; // Minimum width is 1
+
+          std::function<void(Expr)> processExpr = [&](Expr node) {
+              if (!node) return;
+
+              if (isOpX<MPZ>(node)) {
+                  mpz_class val = getTerm<mpz_class>(node);
+                  unsigned int width = binaryLog(val);
+                  // Debugging
+                  if (debug >= 3) {
+                      outs() << "Lia2Bv::findMinBitWidth(Expr): Found constant " << val.get_str()
+                             << ", requires width " << width << ". Current exprMaxWidth = " << exprMaxWidth << "\n";
+                  }
+                  exprMaxWidth = std::max(exprMaxWidth, width);
+                  if (debug >= 3) {
+                      outs() << "Lia2Bv::findMinBitWidth(Expr): Updated exprMaxWidth = " << exprMaxWidth << "\n";
+                  }
+              }
+
+              for (unsigned i = 0; i < node->arity(); ++i) {
+                  processExpr(node->arg(i));
+              }
+          };
+
+          processExpr(e);
+          return exprMaxWidth; // Just return width needed for constants in 'e'
+      }
+      // --- End New Overload ---
+
+
     public:
       Lia2BvTranslator(ExprFactory &efac, EZ3 &z3, unsigned width = 4, int _debug = 0) : 
         m_efac(efac), m_z3(z3), m_width(width), debug(_debug) {}
+
+      // --- New Method Added ---
+      void setOriginalBvWidth(unsigned width) {
+          m_original_bv_width = width;
+          if (debug >= 2 && m_original_bv_width > 0) {
+              outs() << "Lia2Bv: Original BV width set to " << m_original_bv_width << "\n";
+          }
+      }
+      // --- End New Method ---
+
 
       CHCs translate(CHCs &input)
       {
         // Clear maps before translation
         m_var_map.clear();
         m_decl_map.clear();
+        m_original_bv_width = 0; // Reset in case translator is reused
+
+        // --- Modification: Detect original BV width ---
+        if (input.hasBV) {
+            for (Expr decl : input.decls) {
+                if (decl && decl->arity() > 1) {
+                    // Check sorts (args 1 to N-1)
+                    for (unsigned i = 1; i < decl->arity() - 1; ++i) {
+                        Expr sort = decl->arg(i);
+                        if (isOpX<BVSORT>(sort)) {
+                            m_original_bv_width = bv::width(sort);
+                            if (debug >= 2) {
+                                outs() << "Lia2Bv::translate(CHCs): Detected original BV width " << m_original_bv_width << " from decl " << *decl << "\n";
+                            }
+                            goto width_detected; // Found it, stop searching
+                        }
+                    }
+                }
+            }
+            width_detected:; // Label to jump to after finding width
+        }
+        // --- End Modification ---
+
 
         // Calculate minimum required bitwidth based on constants in the input LIA CHCs
-        m_width = findMinBitWidth(input.chcs);
+        unsigned const_width = findMinBitWidth(input.chcs);
+        // --- Modification: Use max of const_width and original_bv_width ---
+        m_width = std::max({const_width, m_original_bv_width, (unsigned)4}); // Ensure at least 4
         
         if (debug >= 2) {
-          outs() << "Using bit width: " << m_width << "\n";
+          outs() << "Lia2Bv::translate(CHCs): Width from constants: " << const_width 
+                 << ", Original BV width: " << m_original_bv_width 
+                 << ". Using final initial width: " << m_width << "\n";
         }
 
         CHCs result(m_efac, m_z3, input.debug);
@@ -291,16 +375,41 @@ namespace ufo
       // Add public method to translate individual expressions
       Expr translateExpr(Expr e, unsigned width = 0)
       {
-        // Use provided width or default if not specified
-        unsigned original_width = m_width;
-        if (width > 0) m_width = width; // Temporarily set width for this call
+        // --- Modification Starts ---
+        unsigned original_width = m_width; // Store the class's default width (set by translate(CHCs&))
+        unsigned target_width = width;     // Start with the explicitly provided width
+
+        if (target_width == 0) { // If no width was provided by the caller
+            unsigned required_width = findMinBitWidth(e); // Calculate width needed for constants in this specific expression 'e'
+            // Use the maximum of the width required by 'e', the default width calculated from the original CHCs, and the original BV width.
+            target_width = std::max({required_width, original_width, m_original_bv_width}); 
+            if (debug >= 2) {
+                 outs() << "Lia2Bv::translateExpr: No width provided. Calculated required: " << required_width 
+                        << ", CHC default: " << original_width 
+                        << ", Original BV: " << m_original_bv_width 
+                        << ". Using target width: " << target_width << "\n";
+            }
+        } else {
+             // If width > 0, the caller explicitly requested a width.
+             // Ensure it's not smaller than the original BV width, if one exists.
+             unsigned enforced_width = std::max(target_width, m_original_bv_width);
+             if (debug >= 2) {
+                 outs() << "Lia2Bv::translateExpr: Width provided: " << width 
+                        << ", Original BV: " << m_original_bv_width 
+                        << ". Using target width: " << enforced_width << "\n";
+             }
+             target_width = enforced_width;
+        }
+
+        m_width = target_width; // Temporarily set the class width for the helper function call below
+        // --- Modification Ends ---
         
         // Ensure maps are initialized if called standalone (might need context)
         // For now, assume maps are populated by a prior call to translate(CHCs&)
         // or handle initialization explicitly if needed for standalone use.
-        Expr result = translateExprHelper(e);
+        Expr result = translateExprHelper(e); // This helper uses the temporarily set m_width
 
-        if (width > 0) m_width = original_width; // Restore original width
+        m_width = original_width; // Restore original class default width before returning
         return result;
       }
 
