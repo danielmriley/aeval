@@ -202,8 +202,8 @@ namespace expr
     NOP(BSGT, "bvsgt", FUNCTIONAL, BvOp)
     NOP(BCONCAT, "concat", FUNCTIONAL, BvOp)
     NOP(BEXTRACT, "extract", FUNCTIONAL, BvOp)
-    NOP(BSEXT, "bvsext", FUNCTIONAL, BvOp)
-    NOP(BZEXT, "bvzext", FUNCTIONAL, BvOp)
+    NOP(BSEXT, "bvsext", FUNCTIONAL, BvOp) // BV sign extract
+    NOP(BZEXT, "bvzext", FUNCTIONAL, BvOp) // BV zero extract
     NOP(BREPEAT, "bvrepeat", FUNCTIONAL, BvOp)
     NOP(BSHL, "bvshl", FUNCTIONAL, BvOp)
     NOP(BLSHR, "bvlshr", FUNCTIONAL, BvOp)

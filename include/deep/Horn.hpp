@@ -215,14 +215,14 @@ namespace ufo
       return false;
     }
 
-    Expr getDeclByName (Expr a)
+    Expr getDeclByName (Expr a) const // Add const here
     {
       for (auto & d : decls)
         if (d->left() == a) return d;
       return NULL;
     }
 
-    bool addedDecl (Expr a)
+    bool addedDecl (Expr a) const // Add const here too for consistency
     {
       return getDeclByName(a) != NULL;
     }

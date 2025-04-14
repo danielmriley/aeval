@@ -2,8 +2,12 @@
 #define LIA2BV__HPP__
 
 #include "deep/Horn.hpp"
+#include "ufo/Smt/EZ3.hh" // Include necessary headers
+#include "ufo/ExprBv.hh"
+#include "ufo/Expr.hpp"
 
 using namespace std;
+using namespace expr::op; // Include namespace for operators like TRUE, FALSE, etc.
 
 namespace ufo
 {
@@ -17,7 +21,7 @@ namespace ufo
       
       // Maps for tracking translations
       std::map<Expr, Expr> m_var_map;      // Maps LIA vars to BV vars  
-      std::map<Expr, Expr> m_decl_map;     // Maps LIA decls to BV decls
+      std::map<Expr, Expr> m_decl_map;     // Maps LIA decls (full Expr) to BV decls (full Expr)
       
       // Translation helpers
       Expr translateVar(Expr var)
@@ -26,16 +30,19 @@ namespace ufo
         if (it != m_var_map.end())
             return it->second;
 
-        if (!isOpX<INT_TY>(bind::typeOf(var)))
-            return var;
+        // Check if it's an integer constant variable before translating
+        if (!bind::isIntConst(var)) {
+             if (debug >= 3) outs() << "Kept non-Int var: " << *var << "\n";
+             return var; // Keep non-integer vars as is
+        }
             
         // Create BV variable using bv::bvConst
-        Expr name = bind::fname(bind::fname(var));
-        Expr bvVar = bv::bvConst(name, m_width);
-        m_var_map[var] = bvVar;
+        Expr name = bind::fname(bind::fname(var)); // Get the name Expr
+        Expr bvVar = bv::bvConst(name, m_width); // Create BV constant with the same name
+        m_var_map[var] = bvVar; // Map original LIA var Expr to BV var Expr
         
         if (debug >= 3) {
-            outs() << "Mapped " << *var << " to " << *bvVar << "\n";
+            outs() << "Mapped LIA var " << *var << " to BV var " << *bvVar << "\n";
         }
         return bvVar;
       }
@@ -46,18 +53,20 @@ namespace ufo
         
         for (const auto &var : origVars)
         {
-            if (!isOpX<INT_TY>(bind::typeOf(var))) {
-                translatedVars.push_back(var);
+            // Check if it's an integer variable before translating
+            if (!bind::isIntConst(var)) {
+                translatedVars.push_back(var); // Keep non-Int vars
+                if (debug >= 3) outs() << "Kept non-Int invVar: " << *var << "\n";
                 continue;
             }
 
             // Use same translation logic as translateVar
-            Expr name = bind::fname(bind::fname(var));
-            Expr bvVar = bv::bvConst(name, m_width);
+            Expr name = bind::fname(bind::fname(var)); // Get name Expr
+            Expr bvVar = bv::bvConst(name, m_width); // Create BV var
             translatedVars.push_back(bvVar);
             
             if (cacheVars) {
-                m_var_map[var] = bvVar;
+                m_var_map[var] = bvVar; // Map original LIA var to BV var
                 if (debug >= 3) {
                     outs() << "Cached mapping: " << *var << " -> " << *bvVar << "\n";
                 }
@@ -70,34 +79,41 @@ namespace ufo
       unsigned int binaryLog(mpz_class v)
       {
         // Small numbers optimization
-        if (v == 0) return 1;
-        if (v == 1) return 1;
+        if (v == 0) return 1; // Need 1 bit for 0
         
-        // Get absolute value for negative numbers
-        if (v < 0) v = -v;
+        // Get absolute value for negative numbers, need extra bit for sign
+        bool negative = (v < 0);
+        if (negative) v = -v;
         
-        // Calculate log2 rounded up
-        unsigned int width = 1;
-        v = v - 1;
-        while (v > 0) {
-          v = v >> 1;
-          width++;
-        }
-        return width;
+        // Calculate log2 rounded up for magnitude
+        unsigned int width = 0;
+        // Handle v=1 case correctly
+        mpz_class temp_v = v;
+        if (temp_v == 1 && !negative) return 1; // 1 needs 1 bit
+        
+        // Find the highest set bit position (equivalent to floor(log2(v)) + 1)
+        width = mpz_sizeinbase(temp_v.get_mpz_t(), 2);
+
+        // Add 1 bit for the sign if negative OR if positive and needs sign bit space
+        // For two's complement, width needs to accommodate max(abs(v), abs(v)-1 if negative)
+        // If v = -8 (1000), width=4. If v=7 (0111), width=4.
+        // If v = -1 (1), width=1. If v=0 (0), width=1.
+        // Width calculated is for magnitude. Add 1 for sign.
+        return width + 1; 
       }
 
       unsigned int findMinBitWidth(const std::vector<HornRuleExt>& rules)
       {
-        unsigned int maxWidth = m_width;
+        unsigned int maxWidth = m_width; // Start with default or provided width
 
         // Helper to process an expression and update maxWidth
         std::function<void(Expr)> processExpr = [&](Expr e) {
           if (!e) return;
           
-          // Check for integer constants
+          // Check for integer constants (MPZ)
           if (isOpX<MPZ>(e)) {
             unsigned int width = binaryLog(getTerm<mpz_class>(e));
-            maxWidth = std::max(maxWidth, width + 1); // +1 for sign bit
+            maxWidth = std::max(maxWidth, width); 
           }
           
           // Recursively process all arguments
@@ -106,20 +122,25 @@ namespace ufo
           }
         };
 
-        // Process all rules
+        // Process all rules and involved variables/constants
         for (const auto& rule : rules) {
           processExpr(rule.body);
-          for (const auto& v : rule.srcVars) processExpr(v);
-          for (const auto& v : rule.dstVars) processExpr(v);
-          for (const auto& v : rule.locVars) processExpr(v);
+          // Also consider variables if they imply range constraints, though less direct
+          // for (const auto& v : rule.srcVars) processExpr(v); // Variables usually don't have intrinsic width
+          // for (const auto& v : rule.dstVars) processExpr(v);
+          // for (const auto& v : rule.locVars) processExpr(v);
         }
 
-        // Round up to nearest power of 2 greater than 4
+        // Ensure minimum width (e.g., 4 bits)
         maxWidth = std::max(maxWidth, (unsigned int)4);
-        unsigned int pow2 = 4;
-        while (pow2 < maxWidth) pow2 *= 2;
+
+        // Optional: Round up to nearest power of 2 (common practice)
+        // unsigned int pow2 = 4;
+        // while (pow2 < maxWidth) pow2 *= 2;
+        // return pow2;
         
-        return pow2;
+        // Or just return the calculated max width
+        return maxWidth;
       }
 
     public:
@@ -128,7 +149,11 @@ namespace ufo
 
       CHCs translate(CHCs &input)
       {
-        // Calculate minimum required bitwidth 
+        // Clear maps before translation
+        m_var_map.clear();
+        m_decl_map.clear();
+
+        // Calculate minimum required bitwidth based on constants in the input LIA CHCs
         m_width = findMinBitWidth(input.chcs);
         
         if (debug >= 2) {
@@ -138,11 +163,11 @@ namespace ufo
         CHCs result(m_efac, m_z3, input.debug);
 
         // Copy basic fields first
-        result.failDecl = input.failDecl;
+        result.failDecl = input.failDecl; // Keep original failDecl name/Expr
         result.debug = input.debug;
         result.hasQuery = input.hasQuery;
-        result.hasArrays = input.hasArrays;
-        result.hasAnyArrays = input.hasAnyArrays;
+        result.hasArrays = input.hasArrays; // Should be false if input is LIA
+        result.hasAnyArrays = input.hasAnyArrays; // Should be false
         result.hasBV = true; // Set to true since we're translating to BV
         result.glob_ind = input.glob_ind;
 
@@ -157,8 +182,8 @@ namespace ufo
         // 2. Create new variable maps 
         translateVariableMaps(input, result);
 
-        // 3. Translate CHC rules
-        result.chcs = translateClauses(input.chcs);
+        // 3. Translate CHC rules (pass input and result)
+        result.chcs = translateClauses(input.chcs, input, result);
 
         // 4. Copy cycle information
         result.cycleSearchDone = input.cycleSearchDone;
@@ -172,11 +197,15 @@ namespace ufo
         result.wtoDecls.clear();
         
         // First translate all declarations and ensure they exist in the map
-        for (auto decl : input.wtoDecls) {
+        for (auto decl : input.wtoDecls) { // decl is the original full LIA declaration Expr
           if (decl && !isOpX<TRUE>(decl)) {  // Only process valid declarations
-            auto it = m_decl_map.find(decl);
+            auto it = m_decl_map.find(decl); // Find using original full decl
+            // It's possible a decl in wtoDecls is not in the main decls if simplified away
             if (it != m_decl_map.end()) {
-              result.wtoDecls.push_back(it->second);
+                result.wtoDecls.push_back(it->second); // Store the translated full BV declaration Expr
+            } else if (decl->arg(0) != input.failDecl) { // Check name against failDecl name
+                 if (debug >= 1) outs() << "Warning: WTO decl " << *decl << " not found in map during LIA->BV translation.\n";
+                 // Decide how to handle this - skip or assert? Skipping for now.
             }
           }
         }
@@ -185,22 +214,67 @@ namespace ufo
         result.wtoCHCs.clear();
         result.dwtoCHCs.clear();
 
-        // First rebuild wtoCHCs 
-        for (auto wto : input.wtoCHCs) {
-          // if (!wto) continue;
-          for (size_t i = 0; i < result.chcs.size(); i++) {
-            if (wto->srcRelation && wto->dstRelation &&
-                result.chcs[i].srcRelation == m_decl_map[wto->srcRelation] && 
-                result.chcs[i].dstRelation == m_decl_map[wto->dstRelation]) {
-              result.wtoCHCs.push_back(&result.chcs[i]);
-              // Also add to dwtoCHCs if not a query
-              if (!wto->isQuery) {
-                result.dwtoCHCs.push_back(&result.chcs[i]);
-              }
-              break;
-            }
-          }
+        // Map original rule pointers to their index in the input.chcs vector
+        std::map<const HornRuleExt*, size_t> inputRuleIndex;
+        for(size_t i = 0; i < input.chcs.size(); ++i) {
+            inputRuleIndex[&input.chcs[i]] = i;
         }
+
+        // Iterate through the *original* wtoCHCs list
+        for (const HornRuleExt* origWtoRulePtr : input.wtoCHCs) {
+            if (!origWtoRulePtr) continue;
+
+            // Find the index of this rule in the original CHCs
+            auto idxIt = inputRuleIndex.find(origWtoRulePtr);
+            if (idxIt == inputRuleIndex.end()) {
+                 assert(false && "Original WTO rule not found in input CHCs during LIA->BV translation");
+                 continue;
+            }
+            size_t ruleIndex = idxIt->second;
+
+            // Ensure the index is valid for the translated rules
+            if (ruleIndex < result.chcs.size()) {
+                // Get the pointer to the corresponding translated rule
+                HornRuleExt* translatedRulePtr = &result.chcs[ruleIndex];
+
+                // Basic sanity check (optional but good)
+                #ifndef NDEBUG // Only include assertions in debug builds
+                Expr expectedTranslatedSrcName;
+                if (isOpX<TRUE>(origWtoRulePtr->srcRelation)) {
+                    expectedTranslatedSrcName = mk<TRUE>(m_efac);
+                } else {
+                    Expr originalSrcDecl = input.getDeclByName(origWtoRulePtr->srcRelation); // Get original full decl by name
+                    assert(originalSrcDecl && "Original WTO source declaration not found");
+                    auto srcIt = m_decl_map.find(originalSrcDecl); // Find translated full decl
+                    assert(srcIt != m_decl_map.end() && "WTO Source relation not found in decl_map");
+                    expectedTranslatedSrcName = srcIt->second->arg(0); // Get translated name
+                }
+
+                Expr expectedTranslatedDstName;
+                if (origWtoRulePtr->dstRelation == input.failDecl) { // Compare names
+                    expectedTranslatedDstName = result.failDecl; // Use result's failDecl name
+                } else {
+                    Expr originalDstDecl = input.getDeclByName(origWtoRulePtr->dstRelation); // Get original full decl by name
+                    assert(originalDstDecl && "Original WTO destination declaration not found");
+                    auto dstIt = m_decl_map.find(originalDstDecl); // Find translated full decl
+                    assert(dstIt != m_decl_map.end() && "WTO Destination relation not found in decl_map");
+                    expectedTranslatedDstName = dstIt->second->arg(0); // Get translated name
+                }
+
+                // Compare translated rule's name with expected translated name
+                assert(translatedRulePtr->srcRelation == expectedTranslatedSrcName && "WTO Source relation mismatch after LIA->BV translation");
+                assert(translatedRulePtr->dstRelation == expectedTranslatedDstName && "WTO Destination relation mismatch after LIA->BV translation");
+                #endif
+
+                result.wtoCHCs.push_back(translatedRulePtr);
+                if (!translatedRulePtr->isQuery) { // Check the translated rule's property
+                    result.dwtoCHCs.push_back(translatedRulePtr);
+                }
+            } else {
+                assert(false && "Rule index out of bounds after LIA->BV translation");
+            }
+        }
+
 
         if (debug >= 3) {
           outs() << "Lia2Bv: Built wtoCHCs with " << result.wtoCHCs.size() << " rules\n";
@@ -208,8 +282,8 @@ namespace ufo
         }
 
         // Re-run cycle detection to ensure consistency  
-        result.cycleSearchDone = false;
-        result.findCycles();
+        result.cycleSearchDone = false; // Force recalculation
+        result.findCycles(); // This rebuilds outgs internally
 
         return result;
       }
@@ -218,34 +292,36 @@ namespace ufo
       Expr translateExpr(Expr e, unsigned width = 0)
       {
         // Use provided width or default if not specified
-        unsigned w = width > 0 ? width : m_width;
+        unsigned original_width = m_width;
+        if (width > 0) m_width = width; // Temporarily set width for this call
         
-        // Ensure maps are initialized
-        if (m_var_map.empty() && m_decl_map.empty())
-        {
-          // Create temporary maps if needed
-          return translateExprHelper(e);
-        }
-        return translateExprHelper(e);
+        // Ensure maps are initialized if called standalone (might need context)
+        // For now, assume maps are populated by a prior call to translate(CHCs&)
+        // or handle initialization explicitly if needed for standalone use.
+        Expr result = translateExprHelper(e);
+
+        if (width > 0) m_width = original_width; // Restore original width
+        return result;
       }
 
     private:
       ExprSet translateDeclarations(const ExprSet &decls)
       {
         ExprSet result;
-        for (Expr decl : decls)
+        for (Expr decl : decls) // decl is the original full LIA declaration Expr
         {
           if (decl == NULL) continue;
           
           ExprVector sorts;
-          for (unsigned i = 1; i < decl->arity()-1; i++)
+          // Start from index 1 to skip the relation name (arg 0)
+          for (unsigned i = 1; i < decl->arity()-1; i++) // Stop before the Bool return type
           {
             Expr sort = decl->arg(i);
             // Handle INT_TY sorts - convert to BVSORT
             if (isOpX<INT_TY>(sort)) {
-              sorts.push_back(bv::bvsort(m_width, m_efac));
+              sorts.push_back(bv::bvsort(m_width, m_efac)); // Use calculated/provided m_width
             }
-            // Handle other sorts
+            // Handle other sorts (keep as is)
             else {
               sorts.push_back(sort);
             }
@@ -259,9 +335,9 @@ namespace ufo
           // Add boolean return type
           sorts.push_back(mk<BOOL_TY>(m_efac));
           
-          // Create new declaration with translated types
-          Expr newDecl = bind::fdecl(decl->arg(0), sorts);
-          m_decl_map[decl] = newDecl;
+          // Create new declaration with translated types, keeping original name
+          Expr newDecl = bind::fdecl(decl->arg(0), sorts); // Use original name decl->arg(0)
+          m_decl_map[decl] = newDecl; // Map original full decl to translated full decl
 
           if (debug >= 3) {
             outs() << "Translated declaration " << *decl 
@@ -275,41 +351,90 @@ namespace ufo
 
       void translateVariableMaps(const CHCs &input, CHCs &output)
       {
-        // Translate regular variables using translateInvVars
-        for (const auto &kv : input.invVars)
+        // Translate invVars
+        output.invVars.clear();
+        for (const auto &kv : input.invVars) // kv.first is relation name (Expr)
         {
-          output.invVars[kv.first] = translateInvVars(kv.second, true);
+            Expr originalDecl = input.getDeclByName(kv.first); // Find original full decl
+            if (!originalDecl) {
+                 if (debug >= 1) outs() << "Warning: Declaration for invVar " << *kv.first << " not found.\n";
+                 continue;
+            }
+            auto it = m_decl_map.find(originalDecl); // Find translated full decl
+            if (it != m_decl_map.end()) {
+                Expr translatedName = it->second->arg(0); // Get translated name
+                output.invVars[translatedName] = translateInvVars(kv.second, true); // Map translated name to translated vars
+            } else {
+                 if (debug >= 1) outs() << "Warning: Translated declaration for invVar " << *kv.first << " not found in map.\n";
+            }
         }
 
-        // Translate prime variables using translateInvVars
-        for (const auto &kv : input.invVarsPrime) 
+        // Translate invVarsPrime similarly
+        output.invVarsPrime.clear();
+        for (const auto &kv : input.invVarsPrime) // kv.first is relation name (Expr)
         {
-          output.invVarsPrime[kv.first] = translateInvVars(kv.second, true);
+            Expr originalDecl = input.getDeclByName(kv.first); // Find original full decl
+             if (!originalDecl) {
+                 if (debug >= 1) outs() << "Warning: Declaration for invVarPrime " << *kv.first << " not found.\n";
+                 continue;
+            }
+            auto it = m_decl_map.find(originalDecl); // Find translated full decl
+            if (it != m_decl_map.end()) {
+                Expr translatedName = it->second->arg(0); // Get translated name
+                output.invVarsPrime[translatedName] = translateInvVars(kv.second, true); // Map translated name to translated vars
+            } else {
+                 if (debug >= 1) outs() << "Warning: Translated declaration for invVarPrime " << *kv.first << " not found in map.\n";
+            }
         }
       }
 
-      std::vector<HornRuleExt> translateClauses(const std::vector<HornRuleExt> &rules)
+      // Update signature to accept input and result CHCs
+      std::vector<HornRuleExt> translateClauses(const std::vector<HornRuleExt> &rules, const CHCs& input, CHCs& result)
       {
-        std::vector<HornRuleExt> result;
+        std::vector<HornRuleExt> translatedRules;
         for (const auto &rule : rules)
         {
-          HornRuleExt newRule = rule;
-          
-          // Translate source/destination relations
-          if (m_decl_map.count(rule.srcRelation))
-            newRule.srcRelation = m_decl_map[rule.srcRelation];
-          if (m_decl_map.count(rule.dstRelation))  
-            newRule.dstRelation = m_decl_map[rule.dstRelation];
+          HornRuleExt newRule = rule; // Copy basic structure
 
-          // Translate variables
-          translateRuleVariables(newRule);
+          // Translate source relation name
+          if (!isOpX<TRUE>(rule.srcRelation)) { // rule.srcRelation is the NAME
+              Expr originalDecl = input.getDeclByName(rule.srcRelation); // Get original full decl by name
+              assert(originalDecl && "Original source declaration not found");
+              auto it = m_decl_map.find(originalDecl); // Find translated full decl using original full decl as key
+              assert(it != m_decl_map.end() && "Source relation not found in decl_map during LIA->BV translation");
+              newRule.srcRelation = it->second->arg(0); // Set to translated NAME
+          } else {
+              newRule.srcRelation = mk<TRUE>(m_efac); // Keep TRUE as TRUE
+          }
 
-          // Translate body constraints and fix formatting
-          newRule.body = fixFormatting(translateExpr(rule.body));
-          
-          result.push_back(newRule);
+          // Translate destination relation name
+          if (rule.dstRelation != input.failDecl) { // rule.dstRelation is the NAME, compare with failDecl NAME
+              Expr originalDecl = input.getDeclByName(rule.dstRelation); // Get original full decl by name
+              assert(originalDecl && "Original destination declaration not found");
+              auto it = m_decl_map.find(originalDecl); // Find translated full decl using original full decl as key
+              assert(it != m_decl_map.end() && "Destination relation not found in decl_map during LIA->BV translation");
+              newRule.dstRelation = it->second->arg(0); // Set to translated NAME
+          } else {
+              newRule.dstRelation = result.failDecl; // Use failDecl name from the target CHC
+          }
+
+          // Translate variables (ensure maps are populated correctly before this)
+          // This uses m_var_map implicitly via translateInvVars
+          translateRuleVariables(newRule); 
+
+          // Translate body constraints
+          newRule.body = fixFormatting(translateExprHelper(rule.body)); // Use helper, translateExpr uses m_var_map
+
+          // Clear fields that need rebuilding based on translated vars/relations
+          // These were specific to the original rule structure and parsing
+          newRule.lin.clear();
+          newRule.origSrc.clear();
+          newRule.origDst.clear();
+          newRule.origSrcVars.clear();
+
+          translatedRules.push_back(newRule);
         }
-        return result;
+        return translatedRules;
       }
 
       void translateRuleVariables(HornRuleExt &rule)
@@ -327,98 +452,154 @@ namespace ufo
 
         // Handle ITE expressions 
         if (isOpX<ITE>(e)) {
-          Expr cond = translateExpr(e->arg(0));
-          Expr thenBranch = translateExpr(e->arg(1));
-          Expr elseBranch = translateExpr(e->arg(2));
+          Expr cond = translateExprHelper(e->arg(0)); // Recursive call
+          Expr thenBranch = translateExprHelper(e->arg(1)); // Recursive call
+          Expr elseBranch = translateExprHelper(e->arg(2)); // Recursive call
           
-          // If condition is a BV1, convert to boolean
+          // If condition was originally boolean (not LIA Int), it remains boolean.
+          // If condition was LIA Int, it's now BV. Convert BV1 to boolean for ITE.
           if (isOpX<BVSORT>(typeOf(cond)) && width(typeOf(cond)) == 1) {
-            cond = bv::tobool(cond);
+            cond = bv::tobool(cond); // Convert bv1 to bool
           }
+          // If original condition was bool, cond is already bool.
           
           return mk<ITE>(cond, thenBranch, elseBranch);
         }
         
-        // Handle variables
+        // Handle variables (constants in Expr terminology)
         if (bind::IsConst()(e))
-          return translateVar(e);
+          return translateVar(e); // Uses m_var_map
 
-        // Handle integer literals 
+        // Handle integer literals (MPZ)
         if (isOpX<MPZ>(e))
         {
           mpz_class val = getTerm<mpz_class>(e);
-          return bv::bvnum(val, m_width, m_efac);
+          // Convert LIA constant to BV constant using calculated width
+          return bv::bvnum(val, m_width, m_efac); 
         }
 
-        // Handle operations - all LIA operations are signed
+        // Handle LIA arithmetic operations -> BV operations (signed)
         if (isOpX<PLUS>(e))
-          return bv::bvadd(translateExpr(e->left()), translateExpr(e->right()));
+          return bv::bvadd(translateExprHelper(e->left()), translateExprHelper(e->right()));
         else if (isOpX<MINUS>(e))
-          return mk<BSUB>(translateExpr(e->left()), translateExpr(e->right()));
+          // Use bvsub for consistency, though mk<BSUB> might work
+          return mk<expr::op::BSUB>(translateExprHelper(e->left()), translateExprHelper(e->right())); 
         else if (isOpX<MULT>(e))
-          return mk<BMUL>(translateExpr(e->left()), translateExpr(e->right()));
-        else if (isOpX<DIV>(e)) {
-          // LIA division is always signed integer division
-          Expr left = translateExpr(e->left());
-          Expr right = translateExpr(e->right());
-          // Optionally add check for division by zero
+          // Use bvmul for consistency
+          return mk<expr::op::BMUL>(translateExprHelper(e->left()), translateExprHelper(e->right())); 
+        else if (isOpX<DIV>(e)) { 
+          // LIA division (integer division towards zero) -> Signed BV division (BSDIV)
+          Expr left = translateExprHelper(e->left());
+          Expr right = translateExprHelper(e->right());
+          // Add check for division by zero? Z3 handles it by returning uninterpreted value.
           return mk<BSDIV>(left, right); 
         }
-        else if (isOpX<IDIV>(e)) {
-          // Floor division in LIA also maps to signed BV division
-          Expr left = translateExpr(e->left());
-          Expr right = translateExpr(e->right());
+        else if (isOpX<IDIV>(e)) { 
+          // LIA floor division -> Signed BV division (BSDIV) - Note: Semantics differ for negative numbers!
+          // LIA IDIV: floor(a/b). BSDIV: round towards zero(a/b).
+          // This translation might be imprecise.
+          if (debug >= 1) outs() << "Warning: Translating LIA IDIV to BSDIV, semantics may differ.\n";
+          Expr left = translateExprHelper(e->left());
+          Expr right = translateExprHelper(e->right());
           return mk<BSDIV>(left, right);
         }
         else if (isOpX<MOD>(e)) {
-          // LIA mod becomes signed remainder
-          Expr left = translateExpr(e->left());
-          Expr right = translateExpr(e->right());
+          // LIA modulo -> Signed BV remainder (BSREM) - Note: Semantics differ for negative numbers!
+          // LIA MOD: a - b*floor(a/b). BSREM: a - b*(a bvsdiv b).
+          // This translation might be imprecise.
+          if (debug >= 1) outs() << "Warning: Translating LIA MOD to BSREM, semantics may differ.\n";
+          Expr left = translateExprHelper(e->left());
+          Expr right = translateExprHelper(e->right());
           return mk<BSREM>(left, right);
         }
-        else if (isOpX<UN_MINUS>(e))
-          return bv::bvneg(translateExpr(e->left()));
-        else if (isOpX<LEQ>(e))
-          return bv::bvsle(translateExpr(e->left()), translateExpr(e->right())); // Changed to signed
-        else if (isOpX<LT>(e))
-          return bv::bvslt(translateExpr(e->left()), translateExpr(e->right())); // Changed to signed
-        else if (isOpX<GEQ>(e))
-          return bv::bvsge(translateExpr(e->left()), translateExpr(e->right())); // Changed to signed 
-        else if (isOpX<GT>(e))
-          return bv::bvsgt(translateExpr(e->left()), translateExpr(e->right())); // Changed to signed
+        else if (isOpX<UN_MINUS>(e)) // LIA unary minus -> BV negation
+          return bv::bvneg(translateExprHelper(e->left()));
           
-        // Keep boolean operations untranslated
+        // Handle LIA comparisons -> Signed BV comparisons
+        else if (isOpX<LEQ>(e))
+          return bv::bvsle(translateExprHelper(e->left()), translateExprHelper(e->right())); 
+        else if (isOpX<LT>(e))
+          return bv::bvslt(translateExprHelper(e->left()), translateExprHelper(e->right())); 
+        else if (isOpX<GEQ>(e))
+          return bv::bvsge(translateExprHelper(e->left()), translateExprHelper(e->right())); 
+        else if (isOpX<GT>(e))
+          return bv::bvsgt(translateExprHelper(e->left()), translateExprHelper(e->right())); 
+        else if (isOpX<EQ>(e)) // Equality
+          return mk<EQ>(translateExprHelper(e->left()), translateExprHelper(e->right()));
+        else if (isOpX<NEQ>(e)) // Inequality
+          return mk<NEQ>(translateExprHelper(e->left()), translateExprHelper(e->right()));
+          
+        // Keep boolean operations (AND, OR, NOT, IMPL, IFF, XOR) untranslated
         else if (isOp<BoolOp>(e))
         {
           ExprVector args;
           for (unsigned i = 0; i < e->arity(); i++)
-            args.push_back(translateExpr(e->arg(i)));
-          return e->efac().mkNary(e->op(), args);
+            args.push_back(translateExprHelper(e->arg(i))); // Recursive call
+          return e->efac().mkNary(e->op(), args); // Reconstruct with same operator
+        }
+        
+        // Handle FAPP (relation calls)
+        else if (isOpX<FAPP>(e))
+        {
+            Expr fdecl = e->arg(0); // This is the FDECL expression
+            Expr originalName = bind::fname(fdecl); // Get the name Expr
+
+            // Find the original full declaration using the name
+            // This requires access to the input CHCs context.
+            // Assuming m_decl_map maps original full decl to translated full decl.
+            // Need a way to find the original decl from name or context.
+            // Fallback: Assume fdecl itself is the key if it was in input.decls.
+            auto decl_it = m_decl_map.find(fdecl);
+            Expr translated_fdecl;
+            if (decl_it != m_decl_map.end()) {
+                translated_fdecl = decl_it->second;
+            } else {
+                if (debug >= 1) outs() << "Warning: FDECL " << *fdecl << " not found in decl_map during FAPP translation.\n";
+                translated_fdecl = fdecl; // Keep original as fallback
+            }
+
+            ExprVector args;
+            args.push_back(translated_fdecl); // Use translated FDECL
+            // Translate arguments recursively
+            for (unsigned i = 1; i < e->arity(); ++i)
+              args.push_back(translateExprHelper(e->arg(i))); // Recursive call
+            return mknary<FAPP>(args);
         }
 
-        // Any other operation - recursively translate args
+
+        // Any other operation - recursively translate args and keep operator
+        // This might cover UFs or other non-LIA/Bool constructs if present.
+        if (debug >= 1) outs() << "Warning: Translating unknown operator " << e->op() << " recursively.\n";
         ExprVector args;
         for (unsigned i = 0; i < e->arity(); i++)
-          args.push_back(translateExpr(e->arg(i)));
+          args.push_back(translateExprHelper(e->arg(i)));
         return e->efac().mkNary(e->op(), args);
       }
 
       Expr fixFormatting(Expr e)
       {
-        // Fix rules that end with NULL
+        // Fix rules that end with NULL (should not happen with proper parsing/translation)
         if (e == NULL) 
         {
-          return mk<FALSE>(m_efac);
+          if (debug >= 1) outs() << "Warning: Encountered NULL expression in fixFormatting.\n";
+          return mk<FALSE>(m_efac); // Return FALSE instead of NULL
         }
 
-        // Fix rule formatting
+        // Recursively fix formatting for arguments
         ExprVector args;
+        bool changed = false;
         for (unsigned i = 0; i < e->arity(); i++)
         {
-          args.push_back(fixFormatting(e->arg(i)));
+          Expr oldArg = e->arg(i);
+          Expr newArg = fixFormatting(oldArg);
+          args.push_back(newArg);
+          if (oldArg != newArg) changed = true;
         }
 
-        if (args.empty()) return e;
+        // If no arguments or no changes, return original expression
+        if (args.empty() || !changed) return e;
+        
+        // Reconstruct expression with fixed arguments
         return e->efac().mkNary(e->op(), args);
       }
   };
