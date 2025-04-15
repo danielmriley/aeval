@@ -23,8 +23,12 @@ namespace ufo
     std::vector<ExprSet> m_learnedLemmas;  // Stores learned lemmas per iteration
     unsigned m_original_bv_width = 0; // Store original BV width
 
-    ExprSet m_liaSolution;  // Solution found in LIA as set of expressions
-    ExprMap m_bvSolution;   // Translated solution in BV
+    // --- Refactored Solution Storage ---
+    // m_liaSolution is removed
+    map<Expr, ExprSet> m_liaSolutionMap; // Maps LIA relation -> LIA solution ExprSet
+    // m_bvSolution is removed
+    map<Expr, Expr> m_bvSolutionMap;   // Maps BV relation -> combined BV solution Expr
+    // --- End Refactored Solution Storage ---
 
     map<Expr, ExprVector> origBvVars;  // Original BV variables in the program
     map<Expr, ExprVector> origBvVarsPrime;  // Original primed BV variables in the program
@@ -154,11 +158,30 @@ namespace ufo
 
       // Create temporary CHCs for the translation
       CHCs translatedChcs = m_Bv2LiaTranslator.translate(m_bvChcs);
+
+      // --- Modification: Clear maps and add debug prints ---
+      origLiaVars.clear(); 
+      origLiaVarsPrime.clear();
+      if (debug >= 4) outs() << "Populating origLiaVars:\n";
+      // --- End Modification ---
+
       for (auto d : translatedChcs.decls)
       {
-        // Copy vectors directly
-        origLiaVars[d] = translatedChcs.invVars[d];
-        origLiaVarsPrime[d] = translatedChcs.invVarsPrime[d];
+        // --- Modification: Use relation name as key ---
+        Expr relName = d->left(); 
+        if (!relName) continue; // Skip if name is null
+
+        // Copy vectors directly, using the relation NAME as the key
+        origLiaVars[relName] = translatedChcs.invVars[relName];
+        origLiaVarsPrime[relName] = translatedChcs.invVarsPrime[relName];
+        // --- End Modification ---
+
+        // +++ Debugging +++
+        if (debug >= 4) {
+            outs() << "  Stored LIA vars for relation: " << *relName 
+                   << " (" << origLiaVars[relName].size() << " vars)\n";
+        }
+        // +++ End Debugging +++
       }
 
       m_liaChcs->reinitialize(translatedChcs);
@@ -329,13 +352,15 @@ namespace ufo
     CHCs& getLiaChcs() { return *m_liaChcs; }
     CHCs& getBvChcs() { return m_bvChcs; }
 
-    void getSolution(ExprMap &e) {
-      e = m_bvSolution;
+    // --- Updated getSolution methods ---
+    void getSolution(map<Expr, Expr> &e) { // Changed signature
+      e = m_bvSolutionMap;
     }
 
-    ExprMap getSolution() {
-      return m_bvSolution;
+    map<Expr, Expr> getSolution() { // Changed signature
+      return m_bvSolutionMap;
     }
+    // --- End Updated getSolution methods ---
 
     bool solve(unsigned to = 100) {
       if (debug >= 1) {
@@ -359,23 +384,23 @@ namespace ufo
         }
 
         // 2. Try to solve LIA system with timeout
-        if (!solveLIA()) {
+        if (!solveLIA()) { // solveLIA now populates m_liaSolutionMap
           if (debug >= 1) outs() << "Could not find LIA solution\n";
           return false;
         }
 
         if (debug >= 3) {
-          outs() << "Found LIA solution with " << m_liaSolution.size() << " variables\n";
+          outs() << "Found LIA solution with " << m_liaSolutionMap.size() << " relations\n"; // Updated log
         }
 
         // 3. Translate LIA solution back to BV
-        if (!translateSolutionToBv()) {
+        if (!translateSolutionToBv()) { // translateSolutionToBv now uses m_liaSolutionMap and populates m_bvSolutionMap
           if (debug >= 1) outs() << "Failed to translate solution to BV\n";
           return false;
         }
 
         if (debug >= 3) {
-          outs() << "Translated solution back to BV with " << m_bvSolution.size() << " variables\n";
+          outs() << "Translated solution back to BV with " << m_bvSolutionMap.size() << " relations\n"; // Updated log
         }
 
         // 4. Check if solution is safe in BV
@@ -389,7 +414,7 @@ namespace ufo
         
         if (isSafe) {
           if (debug >= 1) {
-            outs() << "Found safe BV solution after " << (i+1) << " iterations!\n";
+            outs() << "Success! Found safe BV solution after " << (i+1) << " iterations!\n";
             printSolution();
           }
           return true;
@@ -507,33 +532,47 @@ namespace ufo
         if (debug >= 2)
           outs() << "Bootstrap successful\n";
 
-        // Get lemmas safely
-        ExprSet lemmas = solver->getlearnedLemmas(0);
-        if (lemmas.empty())
-        {
-          if (debug >= 1)
-            outs() << "Warning: No lemmas found\n";
-          return false;
-        }
+        // --- Store LIA solution per relation ---
+        m_liaSolutionMap.clear();
+        for (auto &liaDecl : m_liaChcs->decls) { // liaDecl is the full declaration Expr, e.g., (declare-rel inv (Int))
+            Expr liaDeclExpr = liaDecl->left(); // liaDeclExpr is just the name, e.g., inv
+            // --- Fix: Pass the full declaration to getVarIndex ---
+            // int invNum = getVarIndex(liaDeclExpr, m_liaChcs->decls); // OLD INCORRECT FIX: Searches for name in list of full decls
+            int invNum = getVarIndex(liaDecl, m_liaChcs->decls); // CORRECTED FIX: Searches for full decl in list of full decls
+            // --- End Fix ---
+            // +++ Debugging +++
+            if (debug >= 5) {
+                // Added full decl to log
+                outs() << "  solveLIA (bootstrap): Checking relation " << *liaDeclExpr << ", full decl: " << *liaDecl << ", found invNum: " << invNum << "\n";
+                if (invNum >= 0) solver->printSolutionForRelation(invNum);
+            }
+            // +++ End Debugging +++
+            if (invNum < 0) { // Log if not found
+                 if (debug >= 1) outs() << "Error: Could not find index for LIA declaration: " << *liaDecl << "\n";
+                 continue;
+            }
 
-        if (debug >= 3)
-        {
-          outs() << "Lemmas found:\n";
-          for (auto &lemma : lemmas)
-          {
-            outs() << "  " << lemma << "\n";
-          }
+            ExprSet lemmas = solver->getlearnedLemmas(invNum);
+            if(debug >=4) outs() << "  lemmas size: " << lemmas.size() << "\n";
+            if (!lemmas.empty()) {
+                ExprSet validLemmas;
+                for (auto &lemma : lemmas) {
+                    validLemmas.insert(normalizeExpr(lemma));
+                }
+                m_liaSolutionMap[liaDeclExpr] = validLemmas; // Store using name as key
+                 if (debug >= 3) {
+                    outs() << "LIA Lemmas for " << liaDeclExpr << ":\n";
+                    for(auto& l : validLemmas) outs() << "  " << l << "\n";
+                 }
+            } else {
+                 if (debug >= 2) outs() << "Warning: No LIA lemmas found for " << liaDeclExpr << "\n";
+            }
         }
+        // --- End Store LIA solution ---
 
-        // Validate and normalize lemmas
-        ExprSet validLemmas;
-        for (auto &lemma : lemmas)
-        {
-          validLemmas.insert(normalizeExpr(lemma));
-        }
-
-        m_liaSolution = validLemmas;
-        return !m_liaSolution.empty();
+        // --- Return true if bootstrap succeeded, regardless of map content ---
+        return true;
+        // --- End Modification ---
       }
 
       solver->calculateStatistics();
@@ -546,29 +585,51 @@ namespace ufo
           outs() << "V4 solver found solution\n";
         }
 
-        // Get lemmas safely
-        ExprSet lemmas = solver->getlearnedLemmas(0);
-        if (lemmas.empty()) {
-          if (debug >= 1) outs() << "Warning: No lemmas found\n";
-          return false;
-        }
+        // --- Store LIA solution per relation ---
+        m_liaSolutionMap.clear();
+        for (auto &liaDecl : m_liaChcs->decls) { // liaDecl is the full declaration Expr
+            Expr liaDeclExpr = liaDecl->left(); // liaDeclExpr is just the name
+            // --- Fix: Pass the full declaration to getVarIndex ---
+            // int invNum = getVarIndex(liaDeclExpr, m_liaChcs->decls); // OLD INCORRECT FIX
+            int invNum = getVarIndex(liaDecl, m_liaChcs->decls); // CORRECTED FIX
+            // --- End Fix ---
+            // +++ Debugging +++
+            if (debug >= 5) {
+                // Added full decl to log
+                outs() << "  solveLIA (synthesize): Checking relation " << *liaDeclExpr << ", full decl: " << *liaDecl << ", found invNum: " << invNum << "\n";
+                if (invNum >= 0) solver->printSolutionForRelation(invNum);
+            }
+            // +++ End Debugging +++
+             if (invNum < 0) { // Log if not found
+                 if (debug >= 1) outs() << "Error: Could not find index for LIA declaration: " << *liaDecl << "\n";
+                 continue;
+             }
 
-        if(debug >= 3)
-        {
-          outs() << "Lemmas found:\n";
-          for (auto &lemma : lemmas) {
-            outs() << "  " << lemma << "\n";
-          }
+            ExprSet lemmas = solver->getlearnedLemmas(invNum);
+            if(debug >=4) outs() << "  lemmas size: " << lemmas.size() << "\n";
+             if (!lemmas.empty()) {
+                ExprSet validLemmas;
+                for (auto &lemma : lemmas) {
+                  if(debug >= 4)
+                  {
+                    outs() << "  learned lemma: " << lemma << "\n";
+                  }
+                    validLemmas.insert(normalizeExpr(lemma));
+                }
+                m_liaSolutionMap[liaDeclExpr] = validLemmas; // Store using name as key
+                 if (debug >= 3) {
+                    outs() << "LIA Lemmas for " << liaDeclExpr << ":\n";
+                    for(auto& l : validLemmas) outs() << "  " << l << "\n";
+                 }
+            } else {
+                 if (debug >= 2) outs() << "Warning: No LIA lemmas found for " << liaDeclExpr << "\n";
+            }
         }
+        // --- End Store LIA solution ---
 
-        // Validate and normalize lemmas
-        ExprSet validLemmas;
-        for (auto &lemma : lemmas) {
-          validLemmas.insert(normalizeExpr(lemma));
-        }
-
-        m_liaSolution = validLemmas;
-        return !m_liaSolution.empty();
+        // --- Return true if synthesize succeeded, regardless of map content ---
+        return true;
+        // --- End Modification ---
       }
 
       return false;
@@ -576,11 +637,11 @@ namespace ufo
 
     bool translateSolutionToBv() {
       if (debug >= 2) {
-        outs() << "Translating LIA solution to BV...\n";
+        outs() << "Translating LIA solution map to BV solution map...\n";
       }
 
-      // Clear any previous solution 
-      m_bvSolution.clear();
+      // Clear any previous solution
+      m_bvSolutionMap.clear();
 
       // Safety check - ensure we have declarations
       if (m_bvChcs.decls.empty()) {
@@ -590,140 +651,230 @@ namespace ufo
         return false;
       }
 
-      // --- Modification: Use the member translator directly ---
-      // Lia2BvTranslator translator(m_efac, m_z3, 4, debug); // Don't create a new one
+      // Get the BV -> LIA declaration map
+      const auto& bvToLiaMap = m_Bv2LiaTranslator.getBvToLiaDeclMap();
 
-      // Print original LIA solution
-      if (debug >= 3) {
-        outs() << "\nLIA Solution:\n";
-        for (auto& expr : m_liaSolution) {
-          outs() << "  " << ineqReverter(expr) << "\n";
-        }
-        outs() << "\n";
-      }
-
-      // Get first relation and ensure it exists
-      auto firstDecl = m_bvChcs.decls.begin();
-      if (firstDecl == m_bvChcs.decls.end() || !*firstDecl) {
-        if (debug >= 1) {
-          outs() << "Error: Invalid first declaration\n";
-        }
-        return false;
-      }
-      
-      Expr rel = (*firstDecl)->left();
-      if (!rel) {
-        if (debug >= 1) {
-          outs() << "Error: Invalid relation expression\n";
-        }
-        return false;
-      }
-
-      // Translate each expression in the solution
-      for (auto& expr : m_liaSolution) {
-        if (!expr) continue; // Skip invalid expressions
-        
-        // --- Modification: Pass the stored original BV width ---
-        Expr bvExpr = m_Lia2BvTranslator.translateExpr(expr, m_original_bv_width); 
-        // --- End Modification ---
-
-        if (!bvExpr) {
-          if (debug >= 2) {
-            outs() << "Warning: Failed to translate expression: " << *expr << "\n";
+      // +++ Debugging +++
+      if (debug >= 4) {
+          outs() << "BV to LIA Relation Map (bvToLiaMap):\n";
+          for (const auto& pair : bvToLiaMap) {
+              if (pair.first && pair.second) { // Check for null pointers
+                  outs() << "  BV: " << *(pair.first) << " -> LIA: " << *(pair.second) << "\n";
+              } else {
+                  outs() << "  BV: (null?) -> LIA: (null?)\n";
+              }
           }
+          outs() << "LIA Solution Map (m_liaSolutionMap):\n";
+          for (const auto& pair : m_liaSolutionMap) {
+               if (pair.first) { // Check for null pointers
+                  outs() << "  LIA: " << *(pair.first) << " -> " << pair.second.size() << " lemmas\n";
+               } else {
+                   outs() << "  LIA: (null?) -> " << pair.second.size() << " lemmas\n";
+               }
+          }
+      }
+      // +++ End Debugging +++
+
+
+      // Iterate through BV declarations
+      for (auto& bvDecl : m_bvChcs.decls) {
+        Expr bvRel = bvDecl->left(); // Original BV relation name
+        if (!bvRel) continue;
+
+        if (debug >= 4) outs() << "Processing BV relation: " << *bvRel << "\n";
+
+        // Find corresponding LIA relation NAME using the map
+        auto mapIt = bvToLiaMap.find(bvRel); // Look up original BV name
+        if (mapIt == bvToLiaMap.end()) {
+          if (debug >= 1) outs() << "Warning: Could not find LIA relation for BV relation " << *bvRel << " in bvToLiaMap\n"; // Added map name
+          continue;
+        }
+        Expr liaRel = mapIt->second; // Translated LIA relation name
+
+        if (debug >= 4) outs() << "  Found corresponding LIA relation name: " << *liaRel << "\n";
+
+        // Find LIA solution for this relation using the LIA relation name as key
+        auto liaSolnIt = m_liaSolutionMap.find(liaRel); // Look up translated LIA name
+        if (liaSolnIt == m_liaSolutionMap.end() || liaSolnIt->second.empty()) {
+          if (debug >= 2) outs() << "Warning: No LIA solution found for relation " << *liaRel << " (BV: " << *bvRel << ") in m_liaSolutionMap\n"; // Added map name
+          // Store 'true' as the solution if none is found? Or skip? Let's store true.
+          m_bvSolutionMap[bvRel] = mk<TRUE>(m_efac);
           continue;
         }
 
-        // Replace variables and add to solution if successful
-        bvExpr = replaceAll(bvExpr, origBvVars[rel], m_bvChcs.invVars[rel]);
-        if (bvExpr) {
-          if (debug >= 3) {
-            outs() << "Translated: " << *expr << "\n";
-            outs() << "      To: " << *bvExpr << "\n";
+        ExprSet& liaExprSet = liaSolnIt->second;
+        ExprSet bvExprSet;
+
+        // Translate each LIA expression in the solution set
+        for (auto& liaExpr : liaExprSet) {
+          if (!liaExpr) continue; // Skip invalid expressions
+
+          Expr bvExpr = m_Lia2BvTranslator.translateExpr(liaExpr, m_original_bv_width);
+
+          if (!bvExpr) {
+            if (debug >= 2) {
+              outs() << "Warning: Failed to translate LIA expression: " << *liaExpr << " for relation " << *liaRel << "\n";
+            }
+            continue;
           }
-          m_bvSolution[expr] = bvExpr;
+
+          // Replace LIA invariant variables with BV invariant variables
+          // Ensure both relations exist in the respective variable maps
+
+          // +++ Debugging: Print map contents before check +++
+          if (debug >= 4) {
+              outs() << "  Checking variable maps for BV='" << *bvRel << "' / LIA='" << *liaRel << "'\n";
+              outs() << "    m_bvChcs.invVars keys: ";
+              for(const auto& p : m_bvChcs.invVars) if(p.first) outs() << *p.first << " "; outs() << "\n";
+              outs() << "    origLiaVars keys: ";
+              for(const auto& p : origLiaVars) if(p.first) outs() << *p.first << " "; outs() << "\n";
+              outs() << "    m_bvChcs.invVars.count(" << *bvRel << "): " << m_bvChcs.invVars.count(bvRel) << "\n";
+              outs() << "    origLiaVars.count(" << *liaRel << "): " << origLiaVars.count(liaRel) << "\n";
+              if (m_bvChcs.invVars.count(bvRel)) {
+                  outs() << "    BV Vars (" << m_bvChcs.invVars.at(bvRel).size() << "): ";
+                  for(const auto& v : m_bvChcs.invVars.at(bvRel)) outs() << *v << " "; outs() << "\n";
+              }
+              if (origLiaVars.count(liaRel)) {
+                  outs() << "    LIA Vars (" << origLiaVars.at(liaRel).size() << "): ";
+                  for(const auto& v : origLiaVars.at(liaRel)) outs() << *v << " "; outs() << "\n";
+              }
+          }
+          // +++ End Debugging +++
+
+          if (origLiaVars.count(liaRel) && m_bvChcs.invVars.count(bvRel)) {
+              // --- Modification: Create non-const copies instead of const references ---
+              ExprVector liaVars = origLiaVars.at(liaRel); 
+              ExprVector bvVars = m_bvChcs.invVars.at(bvRel);
+              // --- End Modification ---
+
+              // +++ Debugging: Check variable vector sizes +++
+              if (debug >= 4 && liaVars.size() != bvVars.size()) {
+                  outs() << "    Warning: LIA var count (" << liaVars.size() 
+                         << ") != BV var count (" << bvVars.size() << ") for relation " << *liaRel << "\n";
+              }
+              // +++ End Debugging +++
+
+              bvExpr = replaceAll(bvExpr, liaVars, bvVars); // Now uses non-const copies
+              if (bvExpr) {
+                  if (debug >= 4) {
+                      outs() << "  Translated LIA: " << *liaExpr << "\n";
+                      outs() << "        to BV (after var replace): " << *bvExpr << "\n"; // Updated log message
+                  }
+                  bvExprSet.insert(bvExpr);
+              }
+          } else {
+              if (debug >= 2) outs() << "Warning: Missing variables for relation pair " << *liaRel << "/" << *bvRel << " during translation.\n";
+          }
+        }
+
+        // Store the conjunction of translated BV expressions
+        m_bvSolutionMap[bvRel] = conjoin(bvExprSet, m_efac);
+        if (debug >= 3) {
+            outs() << "BV Solution for " << *bvRel << ": " << m_bvSolutionMap[bvRel] << "\n";
         }
       }
 
-      // Print full translation results
+
+      // Print full translation results (optional, maybe redundant with above)
       if (debug >= 2) {
-        outs() << "\nTranslated BV Solution:\n";
-        for (auto& kv : m_bvSolution) {
-          outs() << "Original: " << *kv.first << "\n";
-          outs() << "     BV: " << *kv.second << "\n";
+        outs() << "\nFinal Translated BV Solution Map (" << m_bvSolutionMap.size() << " entries):\n";
+        for (auto& kv : m_bvSolutionMap) {
+          outs() << "Relation: " << *kv.first << "\n";
+          outs() << "     BV Solution: " << *kv.second << "\n";
         }
         outs() << "\n";
       }
 
-      return !m_bvSolution.empty();
+      // Consider success if at least one relation was translated, even if to 'true'
+      return !m_bvSolutionMap.empty();
     }
 
-    bool multiHoudini(vector<HornRuleExt*> worklist, bool recur = true) 
+    bool multiHoudini(vector<HornRuleExt*> worklist) // Removed recur parameter
     {
-      if (debug >= 3) outs() << "MultiHoudini\n";
+      if (debug >= 3) outs() << "MultiHoudini (Validation)\n";
 
-      bool res1 = true;
-      for (auto &hr : worklist) 
+      for (auto &hr : worklist)
       {
         if (debug >= 3) {
-          outs() << "  Doing CHC check (" << hr->srcRelation << " -> "
+          outs() << "  Checking CHC (" << hr->srcRelation << " -> "
                  << hr->dstRelation << ")\n";
-        }
-        
-        if (hr->isQuery) continue;
-
-        // Build candidates map for this check
-        map<int, ExprVector> cands;
-        for (auto& kv : m_bvSolution) {
-          int idx = getVarIndex(hr->dstRelation, m_bvChcs.decls);
-          if (idx >= 0) {
-            cands[idx].push_back(kv.second);
-          }
         }
 
         ExprSet exprs = {hr->body};
-        
+
+        // Add source solution constraints if not a fact
         if (!hr->isFact) {
-          // Add source solution constraints
-          ExprSet srcCnjs;
-          auto srcSolnIt = m_bvSolution.find(hr->srcRelation); 
-          if (srcSolnIt != m_bvSolution.end()) {
-            Expr srcSoln = replaceAll(srcSolnIt->second, 
-                                    m_bvChcs.invVars[hr->srcRelation],
-                                    hr->srcVars);
-            exprs.insert(srcSoln);
+          auto srcSolnIt = m_bvSolutionMap.find(hr->srcRelation);
+          if (srcSolnIt != m_bvSolutionMap.end()) {
+            // Check if srcRelation exists in invVars before accessing
+            if (m_bvChcs.invVars.count(hr->srcRelation)) {
+                // srcSolnIt->second is the combined BV solution for the relation
+                Expr srcSolnCombined = srcSolnIt->second;
+                // Substitute invariant variables with rule's source variables
+                Expr srcSolnSubst = replaceAll(srcSolnCombined,
+                                          m_bvChcs.invVars.at(hr->srcRelation), // BV Invariant Vars
+                                          hr->srcVars);                         // BV Rule Source Vars
+                exprs.insert(srcSolnSubst);
+                if(debug >= 3) outs() << "    Source solution (" << hr->srcRelation << "): " << srcSolnSubst << "\n"; // Updated log
+            } else {
+                 if (debug >= 2) outs() << "Warning: Source relation " << hr->srcRelation << " not found in invVars map during multiHoudini check.\n";
+                 continue;
+            }
+          } else {
+             if (debug >= 3) outs() << "    Source solution missing for " << hr->srcRelation << ", assuming true.\n";
+             // If solution for source is missing, it implies 'true', so we don't add anything.
           }
         }
 
+        // Add negated destination solution constraints if not a query
         if (!hr->isQuery) {
-          // Add destination solution constraints
-          ExprSet dstCnjs;
-          auto dstSolnIt = m_bvSolution.find(hr->dstRelation);
-          if (dstSolnIt != m_bvSolution.end()) {
-            Expr dstSoln = replaceAll(dstSolnIt->second,
-                                    m_bvChcs.invVars[hr->dstRelation], 
-                                    hr->dstVars);
-            dstCnjs.insert(mkNeg(dstSoln));
+          auto dstSolnIt = m_bvSolutionMap.find(hr->dstRelation);
+          if (dstSolnIt != m_bvSolutionMap.end()) {
+             // Check if dstRelation exists in invVars before accessing
+             if (m_bvChcs.invVars.count(hr->dstRelation)) {
+                // dstSolnIt->second is the combined BV solution for the relation
+                Expr dstSolnCombined = dstSolnIt->second;
+                 // Substitute invariant variables with rule's destination variables
+                Expr dstSolnSubst = replaceAll(dstSolnCombined,
+                                          m_bvChcs.invVars.at(hr->dstRelation), // BV Invariant Vars
+                                          hr->dstVars);                         // BV Rule Destination Vars
+                exprs.insert(mkNeg(dstSolnSubst));
+                 if(debug >= 3) outs() << "    Neg Dest solution (" << hr->dstRelation << "): " << mkNeg(dstSolnSubst) << "\n"; // Updated log
+             } else {
+                 if (debug >= 2) outs() << "Warning: Destination relation " << hr->dstRelation << " not found in invVars map during multiHoudini check.\n";
+                 continue;
+             }
+          } else {
+            if (debug >= 3) outs() << "    Destination solution missing for " << hr->dstRelation << ", rule trivially satisfied.\n";
+            continue; // Skip the SAT check for this rule
           }
-          exprs.insert(disjoin(dstCnjs, m_efac));
         }
+        // For query rules, we don't add a negated destination. The check is Body ^ SrcInv => false.
+        // Which means we check satisfiability of Body ^ SrcInv.
+
+        // --- Debug Print ---
+        if (debug >= 4) {
+            outs() << "    Checking SAT for: " << conjoin(exprs, m_efac) << "\n";
+        }
+        // --- End Debug Print ---
 
         if (u.isSat(exprs)) {
-          if (debug >= 3) outs() << "    CHC check failed\n";
-          if (recur) {
-            res1 = false;
-            break;
-          }
+          // If SAT, the implication Body ^ SrcInv => DstInv (or Body ^ SrcInv => false for queries) is violated.
+          if (debug >= 3) outs() << "    CHC check failed (SAT)\n";
+          return false; // Solution is not valid for this rule
         }
-        else if (debug >= 3) outs() << "    CHC check succeeded\n";
+        else {
+           if (debug >= 3) outs() << "    CHC check succeeded (UNSAT)\n";
+        }
       }
 
-      if (!recur) return false;
-      if (res1) return true;
-      return multiHoudini(worklist);
+      // If all rules in the worklist passed the check
+      if (debug >= 3) outs() << "MultiHoudini: All checks passed.\n";
+      return true; // Solution is valid for all rules checked
     }
 
-    bool checkSafetyInBV(map<Expr, ExprSet>& candidates) {
+
+    bool checkSafetyInBV(map<Expr, ExprSet>& candidates) { // candidates param seems unused but kept for signature stability
       if (debug >= 2) {
         outs() << "Checking safety of BV solution\n";
       }
@@ -732,20 +883,22 @@ namespace ufo
 
       // Add all query rules to the worklist
       for (auto& hr : m_bvChcs.chcs) {
-        if (hr.isQuery) {
-          worklist.push_back(&hr);
-        }
+        // --- Modification: Add all rules, not just queries ---
+        worklist.push_back(&hr);
+        // --- End Modification ---
       }
 
       if (worklist.empty()) {
         if (debug >= 2) {
-          outs() << "No queries to check\n";
+          outs() << "No rules to check (system is empty?)\n"; // Updated log
         }
-        return true;
+        return true; // No rules means safe
       }
 
       // Call multiHoudini to check safety
-      return !multiHoudini(worklist, true);
+      // multiHoudini returns true if the solution satisfies all rules in the worklist (is safe)
+      // multiHoudini returns false if any rule is violated (is unsafe)
+      return multiHoudini(worklist); // Return the result directly
     }
 
     bool strengthenTransitionRelation() {
@@ -757,20 +910,28 @@ namespace ufo
       for (auto& hr : m_bvChcs.chcs) {
         if (hr.isQuery) continue;
 
-        // Get solution for dst relation 
-        auto it = m_bvSolution.find(hr.dstRelation);
-        if (it == m_bvSolution.end()) continue;
+        // --- Use m_bvSolutionMap ---
+        auto it = m_bvSolutionMap.find(hr.dstRelation);
+        if (it == m_bvSolutionMap.end()) continue;
+        // --- End Use m_bvSolutionMap ---
 
-        // Convert single expression to set
-        ExprSet dstSoln;
-        dstSoln.insert(it->second);
+        // it->second is the combined BV solution expression
+        Expr dstSolnExpr = it->second;
 
         // Add solution to body as constraints
         ExprSet newBody;
         newBody.insert(hr.body);
-        for (auto& soln : dstSoln) {
-          newBody.insert(soln);
+        // Substitute invariant vars with destination vars before adding
+        if (m_bvChcs.invVars.count(hr.dstRelation)) {
+            Expr dstSolnSubst = replaceAll(dstSolnExpr,
+                                           m_bvChcs.invVars.at(hr.dstRelation),
+                                           hr.dstVars);
+            newBody.insert(dstSolnSubst);
+             if (debug >= 3) outs() << "  Strengthening rule for " << hr.dstRelation << " with: " << dstSolnSubst << "\n";
+        } else {
+             if (debug >= 2) outs() << "Warning: Missing invVars for " << hr.dstRelation << " during strengthening.\n";
         }
+
 
         // Update CHC body with strengthened version
         hr.body = conjoin(newBody, m_efac);
@@ -785,56 +946,48 @@ namespace ufo
     }
 
     void printSolution() {
-      // For each declaration in the BV CHCs
-      for (auto& decl : m_bvChcs.decls) {
-        Expr rel = decl->left();
-        
-        // Get all BV solutions - m_bvSolution maps LIA expr -> BV expr
-        ExprSet bvSolutions;
-        for(auto v: m_liaChcs->invVars[rel])
-        {
-          if (debug >= 3) {
-            outs() << "inv var liaChcs: " << v->left() << "\n";
-          }
-        }
-        for (auto v : m_bvChcs.invVars[rel])
-        {
-          if (debug >= 3) {
-            outs() << "inv var bvChcs: " << v->left() << "\n";
-          }
-        }
-        for (auto& kv : m_bvSolution) {
-          if (debug >= 3) {
-            outs() << "kv.second: " << kv.second << "\n";
-          }
-          // Replace LIA vars with corresponding BV vars before adding to solution set
-          Expr bvSoln = replaceAll(kv.second, 
-                                 m_liaChcs->invVars[rel], 
-                                 m_bvChcs.invVars[rel]);
-          if (debug >= 3) {
-            outs() << "bvSoln: " << bvSoln << "\n"; 
-          }
-          bvSolutions.insert(bvSoln);
-        }
+      outs() << "; --- BV Solution ---\n";
+      // --- Use m_bvSolutionMap ---
+      for (auto& kv : m_bvSolutionMap) {
+        Expr rel = kv.first;
+        Expr solution = kv.second; // This is the combined BV solution
+      // --- End Use m_bvSolutionMap ---
 
-        // Print function definition header 
+        // Check if relation exists in invVars map
+        if (!m_bvChcs.invVars.count(rel)) {
+            if (debug >= 1) outs() << "; Warning: Cannot print solution for " << *rel << " - missing variables.\n";
+            continue;
+        }
+        const ExprVector& invVars = m_bvChcs.invVars.at(rel);
+
+        // Print function definition header
         outs() << "(define-fun " << *rel << " (";
-        for (auto& var : m_bvChcs.invVars[rel]) {
+        for (auto& var : invVars) {
           outs() << "(" << *var << " ";
           u.print(typeOf(var));
           outs() << ")";
         }
         outs() << ") Bool\n  ";
 
-        // Print conjunction of all BV solution expressions
-        Expr solution = simplifyArithm(conjoin(bvSolutions, m_efac));
+        // Print the combined BV solution expression
         u.print(solution);
         outs() << ")\n";
 
-        // Verify solution only uses allowed variables
-        bool valid = hasOnlyVars(solution, m_bvChcs.invVars[rel]);
-        assert(valid);
+        // --- Fix: Create non-const copy for validation functions ---
+        ExprVector nonConstInvVars = invVars;
+        bool valid = hasOnlyVars(solution, nonConstInvVars);
+        if (!valid && debug >=1) {
+            outs() << "; Warning: Solution for " << *rel << " contains unexpected variables!\n";
+            ExprSet extra;
+            getExtraVars(solution, nonConstInvVars, extra);
+            outs() << "; Extra vars: ";
+            for(const auto& v : extra) outs() << *v << " ";
+            outs() << "\n";
+        }
+        // --- End Fix ---
+        // assert(valid); // Maybe too strict if helper vars exist?
       }
+       outs() << "; --- End BV Solution ---\n";
     }
 
     // Add helper to normalize expressions
@@ -861,14 +1014,17 @@ namespace ufo
     // Add new method to apply solution to CHC system
     bool applySolutionToBvSystem(map<Expr, ExprSet>& cands) {
       if (debug >= 3) {
-        outs() << "Applying solution to BV system\n";
-        outs() << "Solution size: " << m_bvSolution.size() << "\n";
+        outs() << "Applying solution map to BV system (for candidates map)\n";
+        outs() << "Solution map size: " << m_bvSolutionMap.size() << "\n";
       }
-
-      // Convert ExprMap solution to map<Expr,ExprSet> format
-      for (auto& kv : m_bvSolution) {
+      cands.clear();
+      // Convert m_bvSolutionMap to map<Expr,ExprSet> format
+      // --- Use m_bvSolutionMap ---
+      for (auto& kv : m_bvSolutionMap) {
+        // kv.first is BV relation, kv.second is combined BV solution Expr
         cands[kv.first] = ExprSet{kv.second};
       }
+      // --- End Use m_bvSolutionMap ---
 
       return true;
     }

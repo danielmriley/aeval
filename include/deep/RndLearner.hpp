@@ -678,6 +678,28 @@ namespace ufo
         assert(hasOnlyVars(res, ruleManager.invVars[rel]));
       }
     }
+
+    // Helper to print solution for a single relation index
+    void printSolutionForRelation(int invNum)
+    {
+        if (invNum < 0 || invNum >= sfs.size()) {
+            outs() << "; Warning: Invalid invNum " << invNum << " for printSolutionForRelation\n";
+            return;
+        }
+        outs() << "; Debug: Lemmas for invNum " << invNum << " (" << *decls[invNum] << "):\n";
+        // Ensure learnedExprs exists and is not empty before iterating
+        if (!sfs[invNum].empty()) {
+            for (const auto& lemma : sfs[invNum].back().learnedExprs) {
+                if (lemma) { // Check if lemma is not null
+                   outs() << ";   " << *lemma << "\n";
+                } else {
+                   outs() << ";   <null lemma>\n";
+                }
+            }
+        } else {
+             outs() << ";   <no SamplFactory found for index " << invNum << ">\n";
+        }
+    }
   };
 
   inline void learnInvariants(string smt, unsigned to, int maxAttempts,

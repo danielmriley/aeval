@@ -22,6 +22,7 @@ namespace ufo
       // Maps for tracking translations
       std::map<Expr, Expr> m_var_map;      // Maps BV vars to LIA vars  
       std::map<Expr, Expr> m_decl_map;     // Maps BV decls (full Expr) to LIA decls (full Expr)
+      std::map<Expr, Expr> m_bvToLiaDeclMap; // Map from BV decl expr to LIA decl expr
 
       // Translation helpers
       static bool isBVSort(Expr e) { return isOpX<BVSORT>(e); }
@@ -266,10 +267,28 @@ namespace ufo
         return translateExprHelper(e);
       }
 
+      // Add getter for the BV to LIA declaration map
+      const std::map<Expr, Expr>& getBvToLiaDeclMap() const {
+        // +++ Debugging +++
+        if (m_debug >= 4) {
+            outs() << "Bv2LiaTranslator::getBvToLiaDeclMap() called. Map size: " << m_bvToLiaDeclMap.size() << "\n";
+            for (const auto& pair : m_bvToLiaDeclMap) {
+                 if (pair.first && pair.second) {
+                     outs() << "  Map Entry: BV=" << *(pair.first) << " -> LIA=" << *(pair.second) << "\n";
+                 }
+            }
+        }
+        // +++ End Debugging +++
+        return m_bvToLiaDeclMap;
+      }
+
     private:
       ExprSet translateDeclarations(const ExprSet &decls)
       {
         ExprSet result;
+        m_decl_map.clear(); // Clear previous declaration mappings
+        m_bvToLiaDeclMap.clear(); // Clear the BV->LIA map too
+
         for (Expr decl : decls) // decl is the original full declaration Expr
         {
           if (decl == NULL) continue;
@@ -300,10 +319,12 @@ namespace ufo
           // Create new declaration with translated types, keeping original name
           Expr newDecl = bind::fdecl(decl->arg(0), sorts); // Use original name decl->arg(0)
           m_decl_map[decl] = newDecl; // Map original full decl to translated full decl
+          m_bvToLiaDeclMap[decl->arg(0)] = newDecl->arg(0); // Map original BV name to translated LIA name
 
           if (m_debug >= 3) {
             outs() << "Translated declaration " << *decl 
                    << " to " << *newDecl << "\n";
+            outs() << "Added to bvToLiaDeclMap: BV=" << *decl->arg(0) << " -> LIA=" << *newDecl->arg(0) << "\n";
           }
 
           result.insert(newDecl);
