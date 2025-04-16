@@ -457,6 +457,8 @@ namespace ufo
         rule.body = normalizeExpr(rule.body);
       }
 
+      m_liaSolutionMap.clear();
+
       // Configure solver with safe parameters
       bool freqs = true;
       bool aggp = false;  // Disable aggressive pruning to avoid FPE
@@ -789,6 +791,9 @@ namespace ufo
       return !m_bvSolutionMap.empty();
     }
 
+
+    // TODO: Review again to make sure it does what it should be doing.
+    // Namely, it should check the BV system
     bool multiHoudini(vector<HornRuleExt*> worklist) // Removed recur parameter
     {
       if (debug >= 3) outs() << "MultiHoudini (Validation)\n";
@@ -854,8 +859,10 @@ namespace ufo
 
         // --- Debug Print ---
         if (debug >= 4) {
-            outs() << "    Checking SAT for: " << conjoin(exprs, m_efac) << "\n";
-        }
+            outs() << "    Checking SAT for: \n";
+            pprint(conjoin(exprs, m_efac));
+            outs() << "\n";
+          }
         // --- End Debug Print ---
 
         if (u.isSat(exprs)) {
@@ -923,11 +930,28 @@ namespace ufo
         newBody.insert(hr.body);
         // Substitute invariant vars with destination vars before adding
         if (m_bvChcs.invVars.count(hr.dstRelation)) {
-            Expr dstSolnSubst = replaceAll(dstSolnExpr,
-                                           m_bvChcs.invVars.at(hr.dstRelation),
-                                           hr.dstVars);
-            newBody.insert(dstSolnSubst);
-             if (debug >= 3) outs() << "  Strengthening rule for " << hr.dstRelation << " with: " << dstSolnSubst << "\n";
+            // --- Modification: Substitute invariant vars with DESTINATION vars ---
+            // --- Create non-const copies ---
+            ExprVector invVars = m_bvChcs.invVars.at(hr.dstRelation);
+            ExprVector srcVars = hr.srcVars; // Use destination variables as target
+            // --- End Create non-const copies ---
+
+            // Check if variable counts match before substitution
+            outs() << " invVars size: " << invVars.size() << ", srcVars size: " << srcVars.size() << "\n";
+            if (invVars.size() == srcVars.size()) { // Check against dstVars size
+                Expr srcSolnSubst = replaceAll(dstSolnExpr,
+                                               invVars, // Variables in the solution expression (now a copy)
+                                               srcVars); // Target variables for substitution (now a copy)
+                newBody.insert(srcSolnSubst);
+                if (debug >= 3)
+                  outs() << "  Strengthening rule for " << hr.dstRelation
+                         << " (using dstVars) with: " << srcSolnSubst << "\n"; // Updated log
+            } else {
+                if (debug >= 1) outs() << "Warning: Variable count mismatch during strengthening for rule involving "
+                                       << hr.dstRelation << ". Invariant vars (" << invVars.size()
+                                       << ") vs Destination vars (" << srcVars.size() << "). Skipping strengthening for this rule.\n"; // Updated log
+            }
+            // --- End Modification ---
         } else {
              if (debug >= 2) outs() << "Warning: Missing invVars for " << hr.dstRelation << " during strengthening.\n";
         }
