@@ -35,6 +35,50 @@ namespace ufo
     map<Expr, ExprVector> origLiaVars; // Original LIA variables in the program
     map<Expr, ExprVector> origLiaVarsPrime; // Original primed LIA variables in the program
 
+    // --- Add new private helper method for printing BV solution map ---
+    void printBvSolutionMap(const map<Expr, Expr>& bvSolutionMap) {
+      outs() << "; --- BV Solution Map ---\n";
+      for (const auto& kv : bvSolutionMap) {
+        Expr rel = kv.first;
+        Expr solution = kv.second; // This is the combined BV solution
+
+        // Check if relation exists in invVars map
+        if (!m_bvChcs.invVars.count(rel)) {
+            if (debug >= 1) outs() << "; Warning: Cannot print solution for " << *rel << " - missing variables.\n";
+            continue;
+        }
+        const ExprVector& invVars = m_bvChcs.invVars.at(rel);
+
+        // Print function definition header
+        outs() << "(define-fun " << *rel << " (";
+        for (const auto& var : invVars) {
+          outs() << "(" << *var << " ";
+          u.print(typeOf(var));
+          outs() << ")";
+        }
+        outs() << ") Bool\n  ";
+
+        // Print the combined BV solution expression
+        u.print(solution);
+        outs() << ")\n";
+
+        // --- Validation Check (Optional but good practice) ---
+        ExprVector nonConstInvVars = invVars; // Create non-const copy for validation
+        bool valid = hasOnlyVars(solution, nonConstInvVars);
+        if (!valid && debug >= 1) {
+            outs() << "; Warning: Solution for " << *rel << " contains unexpected variables!\n";
+            ExprSet extra;
+            getExtraVars(solution, nonConstInvVars, extra);
+            outs() << "; Extra vars: ";
+            for(const auto& v : extra) outs() << *v << " ";
+            outs() << "\n";
+        }
+        // --- End Validation Check ---
+      }
+      outs() << "; --- End BV Solution Map ---\n";
+    }
+    // --- End new private helper method ---
+
   public:
     BitHorn(ExprFactory &efac, EZ3 &z3, CHCs &input, int _debug = 0) : 
       m_efac(efac), 
@@ -414,6 +458,12 @@ namespace ufo
         if (debug >= 3) {
           outs() << "Translated solution back to BV with " << m_bvSolutionMap.size() << " relations\n"; // Updated log
         }
+
+        // --- Call the new print method here ---
+        if (debug >= 2) { // Print intermediate solution if debug level is 2 or higher
+            printBvSolutionMap(m_bvSolutionMap);
+        }
+        // --- End call ---
 
         // 4. Check if solution is safe in BV
         map<Expr, ExprSet> candidates;
@@ -980,48 +1030,9 @@ namespace ufo
     }
 
     void printSolution() {
-      outs() << "; --- BV Solution ---\n";
-      // --- Use m_bvSolutionMap ---
-      for (auto& kv : m_bvSolutionMap) {
-        Expr rel = kv.first;
-        Expr solution = kv.second; // This is the combined BV solution
-      // --- End Use m_bvSolutionMap ---
-
-        // Check if relation exists in invVars map
-        if (!m_bvChcs.invVars.count(rel)) {
-            if (debug >= 1) outs() << "; Warning: Cannot print solution for " << *rel << " - missing variables.\n";
-            continue;
-        }
-        const ExprVector& invVars = m_bvChcs.invVars.at(rel);
-
-        // Print function definition header
-        outs() << "(define-fun " << *rel << " (";
-        for (auto& var : invVars) {
-          outs() << "(" << *var << " ";
-          u.print(typeOf(var));
-          outs() << ")";
-        }
-        outs() << ") Bool\n  ";
-
-        // Print the combined BV solution expression
-        u.print(solution);
-        outs() << ")\n";
-
-        // --- Fix: Create non-const copy for validation functions ---
-        ExprVector nonConstInvVars = invVars;
-        bool valid = hasOnlyVars(solution, nonConstInvVars);
-        if (!valid && debug >=1) {
-            outs() << "; Warning: Solution for " << *rel << " contains unexpected variables!\n";
-            ExprSet extra;
-            getExtraVars(solution, nonConstInvVars, extra);
-            outs() << "; Extra vars: ";
-            for(const auto& v : extra) outs() << *v << " ";
-            outs() << "\n";
-        }
-        // --- End Fix ---
-        // assert(valid); // Maybe too strict if helper vars exist?
-      }
-       outs() << "; --- End BV Solution ---\n";
+      // --- Refactor to use the helper method ---
+      printBvSolutionMap(m_bvSolutionMap);
+      // --- End Refactor ---
     }
 
     // Add helper to normalize expressions
