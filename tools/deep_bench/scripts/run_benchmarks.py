@@ -89,6 +89,8 @@ def setup_output_dirs(timestamp):
 def run_benchmark(args):
     tool, bench_file, timeout, tool_flags = args
     result = BenchmarkResult(bench_file, "Unknown", 0)
+    # Extract the base name of the tool for easier comparison
+    tool_name = os.path.basename(tool) 
     result.tool_info = {
         'tool': tool,
         'flags': tool_flags,
@@ -97,28 +99,60 @@ def run_benchmark(args):
     
     try:
         start_time = time.time()
-        cmd = [tool] + tool_flags.split() + [str(bench_file)]
+        # Ensure flags are handled correctly, especially if empty for z3
+        cmd_flags = tool_flags.split() if tool_flags else []
+        cmd = [tool] + cmd_flags + [str(bench_file)]
         
         proc = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
         runtime = time.time() - start_time
         
         # Analyze output
         output = proc.stdout
-        if "Success" in output:
-            result.status = "Success"
-            result.result = "\n".join(output.split("Success")[1].strip().split("\n")[-10:])
-        elif "unknown" in output:
-            result.status = "unknown"
-            result.result = ""
-        elif "unsupported" in output:
-            result.status = "unsupported"
-            result.result = ""
-        else:
-            result.status = "Error"
-            result.result = "\n".join(re.findall(r"ERROR.*(?:\n.*){0,9}", output)[-10:])
         
+        # --- Tool-specific output parsing ---
+        if tool_name == "z3":
+            if "unsat" in output:
+                result.status = "Success"
+                result.result = "unsat" # Store the core result
+            elif "sat" in output:
+                result.status = "Error" # Treat 'sat' as an error/failure for CHC
+                result.result = "sat"
+            elif "unknown" in output:
+                 result.status = "unknown"
+                 result.result = "unknown"
+            else:
+                # Handle other Z3 outputs (e.g., errors, unexpected output)
+                result.status = "Error" 
+                # Capture some output/error for context
+                result.result = output[-500:] 
+                result.error = proc.stderr[-500:] if proc.stderr else ""
+        else: # Original FreqHorn parsing logic
+            if not output:
+                result.status = "No Output"
+                result.result = ""
+            elif "Success" in output:
+                result.status = "Success"
+                parts = output.split("Success", 1)
+                result.result = "\n".join(parts[1].strip().split("\n")[-10:]) if len(parts) > 1 else ""
+            elif "unknown" in output:
+                result.status = "unknown"
+                result.result = ""
+            elif "unsupported" in output:
+                result.status = "unsupported"
+                result.result = ""
+            else:
+                error_lines = re.findall(r"ERROR.*(?:\n.*){0,9}", output)
+                if error_lines:
+                    result.status = "Error"
+                    result.result = "\n".join(error_lines[-1].split('\n')[:10]) 
+                else:
+                    result.status = "Unknown Status" 
+                    result.result = output[-500:] 
+        # --- End Tool-specific output parsing ---
+
         result.runtime = runtime
-        result.error = proc.stderr
+        # Store stderr regardless of tool, might contain useful info
+        result.error = proc.stderr 
         return result
         
     except subprocess.TimeoutExpired:
@@ -131,40 +165,53 @@ def run_benchmark(args):
         result.error = str(e)
         return result
 
-def run_config(config, dirs, timestamp):
+# Modify run_config signature to accept position
+def run_config(config, dirs, timestamp, position):
     bench_dir = Path(config['benchmarks'])
-    bench_files = list(bench_dir.glob(config['pattern']))
+    # Use Path.rglob to search recursively if needed, or keep Path.glob for non-recursive
+    bench_files = list(bench_dir.glob(config['pattern'])) 
     
     if not bench_files:
-        print(f"No benchmark files found for config '{config['name']}'")
-        return []
+        # Ensure tuple is returned even if no files found
+        print(f"\nNo benchmark files found for config '{config['name']}' in {bench_dir} matching '{config['pattern']}'") # Added newline for clarity
+        return config['name'], [] 
     
-    print(f"\nRunning configuration '{config['name']}' on {len(bench_files)} benchmarks...")
-    
+    # Prepare arguments for sequential execution
     run_args = [(config['tool'], f, config['timeout'], config['flags']) 
                 for f in bench_files]
     
     results = []
-    with concurrent.futures.ProcessPoolExecutor() as executor:
-        for result in tqdm(executor.map(run_benchmark, run_args),
-                          total=len(bench_files), 
-                          unit="test",
-                          desc=f"Config {config['name']}",
-                          position=0,
-                          leave=True):
+    
+    # Run benchmarks sequentially within this config's process
+    # Use tqdm to show progress for this specific config
+    print(f"\nStarting configuration '{config['name']}' ({len(bench_files)} benchmarks)...") # Add print statement here
+    for args in tqdm(run_args, 
+                     total=len(run_args), 
+                     unit="test",
+                     desc=f"Config {config['name']:<10}", # Pad name for alignment
+                     position=position, # Use passed position
+                     leave=False): # Set leave=False for inner bars
+        try:
+            result = run_benchmark(args) # Call directly
             results.append(result)
             
             # Save detailed output
             output_path = dirs['output'] / config['name']
-            output_path.mkdir(exist_ok=True)
+            output_path.mkdir(parents=True, exist_ok=True)
             
             with open(output_path / f"output_{os.path.basename(result.filename)}", 'w') as f:
                 f.write(f"Status: {result.status}\n")
                 f.write(f"Runtime: {result.runtime:.2f}s\n\n")
                 f.write(f"Result:\n{result.result}\n\n")
                 f.write(f"Errors:\n{result.error}")
-    
-    return results
+        except Exception as exc:
+            bench_file = args[1] # Get benchmark file from args tuple
+            print(f"\nBenchmark {os.path.basename(bench_file)} generated an exception: {exc}") # Added newline
+            # Optionally create a placeholder error result
+            results.append(BenchmarkResult(bench_file, "Executor Crash", 0, error=str(exc)))
+
+    # Return config name along with results
+    return config['name'], results
 
 def write_comparative_results(all_results, dirs, timestamp):
     results_file = dirs['results'] / f'results_{timestamp}.csv'
@@ -242,21 +289,69 @@ def main():
     args = parse_args()
     timestamp = datetime.datetime.now().strftime('%m-%d-%Y_%H-%M-%S')
     
-    configs = load_configs(args.config, args)
+    try:
+        configs = load_configs(args.config, args)
+    except (FileNotFoundError, ValueError, json.JSONDecodeError) as e:
+        print(f"Error loading configuration: {e}")
+        return 1
+        
     dirs = setup_output_dirs(timestamp)
     
-    # Run configurations sequentially
     all_results = {}
-    for config in configs:
+    
+    # Determine max workers for parallel configuration execution
+    # Limit to num_cpus - 2, but ensure at least 1 worker
+    max_workers = max(1, os.cpu_count() - 2 if os.cpu_count() else 1) 
+    print(f"Running up to {max_workers} configurations in parallel.")
+
+    # Use ProcessPoolExecutor to run configurations in parallel
+    with concurrent.futures.ProcessPoolExecutor(max_workers=max_workers) as executor:
+        # Submit all config runs to the executor, passing the position index (idx + 1)
+        future_to_config = {executor.submit(run_config, config, dirs, timestamp, idx + 1): config['name'] 
+                            for idx, config in enumerate(configs)}
+        
+        # Process completed futures using the main progress bar at position 0
+        # Add a newline before the main progress bar starts
+        print() 
+        for future in tqdm(concurrent.futures.as_completed(future_to_config), 
+                           total=len(configs),
+                           desc="Overall Progress",
+                           unit="config",
+                           position=0, # Main progress bar at the top
+                           leave=True): # Keep main progress bar
+            config_name = future_to_config[future]
+            try:
+                # run_config now returns (config_name, results_list)
+                returned_name, results_list = future.result()
+                # Ensure the returned name matches (sanity check)
+                if returned_name == config_name: 
+                    all_results[config_name] = results_list
+                    # Optional: print completion message, but might clutter tqdm output
+                    # print(f"\nConfiguration '{config_name}' finished.") # Added newline
+                else:
+                     # This case should ideally not happen if run_config is correct
+                     print(f"\nWarning: Mismatched config name returned. Expected '{config_name}', got '{returned_name}'. Storing under expected name.")
+                     all_results[config_name] = results_list # Store under original name
+            except Exception as exc:
+                # Add newline for clarity when printing exceptions
+                print(f"\nConfiguration '{config_name}' generated an exception during execution: {exc}") 
+                all_results[config_name] = [] # Store empty results on error
+        # Add a newline after the main progress bar finishes
+        print() 
+
+    # Check if any results were collected
+    if not all_results or all(not res for res in all_results.values()):
+         print("\nNo benchmark results were collected.")
+         # Decide if this is an error state
+         # return 1 
+    else:
         try:
-            results = run_config(config, dirs, timestamp)
-            all_results[config['name']] = results
+            write_comparative_results(all_results, dirs, timestamp)
+            print(f"\nResults saved to {dirs['results']}")
         except Exception as e:
-            print(f"Config '{config['name']}' failed: {e}")
+            print(f"\nError writing results file: {e}")
+            # return 1 # Optionally exit with error if writing fails
     
-    write_comparative_results(all_results, dirs, timestamp)
-    
-    print(f"\nResults saved to {dirs['results']}")
     print(f"Detailed outputs saved to {dirs['output']}")
     
     return 0

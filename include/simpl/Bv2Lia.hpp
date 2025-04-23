@@ -170,7 +170,7 @@ namespace ufo
              // It's possible a decl in wtoDecls is not in the main decls if simplified away
             if (it != m_decl_map.end()) {
                 result.wtoDecls.push_back(it->second); // Store the translated full declaration Expr
-            } else if (decl->arg(0) != input.failDecl) { // Check name against failDecl name
+            } else if (decl != input.failDecl) { // Compare expressions directly instead of accessing arg(0) unsafely
                  if (m_debug >= 1) outs() << "Warning: WTO decl " << *decl << " not found in map during BV->LIA translation.\n";
                  // Decide how to handle this - skip or assert? Skipping for now.
             }
@@ -436,6 +436,12 @@ namespace ufo
         try {
           // Handle ITE expressions
           if (isOpX<ITE>(e)) {
+            // --- Add Arity Check ---
+            if (e->arity() != 3) {
+                 if (m_debug >= 1) outs() << "Warning: Malformed ITE expression encountered (arity != 3): " << *e << "\n";
+                 return mk<TRUE>(m_efac); // Return TRUE as a safe fallback
+            }
+            // --- End Arity Check ---
             Expr cond = translateExprHelper(e->arg(0)); // Recursive call to helper
             Expr thenBranch = translateExprHelper(e->arg(1)); // Recursive call to helper
             Expr elseBranch = translateExprHelper(e->arg(2)); // Recursive call to helper
@@ -484,6 +490,12 @@ namespace ufo
           // Handle application expressions (relation calls in CHCs)
           if (isOpX<FAPP>(e))
           {
+            // --- Add Arity Check ---
+            if (e->arity() < 1) {
+                 if (m_debug >= 1) outs() << "Warning: Malformed FAPP expression encountered (arity < 1): " << *e << "\n";
+                 return mk<TRUE>(m_efac); // Return TRUE as a safe fallback
+            }
+            // --- End Arity Check ---
             Expr fdecl = e->arg(0); // This is the FDECL expression
             Expr originalName = bind::fname(fdecl); // Get the name Expr
             
@@ -512,6 +524,7 @@ namespace ufo
             ExprVector args;
             args.push_back(translated_fdecl); // Use translated FDECL
             // Translate arguments recursively
+            // Loop starts from 1, safe even if arity is 1
             for (unsigned i = 1; i < e->arity(); ++i)
               args.push_back(translateExprHelper(e->arg(i))); // Recursive call
             return mknary<FAPP>(args);

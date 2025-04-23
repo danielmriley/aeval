@@ -5,21 +5,21 @@
       "tool": "./tools/deep/freqhorn",
       "flags": "--bv",
       "benchmarks": "../bench_horn_bv_translated/",
-      "timeout": 5
+      "timeout": 3
     },
     {
-      "name": "lia",
-      "tool": "./tools/deep/freqhorn",
-      "flags": "--data",
-      "benchmarks": "../bench_horn/",
-      "timeout": 5
+      "name": "z3",
+      "tool": "z3",
+      "flags": "",
+      "benchmarks": "../bench_horn_bv_translated/",
+      "timeout": 3
     },
     {
       "name": "bv10",
       "tool": "./tools/deep/freqhorn",
       "flags": "--bv",
       "benchmarks": "../bench_horn_bv_translated/",
-      "timeout": 10
+      "timeout": 6
     }
   ]
 }

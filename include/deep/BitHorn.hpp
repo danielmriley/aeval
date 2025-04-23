@@ -156,6 +156,17 @@ namespace ufo
         outs() << "Translating BV to LIA\n";
       }
 
+      // --- Potential Crash Site ---
+      // The GDB backtrace indicates a segmentation fault inside m_Bv2LiaTranslator.translate,
+      // specifically when calling ENode::arg().
+      // Based on debug logs, this likely occurs when processing a rule involving a 0-arity
+      // predicate like 'true' (as source) or 'fail' (as destination).
+      // The translator might be attempting node->arg(0) on the ENode representing 'true' or 'fail'
+      // without checking node->arity() first, leading to an out-of-bounds access.
+      // The fix requires modifying the Bv2LiaTranslator::translate implementation
+      // (likely in simpl/Bv2Lia.hpp) to correctly handle 0-arity predicates.
+      // --- End Potential Crash Site ---
+
       // Create temporary CHCs for the translation
       CHCs translatedChcs = m_Bv2LiaTranslator.translate(m_bvChcs);
 
@@ -386,7 +397,8 @@ namespace ufo
         // 2. Try to solve LIA system with timeout
         if (!solveLIA()) { // solveLIA now populates m_liaSolutionMap
           if (debug >= 1) outs() << "Could not find LIA solution\n";
-          return false;
+          // return false;
+          // Instead of quitting, use the lemmas found to strengthen the BV system and try again.
         }
 
         if (debug >= 3) {
@@ -413,10 +425,9 @@ namespace ufo
         bool isSafe = checkSafetyInBV(candidates);
         
         if (isSafe) {
-          if (debug >= 1) {
-            outs() << "Success! Found safe BV solution after " << (i+1) << " iterations!\n";
-            printSolution();
-          }
+          outs() << "Success : Found safe BV solution after " << (i+1) << " iterations!\n";
+          printSolution();
+
           return true;
         }
 
@@ -443,7 +454,7 @@ namespace ufo
       
     }
 
-    bool solveLIA(unsigned int to = 10) {
+    bool solveLIA(unsigned int to = 100) {
       if (debug >= 2) {
         outs() << "Attempting to solve LIA system\n";  
       }
@@ -463,16 +474,16 @@ namespace ufo
       bool freqs = true;
       bool aggp = false;  // Disable aggressive pruning to avoid FPE
       int mut = 1;       // Disable mutations
-      int da = 0;
-      bool doDisj = false;
+      int da = 1;
+      bool doDisj = true;
       int mbpEqs = 0;
-      bool dAllMbp = false;
+      bool dAllMbp = true;
       bool dAddProp = false;
-      bool dAddDat = false;
+      bool dAddDat = true;
       bool dStrenMbp = false;
-      int dFwd = 0;
+      int dFwd = 1;
       bool dRec = false;
-      bool dGen = false;
+      bool dGen = true;
 
       // Create solver
       std::unique_ptr<RndLearnerV4> solver(new RndLearnerV4(m_efac, m_z3, 
@@ -937,7 +948,6 @@ namespace ufo
             // --- End Create non-const copies ---
 
             // Check if variable counts match before substitution
-            outs() << " invVars size: " << invVars.size() << ", srcVars size: " << srcVars.size() << "\n";
             if (invVars.size() == srcVars.size()) { // Check against dstVars size
                 Expr srcSolnSubst = replaceAll(dstSolnExpr,
                                                invVars, // Variables in the solution expression (now a copy)
