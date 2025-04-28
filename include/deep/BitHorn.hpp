@@ -308,38 +308,50 @@ namespace ufo
             ExprSet lemmas = solver.getlearnedLemmas(invNum);
             if(debug >=4) outs() << "  lemmas size: " << lemmas.size() << "\n";
             if (!lemmas.empty()) {
-                ExprSet finalLemmas; // Use a new set for the final results
-                if (debug >= 4) outs() << "  Normalizing & Simplifying individual lemmas for " << *liaDeclExpr << ":\n";
+                ExprSet simplifiedLemmas; // Store results after initial simplification
+                if (debug >= 4) outs() << "  Simplifying individual lemmas for " << *liaDeclExpr << ":\n";
                 for (auto &lemma : lemmas) {
                     if (debug >= 5) outs() << "    Original: " << *lemma << "\n";
                     // Apply normalizeExpr (ineqReverter, etc.)
                     Expr normalized = normalizeExpr(lemma);
                     if (debug >= 5) outs() << "    Normalized (normalizeExpr): " << *normalized << "\n";
-                    // --- Apply normalizePositive ---
-                    Expr posNormalized = normalizePositive(normalized);
-                    if (debug >= 5) outs() << "    Positively Normalized: " << *posNormalized << "\n";
-                    // --- End Apply normalizePositive ---
-                    // Then apply arithmetic simplification to the positively normalized expression
-                    Expr simplified_lemma = simplifyArithm(posNormalized, false, false); // Use posNormalized here
+                    // Apply arithmetic simplification
+                    Expr simplified_lemma = simplifyArithm(normalized, false, false);
                     if (debug >= 5) outs() << "    Simplified (simplifyArithm): " << *simplified_lemma << "\n";
 
                     if (!isOpX<TRUE>(simplified_lemma)) { // Don't add trivial 'true' lemmas
-                        finalLemmas.insert(simplified_lemma); // Add the processed lemma
+                        simplifiedLemmas.insert(simplified_lemma); // Add the processed lemma
                     }
                 }
 
-                // Optional: Simplify the conjunction of finalLemmas further?
-                Expr conjunction = conjoin(finalLemmas, m_efac);
+                // Simplify the conjunction of simplifiedLemmas
+                Expr conjunction = conjoin(simplifiedLemmas, m_efac);
                 Expr simplifiedArithConj = simplifyArithmConjunctions(conjunction, false); // false: don't keep redundant
                 Expr finalConjunction = simplifyBool(simplifiedArithConj); // Boolean simplification
-                finalLemmas.clear(); // Clear the set
-                getConj(finalConjunction, finalLemmas); // Repopulate with simplified conjunction parts
 
-                m_liaSolutionMap[liaDeclExpr] = finalLemmas; // Store final simplified lemmas
+                // Extract conjuncts after simplification
+                ExprSet conjunctLemmas;
+                getConj(finalConjunction, conjunctLemmas);
+
+                // --- Apply normalizePositive as the final step ---
+                ExprSet finalNormalizedLemmas;
+                if (debug >= 4) outs() << "  Applying final positive normalization for " << *liaDeclExpr << ":\n";
+                for (auto& conjLemma : conjunctLemmas) {
+                    Expr posNormalized = normalizePositive(conjLemma);
+                    // normalizePositive already calls simplifyArithm at the end
+                    if (debug >= 5) outs() << "    Input to normalizePositive: " << *conjLemma << "\n";
+                    if (debug >= 5) outs() << "    Output of normalizePositive: " << *posNormalized << "\n";
+                    if (!isOpX<TRUE>(posNormalized)) {
+                        finalNormalizedLemmas.insert(posNormalized);
+                    }
+                }
+                // --- End Apply normalizePositive ---
+
+                m_liaSolutionMap[liaDeclExpr] = finalNormalizedLemmas; // Store final positively normalized lemmas
 
                  if (debug >= 3) {
-                    outs() << "LIA Lemmas for " << liaDeclExpr << " (" << finalLemmas.size() << "):\n";
-                    for(auto& l : finalLemmas) outs() << "  " << l << "\n";
+                    outs() << "LIA Lemmas for " << liaDeclExpr << " (" << finalNormalizedLemmas.size() << "):\n"; // Use finalNormalizedLemmas
+                    for(auto& l : finalNormalizedLemmas) outs() << "  " << l << "\n"; // Use finalNormalizedLemmas
                  }
             } else {
                  if (debug >= 2) outs() << "Warning: No LIA lemmas found for " << liaDeclExpr << "\n";
