@@ -5,7 +5,7 @@
 #include "simpl/Bv2Lia.hpp"
 #include "simpl/Lia2Bv.hpp"
 #include "ae/ExprSimpl.hpp" // Include ExprSimpl for simplification functions
-// Removed include "ufo/ExprVisitor.hpp"
+#include <utility> // Needed for std::pair
 
 using namespace std;
 
@@ -23,30 +23,23 @@ namespace ufo
     Bv2LiaTranslator m_Bv2LiaTranslator; 
     int debug; 
     std::vector<ExprSet> m_learnedLemmas;  // Stores learned lemmas per iteration
-    unsigned m_original_bv_width = 0; // Store original BV width
-
-    // --- Refactored Solution Storage ---
-    // m_liaSolution is removed
+    unsigned m_original_bv_width = 0;
     map<Expr, ExprSet> m_liaSolutionMap; // Maps LIA relation -> LIA solution ExprSet
-    // m_bvSolution is removed
     map<Expr, Expr> m_bvSolutionMap;   // Maps BV relation -> combined BV solution Expr
-    // --- End Refactored Solution Storage ---
 
     map<Expr, ExprVector> origBvVars;  // Original BV variables in the program
     map<Expr, ExprVector> origBvVarsPrime;  // Original primed BV variables in the program
     map<Expr, ExprVector> origLiaVars; // Original LIA variables in the program
     map<Expr, ExprVector> origLiaVarsPrime; // Original primed LIA variables in the program
 
-    // --- Add new private helper method for printing BV solution map ---
     void printBvSolutionMap(const map<Expr, Expr>& bvSolutionMap) {
-      outs() << "; --- BV Solution Map ---\n";
       for (const auto& kv : bvSolutionMap) {
         Expr rel = kv.first;
         Expr solution = kv.second; // This is the combined BV solution
 
         // Check if relation exists in invVars map
         if (!m_bvChcs.invVars.count(rel)) {
-            if (debug >= 1) outs() << "; Warning: Cannot print solution for " << *rel << " - missing variables.\n";
+            if (debug >= 1) outs() << "; [printBvSolutionMap] Warning: Cannot print solution for " << *rel << " - missing variables.\n";
             continue;
         }
         const ExprVector& invVars = m_bvChcs.invVars.at(rel);
@@ -65,24 +58,19 @@ namespace ufo
         u.print(solution);
         outs() << ")\n";
 
-        // --- Validation Check (Optional but good practice) ---
         ExprVector nonConstInvVars = invVars; // Create non-const copy for validation
         bool valid = hasOnlyVars(solution, nonConstInvVars);
         if (!valid && debug >= 1) {
-            outs() << "; Warning: Solution for " << *rel << " contains unexpected variables!\n";
+            outs() << "; [printBvSolutionMap] Warning: Solution for " << *rel << " contains unexpected variables!\n";
             ExprSet extra;
             getExtraVars(solution, nonConstInvVars, extra);
-            outs() << "; Extra vars: ";
+            outs() << ";   Extra vars: ";
             for(const auto& v : extra) outs() << *v << " ";
             outs() << "\n";
         }
-        // --- End Validation Check ---
       }
-      outs() << "; --- End BV Solution Map ---\n";
     }
-    // --- End new private helper method ---
 
-    // Add helper to normalize expressions (existing)
     Expr normalizeExpr(Expr e) {
       if (!e) return e;
       
@@ -115,18 +103,18 @@ namespace ufo
     Expr normalizePositive(Expr e) {
         // Only normalize comparisons involving numeric expressions
         if (!isOp<ComparissonOp>(e) || !isNumeric(e->left())) {
-             // if (debug >= 4) outs() << "normalizePositive: Skipping non-numeric comparison: " << *e << "\n";
+             // if (debug >= 4) outs() << "[normalizePositive] Skipping non-numeric comparison: " << *e << "\n";
             return e;
         }
 
-        if (debug >= 4) outs() << "normalizePositive: Input: " << *e << "\n";
+        if (debug >= 4) outs() << "[normalizePositive] Input: " << *e << "\n";
 
         // 1. Use normalizeAtom to get Sum(ci*vi) op C form
         ExprVector vars;
         // Collect all variables appearing in the expression
         filter(e, bind::IsConst(), inserter(vars, vars.begin()));
         if (vars.empty()) {
-             if (debug >= 4) outs() << "normalizePositive: No variables found in: " << *e << "\n";
+             if (debug >= 4) outs() << "[normalizePositive] No variables found in: " << *e << "\n";
              // It might be a comparison of constants, simplify it directly
              return simplifyArithm(e);
         }
@@ -134,7 +122,7 @@ namespace ufo
         // Use normalizeAtom from ExprSimpl.hpp
         Expr normalized = normalizeAtom(e, vars);
 
-        if (debug >= 4) outs() << "normalizePositive: After normalizeAtom: " << *normalized << "\n";
+        if (debug >= 4) outs() << "[normalizePositive] After normalizeAtom: " << *normalized << "\n";
 
         if (isOpX<TRUE>(normalized) || isOpX<FALSE>(normalized)) {
             return normalized; // Already simplified to true/false
@@ -142,7 +130,7 @@ namespace ufo
 
         // Check if normalizeAtom produced the expected form
         if (!isOp<ComparissonOp>(normalized) || !isNumeric(normalized->left()) || !isNumeric(normalized->right())) {
-             if (debug >= 1) outs() << "Warning: normalizeAtom did not produce expected Sum(ci*vi) op C form for: " << *e << ". Got: " << *normalized << "\n";
+             if (debug >= 1) outs() << "[normalizePositive] Warning: normalizeAtom did not produce expected Sum(ci*vi) op C form for: " << *e << ". Got: " << *normalized << "\n";
              // Attempt arithmetic simplification as a fallback
              return simplifyArithm(e);
         }
@@ -172,7 +160,7 @@ namespace ufo
                 // Constant term found on LHS (shouldn't happen with normalizeAtom?)
                 constantPart = constantPart + lexical_cast<cpp_int>(term);
                 if (debug >= 3)
-                  outs() << "normalizePositive: Found constant " << *term << " on LHS of normalized expr.\n";
+                  outs() << "[normalizePositive] Found constant " << *term << " on LHS of normalized expr.\n";
                 continue; // Skip to next term
             }
 
@@ -182,7 +170,7 @@ namespace ufo
                 termCoefficients[varPart] += coef;
             } else {
                 // If it's not a variable, treat it as an atomic term with coefficient 1 or -1
-                 if (debug >= 3) outs() << "normalizePositive: Treating non-variable term " << *varPart << " as atomic.\n";
+                 if (debug >= 3) outs() << "[normalizePositive] Treating non-variable term " << *varPart << " as atomic.\n";
                 termCoefficients[varPart] += coef; // Accumulate coefficient for the term itself
             }
         }
@@ -192,12 +180,12 @@ namespace ufo
             // Convert mpz_class to cpp_int before subtracting
             constantPart = constantPart - cpp_int(getTerm<mpz_class>(rhs).get_str());
         } else {
-             if (debug >= 1) outs() << "Warning: RHS of normalized expression is not an MPZ constant: " << *rhs << "\n";
+             if (debug >= 1) outs() << "[normalizePositive] Warning: RHS of normalized expression is not an MPZ constant: " << *rhs << "\n";
              return simplifyArithm(e); // Fallback
         }
 
         if (debug >= 4) {
-            outs() << "normalizePositive: Coefficients map:\n";
+            outs() << "[normalizePositive] Coefficients map:\n";
             // --- Replace structured binding ---
             for(auto const& pair : termCoefficients) {
                 Expr var = pair.first;
@@ -205,7 +193,7 @@ namespace ufo
             // --- End Replace structured binding ---
                 outs() << "  " << *var << ": " << coef << "\n";
             }
-            outs() << "normalizePositive: Constant part (LHS - C): " << constantPart << "\n";
+            outs() << "[normalizePositive] Constant part (LHS - C): " << constantPart << "\n";
         }
 
 
@@ -273,7 +261,7 @@ namespace ufo
         // is implicitly included based on the constantPart logic.
         ExprVector args = {finalLhs, finalRhs};
         Expr result = m_efac.mkNary(op, args);
-        if (debug >= 4) outs() << "normalizePositive: Result: " << *result << "\n";
+        if (debug >= 4) outs() << "[normalizePositive] Result: " << *result << "\n";
 
         // Final simplification pass
         return simplifyArithm(result);
@@ -296,20 +284,20 @@ namespace ufo
             int invNum = getVarIndex(liaDecl, m_liaChcs->decls); // CORRECTED FIX: Searches for full decl in list of full decls
 
             if (debug >= 5) {
-                outs() << "  processLearnedLiaLemmas: Checking relation " << *liaDeclExpr << ", full decl: " << *liaDecl << ", found invNum: " << invNum << "\n";
+                outs() << "[processLearnedLiaLemmas] Checking relation " << *liaDeclExpr << ", full decl: " << *liaDecl << ", found invNum: " << invNum << "\n";
                 if (invNum >= 0) solver.printSolutionForRelation(invNum);
             }
 
             if (invNum < 0) { // Log if not found
-                 if (debug >= 1) outs() << "Error: Could not find index for LIA declaration: " << *liaDecl << "\n";
+                 if (debug >= 1) outs() << "[processLearnedLiaLemmas] Error: Could not find index for LIA declaration: " << *liaDecl << "\n";
                  continue;
             }
 
             ExprSet lemmas = solver.getlearnedLemmas(invNum);
-            if(debug >=4) outs() << "  lemmas size: " << lemmas.size() << "\n";
+            if(debug >=4) outs() << "[processLearnedLiaLemmas]   Lemmas size for " << *liaDeclExpr << ": " << lemmas.size() << "\n";
             if (!lemmas.empty()) {
                 ExprSet simplifiedLemmas; // Store results after initial simplification
-                if (debug >= 4) outs() << "  Simplifying individual lemmas for " << *liaDeclExpr << ":\n";
+                if (debug >= 4) outs() << "[processLearnedLiaLemmas]   Simplifying individual lemmas for " << *liaDeclExpr << ":\n";
                 for (auto &lemma : lemmas) {
                     if (debug >= 5) outs() << "    Original: " << *lemma << "\n";
                     // Apply normalizeExpr (ineqReverter, etc.)
@@ -335,7 +323,7 @@ namespace ufo
 
                 // --- Apply normalizePositive as the final step ---
                 ExprSet finalNormalizedLemmas;
-                if (debug >= 4) outs() << "  Applying final positive normalization for " << *liaDeclExpr << ":\n";
+                if (debug >= 4) outs() << "[processLearnedLiaLemmas]   Applying final positive normalization for " << *liaDeclExpr << ":\n";
                 for (auto& conjLemma : conjunctLemmas) {
                     Expr posNormalized = normalizePositive(conjLemma);
                     // normalizePositive already calls simplifyArithm at the end
@@ -350,447 +338,387 @@ namespace ufo
                 m_liaSolutionMap[liaDeclExpr] = finalNormalizedLemmas; // Store final positively normalized lemmas
 
                  if (debug >= 3) {
-                    outs() << "LIA Lemmas for " << liaDeclExpr << " (" << finalNormalizedLemmas.size() << "):\n"; // Use finalNormalizedLemmas
+                    outs() << "[processLearnedLiaLemmas] Final LIA Lemmas for " << liaDeclExpr << " (" << finalNormalizedLemmas.size() << "):\n"; // Use finalNormalizedLemmas
                     for(auto& l : finalNormalizedLemmas) outs() << "  " << l << "\n"; // Use finalNormalizedLemmas
                  }
             } else {
-                 if (debug >= 2) outs() << "Warning: No LIA lemmas found for " << liaDeclExpr << "\n";
+                 if (debug >= 2) outs() << "[processLearnedLiaLemmas] Warning: No LIA lemmas found for " << *liaDeclExpr << "\n";
                  m_liaSolutionMap[liaDeclExpr] = ExprSet(); // Store empty set
             }
         }
     }
     // --- End new private helper method ---
 
+    // --- New private helper method to check solution map against rules ---
+    /**
+     * @brief Checks if a given solution map satisfies a set of Horn rules.
+     *
+     * Constructs and checks the SMT query (Body ^ SrcInv ^ !DstInv) for each rule.
+     *
+     * @param worklist The list of Horn rules to check against.
+     * @param solutionMap The map representing the solution (relation -> combined expression).
+     * @return `true` if the solution satisfies all rules in the worklist, `false` otherwise.
+     */
+    bool checkLemmasAgainstRules(const vector<HornRuleExt*>& worklist, const map<Expr, Expr>& solutionMap) {
+        if (debug >= 3) outs() << "[checkLemmasAgainstRules] Starting check (" << worklist.size() << " rules)\n";
+        for (const auto* hr : worklist) {
+            if (debug >= 4) {
+                outs() << "  Checking Rule: (";
+                if (hr->srcRelation) outs() << hr->srcRelation; else outs() << "null";
+                outs() << " -> ";
+                if (hr->dstRelation) outs() << hr->dstRelation; else outs() << "null";
+                outs() << ")\n";
+            }
+
+            ExprSet checkExprs;
+            checkExprs.insert(hr->body);
+
+            // Add source solution if not a fact
+            if (!hr->isFact && hr->srcRelation) {
+                auto srcSolnIt = solutionMap.find(hr->srcRelation);
+                if (srcSolnIt != solutionMap.end() && m_bvChcs.invVars.count(hr->srcRelation)) {
+                    Expr srcSolnCombined = srcSolnIt->second;
+                    ExprVector invVars = m_bvChcs.invVars.at(hr->srcRelation); // Use const ref
+                    ExprVector srcVars = hr->srcVars; // Use const ref
+                    if (invVars.size() == srcVars.size()) {
+                        Expr srcSolnSubst = replaceAll(srcSolnCombined, invVars, srcVars);
+                        checkExprs.insert(srcSolnSubst);
+                        if (debug >= 5) outs() << "    Adding SrcInv (" << hr->srcRelation << "): " << srcSolnSubst << "\n";
+                    } else {
+                        if (debug >= 1) outs() << "[checkLemmasAgainstRules] Warning: Var mismatch for src " << hr->srcRelation << ". Skipping rule.\n";
+                        continue;
+                    }
+                } else {
+                    if (debug >= 5) outs() << "    SrcInv missing or vars missing for " << hr->srcRelation << ", assuming true.\n";
+                }
+            }
+
+            // Add negated destination solution if not a query
+            if (!hr->isQuery && hr->dstRelation) {
+                auto dstSolnIt = solutionMap.find(hr->dstRelation);
+                if (dstSolnIt != solutionMap.end() && m_bvChcs.invVars.count(hr->dstRelation)) {
+                    Expr dstSolnCombined = dstSolnIt->second;
+                    ExprVector invVars = m_bvChcs.invVars.at(hr->dstRelation); // Use const ref
+                    ExprVector dstVars = hr->dstVars; // Use const ref
+                    if (invVars.size() == dstVars.size()) {
+                        Expr dstSolnSubst = replaceAll(dstSolnCombined, invVars, dstVars);
+                        checkExprs.insert(mkNeg(dstSolnSubst));
+                        if (debug >= 5) outs() << "    Adding !DstInv (" << hr->dstRelation << "): " << mkNeg(dstSolnSubst) << "\n";
+                    } else {
+                        if (debug >= 1) outs() << "[checkLemmasAgainstRules] Warning: Var mismatch for dst " << hr->dstRelation << ". Skipping rule.\n";
+                        continue;
+                    }
+                } else {
+                    if (debug >= 5) outs() << "    DstInv missing or vars missing for " << hr->dstRelation << ". Rule check skipped (vacuously true).\n";
+                    continue; // Rule holds vacuously
+                }
+            } else if (hr->isQuery) {
+                 // Query check: Body ^ SrcInv => false (or Body ^ SrcInv is UNSAT)
+                 // If SAT/Unknown, the rule fails.
+            }
+
+            // Perform SMT check
+            if (debug >= 5) {
+                outs() << "    Checking SMT query: \n";
+                pprint(conjoin(checkExprs, m_efac));
+                outs() << "\n";
+            }
+            boost::tribool checkResult = u.isSat(checkExprs);
+
+            if (checkResult) { // SAT or indeterminate means the rule is violated
+                if (debug >= 3) {
+                    outs() << "  Rule FAILED (SAT/Indeterminate): (";
+                    if (hr->srcRelation) outs() << hr->srcRelation; else outs() << "null";
+                    outs() << " -> ";
+                    if (hr->dstRelation) outs() << hr->dstRelation; else outs() << "null";
+                    outs() << ")\n";
+                }
+                return false; // Solution is not safe
+            } else {
+                 if (debug >= 4) outs() << "    Rule PASSED (UNSAT)\n";
+            }
+        }
+
+        if (debug >= 3) outs() << "[checkLemmasAgainstRules] Finished: All rules PASSED.\n";
+        return true; // All rules passed
+    }
+    // --- End new private helper method ---
+
     public:
-    BitHorn(ExprFactory &efac, EZ3 &z3, CHCs &input, int _debug = 0) : 
-      m_efac(efac), 
+    BitHorn(ExprFactory &efac, EZ3 &z3, CHCs &input, int _debug = 0) :
+      m_efac(efac),
       m_z3(z3),
       m_liaChcs(new CHCs(efac,z3,_debug)), // Create new CHCs object
       m_bvChcs(input),
       u(efac),
-      m_Lia2BvTranslator(efac, z3, 4, _debug),
-      m_Bv2LiaTranslator(efac, z3, 4, _debug),
+      m_Lia2BvTranslator(efac, z3, 4, _debug), // Default width, will be updated
+      m_Bv2LiaTranslator(efac, z3, 4, _debug), // Default width, will be updated
       debug(_debug),
-      m_learnedLemmas(1) // Initialize with size 1 to store lemmas for the first relation
-    { 
+      m_learnedLemmas(1) // Initialize with size 1
+    {
       if (debug >= 1) {
-        outs() << "Initializing BitHorn solver\n";
+        outs() << "[BitHorn::Constructor] Initializing BitHorn solver\n";
       }
-      // --- Modification: Detect and store original BV width ---
+
+      // --- Modification: Detect and store original BV width without goto ---
+      bool width_detected = false;
       if (m_bvChcs.hasBV) {
           for (auto decl : m_bvChcs.decls) {
               if (decl && decl->arity() > 1) {
+                  // Iterate through arguments, skipping the relation name (index 0)
+                  // and the return type (last index)
                   for (unsigned i = 1; i < decl->arity() - 1; ++i) {
                       Expr sort = decl->arg(i);
                       if (isOpX<BVSORT>(sort)) {
                           m_original_bv_width = bv::width(sort);
                           if (debug >= 2) {
-                              outs() << "BitHorn: Detected original BV width " << m_original_bv_width << " from decl " << *decl << "\n";
+                              outs() << "[BitHorn::Constructor] Detected original BV width " << m_original_bv_width << " from decl " << *decl << "\n";
                           }
-                          goto width_detected_constructor; // Found it
+                          width_detected = true;
+                          break; // Exit inner loop once width is found
                       }
                   }
               }
+              if (width_detected) {
+                  break; // Exit outer loop once width is found
+              }
           }
-          width_detected_constructor:; 
-          // Pass the detected width to the LIA->BV and BV->LIA translator instances
-          if (m_original_bv_width > 0) {
+
+          // Pass the detected width to the translator instances if found
+          if (width_detected && m_original_bv_width > 0) {
               m_Lia2BvTranslator.setOriginalBvWidth(m_original_bv_width);
+              // Assuming Bv2LiaTranslator also needs the original width if applicable
+              // m_Bv2LiaTranslator.setOriginalBvWidth(m_original_bv_width); // Uncomment if needed
+          } else if (debug >= 1 && m_bvChcs.hasBV) {
+              outs() << "[BitHorn::Constructor] Warning: Could not detect original BV width from declarations. Using default.\n";
           }
       }
       // --- End Modification ---
 
+      // Populate original BV variable maps
       for (auto dd : m_bvChcs.decls)
       {
         Expr d = dd->left();
-        // Copy vectors directly
-        origBvVars[d] = m_bvChcs.invVars[d];
-        origBvVarsPrime[d] = m_bvChcs.invVarsPrime[d];
-      }
-      for(auto v: origBvVars)
-      {
-        if (debug >= 3) {
-          outs() << "origBvVars: " << v.first << "\n";
-          for(auto a: v.second)
-          {
-            outs() << "  Var: " << a << "\n";
-            outs() << "  Type: " << bind::typeOf(a) << "\n";
-          }
+        if (!d) continue; // Skip if relation name is null
+
+        // Check if the relation exists in the invVars map before accessing
+        if (m_bvChcs.invVars.count(d)) {
+            origBvVars[d] = m_bvChcs.invVars[d];
+            if (debug >= 3) {
+                outs() << "[BitHorn::Constructor] origBvVars: Populated for " << *d << " with " << origBvVars[d].size() << " vars\n";
+                // Optional: Print individual vars if needed at higher debug level
+                // for(const auto& a : origBvVars[d]) {
+                //     outs() << "  Var: " << *a << " Type: " << *bind::typeOf(a) << "\n";
+                // }
+            }
+        } else if (debug >= 2) {
+            outs() << "[BitHorn::Constructor] Warning: invVars not found for relation " << *d << ".\n";
+        }
+
+        // Check if the relation exists in the invVarsPrime map before accessing
+        if (m_bvChcs.invVarsPrime.count(d)) {
+            origBvVarsPrime[d] = m_bvChcs.invVarsPrime[d];
+             if (debug >= 3) {
+                outs() << "[BitHorn::Constructor] origBvVarsPrime: Populated for " << *d << " with " << origBvVarsPrime[d].size() << " vars\n";
+                // Optional: Print individual vars if needed at higher debug level
+                // for(const auto& a : origBvVarsPrime[d]) {
+                //     outs() << "  Var: " << *a << " Type: " << *bind::typeOf(a) << "\n";
+                // }
+            }
+        } else if (debug >= 2) {
+             outs() << "[BitHorn::Constructor] Warning: invVarsPrime not found for relation " << *d << ".\n";
         }
       }
-      for(auto v: origBvVarsPrime)
-      {
-        if (debug >= 3) {
-          outs() << "origBvVarsPrime: " << v.first << "\n";
-          for(auto a: v.second)
-          {
-            outs() << "  Var: " << a << "\n";
-            outs() << "  Type: " << bind::typeOf(a) << "\n";
-          }
-        }
-      }
+      // --- Removed redundant debug loops ---
     }
 
-    ~BitHorn() {
-      if (m_liaChcs) delete m_liaChcs;
-    }
-
-    // Add reset method
-    void resetLiaChcs() {
-      if (m_liaChcs) {
-        m_liaChcs->reinitialize(m_bvChcs);
-      } else {
-        m_liaChcs = new CHCs(m_bvChcs);
-      }
-    }
-
-    bool translateToBv()
-    {
-      if(debug >= 3)
-      {
-        outs() << "Beginning translation\n";
-      }
-      
-      // Create temporary CHCs for the translation
-      CHCs translatedChcs = m_Lia2BvTranslator.translate(m_bvChcs);
-      for(auto d: translatedChcs.decls)
-      {
-        // Copy vectors directly
-        origBvVars[d] = translatedChcs.invVars[d];
-        origBvVarsPrime[d] = translatedChcs.invVarsPrime[d];
-      }
-      
-      // Properly reinitialize m_bvChcs from translated version
-      m_bvChcs.reinitialize(translatedChcs);
-
-      if (debug >= 3)
-      {
-        outs() << "Ending translation\n";
-        m_bvChcs.print(true);
+    // --- Add translateToBv method ---
+    /**
+     * @brief Translates the internal BV CHC system (m_bvChcs) to the LIA CHC system (m_liaChcs).
+     *
+     * Uses the Bv2LiaTranslator to convert declarations, variables, and rule bodies.
+     * Populates the m_liaChcs object and associated variable maps (origLiaVars).
+     *
+     * @return true if translation is successful, false otherwise.
+     */
+    bool translateToBv() {
+      if (debug >= 1) {
+        outs() << "[translateToBv] Translating BV CHCs to LIA CHCs...\n";
       }
 
-      // Serialize the translated program  
-      m_bvChcs.serialize(false);
+      // Clear any existing LIA CHCs data before translation
+      origLiaVars.clear();
+      origLiaVarsPrime.clear(); // Clear primed vars map as well
 
-      return true;
-    }
+      // Perform the translation using the Bv2LiaTranslator's main translate method
+      // This method handles declarations, variables, and rules internally.
+      // We pass m_bvChcs as input and expect it to return a new CHCs object.
+      // Since m_liaChcs is a pointer, we need to manage its memory.
+      delete m_liaChcs; // Delete the old CHCs object
+      m_liaChcs = new CHCs(m_Bv2LiaTranslator.translate(m_bvChcs)); // Assign the newly translated CHCs
 
-    bool translateToLia()
-    {
-      if (debug >= 2)
-      {
-        outs() << "Translating BV to LIA\n";
-      }
-
-      // --- Potential Crash Site ---
-      // The GDB backtrace indicates a segmentation fault inside m_Bv2LiaTranslator.translate,
-      // specifically when calling ENode::arg().
-      // Based on debug logs, this likely occurs when processing a rule involving a 0-arity
-      // predicate like 'true' (as source) or 'fail' (as destination).
-      // The translator might be attempting node->arg(0) on the ENode representing 'true' or 'fail'
-      // without checking node->arity() first, leading to an out-of-bounds access.
-      // The fix requires modifying the Bv2LiaTranslator::translate implementation
-      // (likely in simpl/Bv2Lia.hpp) to correctly handle 0-arity predicates.
-      // --- End Potential Crash Site ---
-
-      // Create temporary CHCs for the translation
-      CHCs translatedChcs = m_Bv2LiaTranslator.translate(m_bvChcs);
-
-      // --- Modification: Clear maps and add debug prints ---
-      origLiaVars.clear(); 
-      origLiaVarsPrime.clear();
-      if (debug >= 4) outs() << "Populating origLiaVars:\n";
-      // --- End Modification ---
-
-      for (auto d : translatedChcs.decls)
-      {
-        // --- Modification: Use relation name as key ---
-        Expr relName = d->left(); 
-        if (!relName) continue; // Skip if name is null
-
-        // Copy vectors directly, using the relation NAME as the key
-        origLiaVars[relName] = translatedChcs.invVars[relName];
-        origLiaVarsPrime[relName] = translatedChcs.invVarsPrime[relName];
-        // --- End Modification ---
-
-        if (debug >= 4) {
-          outs() << "  Relation: " << *relName << "\n";
-          outs() << "    invVars (" << origLiaVars[relName].size() << "): ";
-          for(const auto& v : origLiaVars[relName]) outs() << *v << " "; outs() << "\n";
-          outs() << "    invVarsPrime (" << origLiaVarsPrime[relName].size() << "): ";
-          for(const auto& v : origLiaVarsPrime[relName]) outs() << *v << " "; outs() << "\n";
-        }
-      }
-
-      // Properly reinitialize m_liaChcs from translated version
-      // --- Modification: Use reinitialize instead of parse ---
+      // Check if the translation resulted in a valid object (basic check)
       if (!m_liaChcs) {
+          if (debug >= 1) outs() << "[translateToBv] Error: Bv2LiaTranslator returned a null CHCs object.\n";
+          // Re-create an empty CHCs object to avoid null pointer issues later
           m_liaChcs = new CHCs(m_efac, m_z3, debug);
+          return false;
       }
-      m_liaChcs->reinitialize(translatedChcs);
-      // --- End Modification ---
 
-      // Old code:
-      // m_liaChcs->serialize(false); // Serialize to chc.smt2
-      // delete m_liaChcs;
-      // m_liaChcs = new CHCs(m_efac, m_z3, debug);
-      // m_liaChcs->parse("chc.smt2");
+      // After translation, populate the origLiaVars map.
+      // The Bv2LiaTranslator should have populated its internal m_var_map.
+      // We need to associate these translated LIA vars with the *translated* LIA relation names.
+      const auto& bvToLiaDeclNameMap = m_Bv2LiaTranslator.getBvToLiaDeclMap(); // Map: BV Name -> LIA Name
 
-      // Debug dump of CHCs contents
-      if (debug >= 5)
-      {
-        outs() << "\n=== Debug dump of LIA CHCs ===\n";
+      for (const auto& bvDecl : m_bvChcs.decls) {
+          Expr bvRelName = bvDecl->left();
+          if (!bvRelName) continue;
 
-        // Print declarations
-        outs() << "Declarations:\n";
-        for (auto decl : m_liaChcs->decls)
-        {
-          outs() << "decl: " << *decl << "\n";
-          if (decl && decl->left())
-          {
-            outs() << "decl->left(): " << *decl->left() << "\n";
+          // Find the corresponding translated LIA relation name
+          auto nameMapIt = bvToLiaDeclNameMap.find(bvRelName);
+          if (nameMapIt == bvToLiaDeclNameMap.end()) {
+              if (debug >= 1) outs() << "[translateToBv] Warning: Could not find translated LIA name for BV relation " << *bvRelName << " in map.\n";
+              continue;
           }
-        }
+          Expr liaRelName = nameMapIt->second;
 
-        // Print variables per declaration
-        outs() << "\nVariables per declaration:\n";
-        for (auto &kv : m_liaChcs->invVars)
-        {
-          if (kv.first)
-          {
-            outs() << "For declaration " << *kv.first << ":\n";
-            for (auto &var : kv.second)
-            {
-              outs() << "  var: " << *var << "\n";
-              if (var && var->left())
-              {
-                outs() << "  var->left(): " << *var->left() << "\n";
+          // Get the original BV invariant variables for this relation
+          if (m_bvChcs.invVars.count(bvRelName)) {
+              const ExprVector& bvInvVars = m_bvChcs.invVars.at(bvRelName);
+              ExprVector translatedLiaVars;
+              // Translate each original BV variable to its LIA counterpart using the translator's map
+              for (const auto& bvVar : bvInvVars) {
+                  // Use the translator's public translateExpr method which uses the internal map
+                  Expr liaVar = m_Bv2LiaTranslator.translateExpr(bvVar);
+                  if (liaVar && liaVar != bvVar) { // Check if translation occurred
+                      translatedLiaVars.push_back(liaVar);
+                  } else if (liaVar == bvVar) {
+                      if (debug >= 3) outs() << "  [translateToBv] Var " << *bvVar << " kept as is during origLiaVars population.\n";
+                      translatedLiaVars.push_back(bvVar); // Keep original if no translation
+                  } else {
+                      if (debug >= 1) outs() << "[translateToBv] Warning: Failed to translate BV variable " << *bvVar << " for relation " << *bvRelName << "\n";
+                      // Handle error? Skip variable? For now, skip.
+                  }
               }
-            }
-          }
-        }
-
-        // Print Horn rules
-        outs() << "\nHorn Rules:\n";
-        for (auto &rule : m_liaChcs->chcs)
-        {
-          outs() << "Rule:\n";
-          if (rule.srcRelation)
-          {
-            outs() << "  src: " << *rule.srcRelation << "\n";
-            if (rule.srcRelation->left())
-            {
-              outs() << "  src->left(): " << *rule.srcRelation->left() << "\n";
-            }
-          }
-          if (rule.dstRelation)
-          {
-            outs() << "  dst: " << *rule.dstRelation << "\n";
-            if (rule.dstRelation->left())
-            {
-              outs() << "  dst->left(): " << *rule.dstRelation->left() << "\n";
-            }
-          }
-          if (rule.body)
-          {
-            outs() << "  body: " << *rule.body << "\n";
-            if (rule.body->left())
-            {
-              outs() << "  body->left(): " << *rule.body->left() << "\n";
-            }
+              origLiaVars[liaRelName] = translatedLiaVars; // Store translated vars under the LIA relation name
+              if (debug >= 4) {
+                  outs() << "  [translateToBv] Stored origLiaVars for LIA rel " << *liaRelName << " (from BV " << *bvRelName << "): " << translatedLiaVars.size() << " vars\n";
+              }
+          } else {
+               if (debug >= 2) outs() << "[translateToBv] Warning: Original BV invVars not found for relation " << *bvRelName << "\n";
           }
 
-          outs() << "  Source vars:\n";
-          for (auto &v : rule.srcVars)
-          {
-            outs() << "    var: " << *v << "\n";
-            if (v && v->left())
-            {
-              outs() << "    var->left(): " << *v->left() << "\n";
-            }
+          // TODO: Handle origLiaVarsPrime similarly if needed, using m_bvChcs.invVarsPrime
+          if (m_bvChcs.invVarsPrime.count(bvRelName)) {
+              const ExprVector& bvInvVarsPrime = m_bvChcs.invVarsPrime.at(bvRelName);
+              ExprVector translatedLiaVarsPrime;
+              for (const auto& bvVarPrime : bvInvVarsPrime) {
+                  Expr liaVarPrime = m_Bv2LiaTranslator.translateExpr(bvVarPrime);
+                   if (liaVarPrime && liaVarPrime != bvVarPrime) {
+                      translatedLiaVarsPrime.push_back(liaVarPrime);
+                  } else if (liaVarPrime == bvVarPrime) {
+                      if (debug >= 3) outs() << "  [translateToBv] Primed Var " << *bvVarPrime << " kept as is during origLiaVarsPrime population.\n";
+                      translatedLiaVarsPrime.push_back(bvVarPrime);
+                  } else {
+                      if (debug >= 1) outs() << "[translateToBv] Warning: Failed to translate primed BV variable " << *bvVarPrime << " for relation " << *bvRelName << "\n";
+                  }
+              }
+              origLiaVarsPrime[liaRelName] = translatedLiaVarsPrime;
+               if (debug >= 4) {
+                  outs() << "  [translateToBv] Stored origLiaVarsPrime for LIA rel " << *liaRelName << " (from BV " << *bvRelName << "): " << translatedLiaVarsPrime.size() << " vars\n";
+              }
           }
-
-          outs() << "  Destination vars:\n";
-          for (auto &v : rule.dstVars)
-          {
-            outs() << "    var: " << *v << "\n";
-            if (v && v->left())
-            {
-              outs() << "    var->left(): " << *v->left() << "\n";
-            }
-          }
-        }
-
-        // Print WTO info
-        outs() << "\nWTO Declarations:\n";
-        for (auto &decl : m_liaChcs->wtoDecls)
-        {
-          outs() << "decl: " << *decl << "\n";
-          if (decl && decl->left())
-          {
-            outs() << "decl->left(): " << *decl->left() << "\n";
-          }
-        }
-
-        outs() << "\nWTO CHCs:\n";
-        for (auto &wto : m_liaChcs->wtoCHCs)
-        {
-          outs() << "WTO rule:\n";
-          if (wto && wto->srcRelation)
-          {
-            outs() << "  src: " << *wto->srcRelation << "\n";
-            if (wto->srcRelation->left())
-            {
-              outs() << "  src->left(): " << *wto->srcRelation->left() << "\n";
-            }
-          }
-          if (wto && wto->dstRelation)
-          {
-            outs() << "  dst: " << *wto->dstRelation << "\n";
-            if (wto->dstRelation->left())
-            {
-              outs() << "  dst->left(): " << *wto->dstRelation->left() << "\n";
-            }
-          }
-        }
-
-        outs() << "\ndWTO CHCs:\n";
-        for (auto &wto : m_liaChcs->dwtoCHCs)
-        {
-          outs() << "WTO rule:\n";
-          if (wto && wto->srcRelation)
-          {
-            outs() << "  src: " << *wto->srcRelation << "\n";
-            if (wto->srcRelation->left())
-            {
-              outs() << "  src->left(): " << *wto->srcRelation->left() << "\n";
-            }
-          }
-          if (wto && wto->dstRelation)
-          {
-            outs() << "  dst: " << *wto->dstRelation << "\n";
-            if (wto->dstRelation->left())
-            {
-              outs() << "  dst->left(): " << *wto->dstRelation->left() << "\n";
-            }
-          }
-        }
-
-        outs() << "=== End debug dump ===\n\n";
       }
 
-      return true;
-    }
 
-    CHCs& getLiaChcs() { return *m_liaChcs; }
-    CHCs& getBvChcs() { return m_bvChcs; }
-
-    // --- Updated getSolution methods ---
-    void getSolution(map<Expr, Expr> &e) { // Changed signature
-      e = m_bvSolutionMap;
-    }
-
-    map<Expr, Expr> getSolution() { // Changed signature
-      return m_bvSolutionMap;
-    }
-    // --- End Updated getSolution methods ---
-
-    bool solve(unsigned to = 100) {
-      if (debug >= 1) {
-        outs() << "Starting BitHorn solver with timeout " << to << "\n";
-      }
-
-      for (unsigned i = 0; i < to; i++) {
-        if (debug >= 2) {
-          outs() << "\nIteration " << i << " of " << to << "\n";
-        }
-
-        // 1. Translate current BV system to LIA
-        if (!translateToLia()) {
-          if (debug >= 1) outs() << "Failed to translate BV to LIA\n";
-          return false;
-        }
-        
+      if (debug >= 2) {
+        outs() << "[translateToBv] Finished translating BV to LIA using Bv2LiaTranslator::translate.\n";
         if (debug >= 3) {
-          outs() << "Translated BV -> LIA system:\n";
+          outs() << "--- Translated LIA System (m_liaChcs) ---\n";
           m_liaChcs->print(true);
-        }
-
-        // 2. Try to solve LIA system with timeout
-        if (!solveLIA()) { // solveLIA now populates m_liaSolutionMap
-          if (debug >= 1) outs() << "Could not find LIA solution\n";
-          // return false;
-          // Instead of quitting, use the lemmas found to strengthen the BV system and try again.
-        }
-
-        if (debug >= 3) {
-          outs() << "Found LIA solution with " << m_liaSolutionMap.size() << " relations\n"; // Updated log
-        }
-
-        // 3. Translate LIA solution back to BV
-        if (!translateSolutionToBv()) { // translateSolutionToBv now uses m_liaSolutionMap and populates m_bvSolutionMap
-          if (debug >= 1) outs() << "Failed to translate solution to BV\n";
-          return false;
-        }
-
-        if (debug >= 3) {
-          outs() << "Translated solution back to BV with " << m_bvSolutionMap.size() << " relations\n"; // Updated log
-        }
-
-        // --- Call the new print method here ---
-        if (debug >= 2) { // Print intermediate solution if debug level is 2 or higher
-            printBvSolutionMap(m_bvSolutionMap);
-        }
-        // --- End call ---
-
-        // 4. Check if solution is safe in BV
-        map<Expr, ExprSet> candidates;
-        if (!applySolutionToBvSystem(candidates)) {
-          if (debug >= 1) outs() << "Failed to apply BV solution\n";
-          return false;
-        }
-
-        bool isSafe = checkSafetyInBV(candidates);
-        
-        if (isSafe) {
-          outs() << "Success : Found safe BV solution after " << (i+1) << " iterations!\n";
-          printSolution();
-
-          return true;
-        }
-
-        if (debug >= 2) {
-          outs() << "Solution not safe in BV, strengthening...\n";
-        }
-
-        // 5. Strengthen transition relation and continue
-        if (!strengthenTransitionRelation()) {
-          if (debug >= 1) outs() << "Failed to strengthen transition relation\n";
-          return false;
+          outs() << "--- End Translated LIA System ---\n";
+          outs() << "--- OrigLiaVars Map (" << origLiaVars.size() << " entries) ---\n";
+          for(const auto& pair : origLiaVars) {
+              outs() << "  Rel: " << *pair.first << " -> ";
+              for(const auto& v : pair.second) outs() << *v << " ";
+              outs() << "\n";
+          }
+          outs() << "--- End OrigLiaVars Map ---\n";
         }
       }
+      return true; // Assume success if no errors were explicitly returned by the translator
+    }
+    // --- End Add translateToBv method ---
 
+    // --- Add getBvChcs method ---
+    CHCs& getBvChcs() {
+        return m_bvChcs;
+    }
+    // --- End Add getBvChcs method ---
+
+    // --- Add solve method ---
+    /**
+     * @brief Main solving loop for the BitHorn solver.
+     *
+     * Attempts to solve the input BV CHC system by translating it to LIA,
+     * solving the LIA system, translating the solution back to BV, and checking safety.
+     *
+     * @param to Timeout parameter (likely for the LIA solver).
+     * @return `true` if a safe solution is found, `false` otherwise.
+     */
+    bool solve(unsigned int to = 100) {
       if (debug >= 1) {
-        outs() << "No solution found after " << to << " iterations\n";
+        outs() << "[solve] Starting BitHorn solve process...\n";
       }
-      return false;
-    }
 
-    private:
-    void initializeSolver(std::unique_ptr<RndLearnerV4> solver)
-    {
-      
+      // 1. Translate BV to LIA
+      if (!translateToBv()) {
+        outs() << "[solve] Error: Failed during BV to LIA translation.\n";
+        return false;
+      }
+
+      // 2. Solve LIA system 
+      bool liaSolved = solveLIA(to);
+      if (!liaSolved) {
+        if (debug >= 1) outs() << "[solve] LIA solver failed to find solution.\n";
+        return false;
+      }
+
+      // 3. Translate LIA solution back to BV
+      if (!translateSolutionToBv()) {
+        outs() << "[solve] Error: Failed translating LIA solution to BV.\n";
+        return false;
+      }
+
+      // 4. Check safety of translated solution
+      bool isSafe = checkSafetyInBV();
+
+      // 5. If unsafe, try strengthening and recheck
+      if (!isSafe && strengthenTransitionRelation()) {
+        if (debug >= 1) outs() << "[solve] Rechecking after strengthening...\n";
+        isSafe = checkSafetyInBV();
+      }
+
+      if (isSafe) {
+        outs() << "\n\nSuccess : Safe solution found\n";
+        printSolution();
+      } else {
+        outs() << "unknown\n";
+      }
+
+      return isSafe;
     }
+    // --- End Add solve method ---
 
     bool solveLIA(unsigned int to = 100) {
       if (debug >= 2) {
-        outs() << "Attempting to solve LIA system\n";  
+        outs() << "[solveLIA] Attempting to solve LIA system\n";  
       }
 
       // Before creating solver, normalize and validate all rule bodies
       for (auto &rule : m_liaChcs->chcs) {
         if (containsOp<IDIV>(rule.body) || containsOp<MOD>(rule.body)) {
-          if (debug >= 1) outs() << "Warning: Skipping rule with division\n";
+          if (debug >= 1) outs() << "[solveLIA] Warning: Skipping rule with division/mod: " << rule.body << "\n";
           continue;
         }
         // --- Apply normalization to rule bodies ---
@@ -825,7 +753,7 @@ namespace ufo
                                         dFwd, dRec, dGen, debug));
 
       if (!solver) {
-        if (debug >= 1) outs() << "Error: Failed to create solver\n";
+        if (debug >= 1) outs() << "[solveLIA] Error: Failed to create solver\n";
         return false;
       }
 
@@ -858,7 +786,7 @@ namespace ufo
             Expr simplified_t = simplifyArithm(normalized_t, false, false);
             if (!isOpX<TRUE>(simplified_t) && hasOnlyVars(simplified_t, m_liaChcs->invVars[rel])) {
                normalizedCandsForRel.insert(simplified_t);
-               if (debug >= 5) outs() << "  solveLIA: Added normalized prefix cand for " << *rel << ": " << *simplified_t << "\n";
+               if (debug >= 5) outs() << "  [solveLIA] Added normalized prefix cand for " << *rel << ": " << *simplified_t << "\n";
             }
           }
           // Add the normalized candidates to the main map
@@ -878,7 +806,7 @@ namespace ufo
               // We pass cands[rel] which now contains normalized prefix candidates.
               // The mutated results might not be normalized, but we'll normalize again after data candidates.
               solver->mutateHeuristicEq(cands[rel], cands[rel], rel, true);
-              if (debug >= 5) outs() << "  solveLIA: Mutated candidates for " << *rel << "\n";
+              if (debug >= 5) outs() << "  [solveLIA] Mutated candidates for " << *rel << "\n";
           }
           // Initialize Aux uses the current state of cands[rel]
           solver->initializeAux(cands[rel], bnd, rel, i, pref);
@@ -889,10 +817,10 @@ namespace ufo
       // Generate data-based candidates if enabled
       if (da > 0) {
         solver->getDataCandidates(cands); // This adds potentially un-normalized candidates
-        if (debug >= 4) outs() << "  solveLIA: Got data candidates.\n";
+        if (debug >= 4) outs() << "  [solveLIA] Got data candidates.\n";
 
         // --- Modification: Normalize all candidates again after adding data candidates ---
-        if (debug >= 4) outs() << "  solveLIA: Normalizing all candidates (prefix + data + mutated)...\n";
+        if (debug >= 4) outs() << "  [solveLIA] Normalizing all candidates (prefix + data + mutated)...\n";
         for (auto& pair : cands) {
             Expr rel = pair.first;
             ExprSet& currentCands = pair.second;
@@ -927,7 +855,7 @@ namespace ufo
       bool bootstrap = solver->bootstrap();
       if (bootstrap) {
         if (debug >= 2)
-          outs() << "Bootstrap successful\n";
+          outs() << "[solveLIA] Bootstrap successful\n";
         // --- Call helper method to process lemmas ---
         processLearnedLiaLemmas(*solver);
         // --- End call helper method ---
@@ -941,7 +869,7 @@ namespace ufo
       // Try synthesis
       if (solver->synthesize(to)) {
         if (debug >= 2) {
-          outs() << "V4 solver found solution via synthesis\n"; // Clarified log
+          outs() << "[solveLIA] V4 solver found solution via synthesis\n"; // Clarified log
         }
         // --- Call helper method to process lemmas ---
         processLearnedLiaLemmas(*solver);
@@ -949,13 +877,13 @@ namespace ufo
         return true; // Return true if synthesis succeeded
       }
 
-      if (debug >= 1) outs() << "LIA solver failed (bootstrap and synthesis)\n"; // Added final failure log
+      if (debug >= 1) outs() << "[solveLIA] LIA solver failed (bootstrap and synthesis)\n"; // Added final failure log
       return false;
     }
 
     bool translateSolutionToBv() {
       if (debug >= 2) {
-        outs() << "Translating LIA solution map to BV solution map...\n";
+        outs() << "[translateSolutionToBv] Translating LIA solution map to BV solution map...\n";
       }
 
       // Clear any previous solution
@@ -964,7 +892,7 @@ namespace ufo
       // Safety check - ensure we have declarations
       if (m_bvChcs.decls.empty()) {
         if (debug >= 1) {
-          outs() << "Error: No declarations found in BV CHCs\n";
+          outs() << "[translateSolutionToBv] Error: No declarations found in BV CHCs\n";
         }
         return false;
       }
@@ -974,7 +902,7 @@ namespace ufo
 
       // +++ Debugging +++
       if (debug >= 4) {
-          outs() << "BV to LIA Relation Map (bvToLiaMap):\n";
+          outs() << "[translateSolutionToBv] BV to LIA Relation Map (bvToLiaMap):\n";
           for (const auto& pair : bvToLiaMap) {
               if (pair.first && pair.second) { // Check for null pointers
                   outs() << "  BV: " << *(pair.first) << " -> LIA: " << *(pair.second) << "\n";
@@ -982,7 +910,7 @@ namespace ufo
                   outs() << "  BV: (null?) -> LIA: (null?)\n";
               }
           }
-          outs() << "LIA Solution Map (m_liaSolutionMap):\n";
+          outs() << "[translateSolutionToBv] LIA Solution Map (m_liaSolutionMap):\n";
           for (const auto& pair : m_liaSolutionMap) {
                if (pair.first) { // Check for null pointers
                   outs() << "  LIA: " << *(pair.first) << " -> " << pair.second.size() << " lemmas\n";
@@ -999,12 +927,12 @@ namespace ufo
         Expr bvRel = bvDecl->left(); // Original BV relation name
         if (!bvRel) continue;
 
-        if (debug >= 4) outs() << "Processing BV relation: " << *bvRel << "\n";
+        if (debug >= 4) outs() << "[translateSolutionToBv] Processing BV relation: " << *bvRel << "\n";
 
         // Find corresponding LIA relation NAME using the map
         auto mapIt = bvToLiaMap.find(bvRel); // Look up original BV name
         if (mapIt == bvToLiaMap.end()) {
-          if (debug >= 1) outs() << "Warning: Could not find LIA relation for BV relation " << *bvRel << " in bvToLiaMap\n"; // Added map name
+          if (debug >= 1) outs() << "[translateSolutionToBv] Warning: Could not find LIA relation for BV relation " << *bvRel << " in bvToLiaMap\n"; // Added map name
           continue;
         }
         Expr liaRel = mapIt->second; // Translated LIA relation name
@@ -1014,7 +942,7 @@ namespace ufo
         // Find LIA solution for this relation using the LIA relation name as key
         auto liaSolnIt = m_liaSolutionMap.find(liaRel); // Look up translated LIA name
         if (liaSolnIt == m_liaSolutionMap.end() || liaSolnIt->second.empty()) {
-          if (debug >= 2) outs() << "Warning: No LIA solution found for relation " << *liaRel << " (BV: " << *bvRel << ") in m_liaSolutionMap\n"; // Added map name
+          if (debug >= 2) outs() << "[translateSolutionToBv] Warning: No LIA solution found for relation " << *liaRel << " (BV: " << *bvRel << ") in m_liaSolutionMap. Setting to TRUE.\n"; // Added map name
           // Store 'true' as the solution if none is found? Or skip? Let's store true.
           m_bvSolutionMap[bvRel] = mk<TRUE>(m_efac);
           continue;
@@ -1031,13 +959,13 @@ namespace ufo
 
           if (!bvExpr) {
             if (debug >= 2) {
-              outs() << "Warning: Failed to translate LIA expression: " << *liaExpr << " for relation " << *liaRel << "\n";
+              outs() << "[translateSolutionToBv] Warning: Failed to translate LIA expression: " << *liaExpr << " for relation " << *liaRel << "\n";
             }
             continue;
           }
 
           // Replace LIA invariant variables with BV invariant variables
-          // Ensure both relations exist in the respective variable maps
+          // Ensure both relations exist in the invVars map
 
           // +++ Debugging: Print map contents before check +++
           if (debug >= 4) {
@@ -1081,23 +1009,23 @@ namespace ufo
                   bvExprSet.insert(bvExpr);
               }
           } else {
-              if (debug >= 2) outs() << "Warning: Missing variables for relation pair " << *liaRel << "/" << *bvRel << " during translation.\n";
+              if (debug >= 2) outs() << "[translateSolutionToBv] Warning: Missing variables for relation pair " << *liaRel << "/" << *bvRel << " during translation.\n";
           }
         }
 
         // Store the conjunction of translated BV expressions
         m_bvSolutionMap[bvRel] = conjoin(bvExprSet, m_efac);
         if (debug >= 3) {
-            outs() << "BV Solution for " << *bvRel << ": " << m_bvSolutionMap[bvRel] << "\n";
+            outs() << "[translateSolutionToBv] BV Solution for " << *bvRel << ": " << m_bvSolutionMap[bvRel] << "\n";
         }
       }
 
 
       // Print full translation results (optional, maybe redundant with above)
       if (debug >= 2) {
-        outs() << "\nFinal Translated BV Solution Map (" << m_bvSolutionMap.size() << " entries):\n";
+        outs() << "\n[translateSolutionToBv] Final Translated BV Solution Map (" << m_bvSolutionMap.size() << " entries):\n";
         for (auto& kv : m_bvSolutionMap) {
-          outs() << "Relation: " << *kv.first << "\n";
+          outs() << "  Relation: " << *kv.first << "\n";
           outs() << "     BV Solution: " << *kv.second << "\n";
         }
         outs() << "\n";
@@ -1107,125 +1035,237 @@ namespace ufo
       return !m_bvSolutionMap.empty();
     }
 
-
-    // TODO: Review again to make sure it does what it should be doing.
-    // Namely, it should check the BV system
-    bool multiHoudini(vector<HornRuleExt*> worklist) // Removed recur parameter
+    /**
+     * Check a single rule against a set of candidates
+     * Returns false if rule passes, true/indeterminate if rule fails
+     */ 
+    boost::tribool checkRule(HornRuleExt* hr, map<Expr, ExprSet>& candidates)
     {
-      if (debug >= 3) outs() << "MultiHoudini (Validation)\n";
+      if (debug >= 3) {
+        outs() << "  Checking rule: " << *hr->srcRelation << " -> " << *hr->dstRelation << "\n";
+      }
 
-      for (auto &hr : worklist)
-      {
-        if (debug >= 3) {
-          outs() << "  Checking CHC (" << hr->srcRelation << " -> "
-                 << hr->dstRelation << ")\n";
+      ExprVector checkExprs;
+      checkExprs.push_back(hr->body);
+
+      // Add source relation candidates if not a fact
+      if (!hr->isFact) {
+        auto srcCandIt = candidates.find(hr->srcRelation);
+        if (srcCandIt != candidates.end()) {
+          for (auto& cand : srcCandIt->second) {
+            Expr srcCandSubst = replaceAll(cand, m_bvChcs.invVars[hr->srcRelation], hr->srcVars);
+            checkExprs.push_back(srcCandSubst);
+          }
         }
+      }
 
-        ExprSet exprs = {hr->body};
+      // Add negated destination candidates if not a query
+      if (!hr->isQuery) {
+        auto dstCandIt = candidates.find(hr->dstRelation);
+        ExprVector negged;
+        if (dstCandIt != candidates.end()) {
+          for (auto& cand : dstCandIt->second) {
+            Expr dstCandSubst = replaceAll(cand, m_bvChcs.invVars[hr->dstRelation], hr->dstVars);
+            negged.push_back(mkNeg(dstCandSubst));
+          }
+        }
+        checkExprs.push_back(disjoin(negged, m_efac));
+      }
 
-        // Add source solution constraints if not a fact
-        if (!hr->isFact) {
-          auto srcSolnIt = m_bvSolutionMap.find(hr->srcRelation);
-          if (srcSolnIt != m_bvSolutionMap.end()) {
-            // Check if srcRelation exists in invVars before accessing
-            if (m_bvChcs.invVars.count(hr->srcRelation)) {
-                // srcSolnIt->second is the combined BV solution for the relation
-                Expr srcSolnCombined = srcSolnIt->second;
-                // Substitute invariant variables with rule's source variables
-                Expr srcSolnSubst = replaceAll(srcSolnCombined,
-                                          m_bvChcs.invVars.at(hr->srcRelation), // BV Invariant Vars
-                                          hr->srcVars);                         // BV Rule Source Vars
-                exprs.insert(srcSolnSubst);
-                if(debug >= 3) outs() << "    Source solution (" << hr->srcRelation << "): " << srcSolnSubst << "\n"; // Updated log
-            } else {
-                 if (debug >= 2) outs() << "Warning: Source relation " << hr->srcRelation << " not found in invVars map during multiHoudini check.\n";
-                 continue;
+      if(debug >= 4) {
+        outs() << "  Checking expressions:\n";
+        for(int i = 0; i < checkExprs.size(); i++) {
+          if(i != 0) outs() << "/\\ ";
+          else outs() << "  ";
+          outs() << "  " << checkExprs[i] << "\n";
+        }
+      }
+
+      return u.isSat(checkExprs);
+    }
+
+    bool anyProgress(vector<HornRuleExt*>& worklist, 
+                     map<Expr, ExprSet>& candidates) 
+    {
+      if(debug >= 2) {
+        outs() << "[anyProgress] Checking for progress...\n";
+      }
+      for (auto* hr : worklist) {
+        boost::tribool res = checkRule(hr, candidates);
+        if (res || indeterminate(res)) {
+          return false; // Found a rule that failed
+        }
+      }
+      return true; // No rules failed
+    }
+
+    /**
+     * Main Houdini-style candidate checking
+     * @param worklist List of rules to check
+     * @param candidates Map from relations to their candidate invariants
+     * @return true if all rules pass with current candidates
+     */
+    bool multiHoudini(vector<HornRuleExt*>& worklist, 
+                     map<Expr, ExprSet>& candidates) 
+    {
+      if (debug >= 2) {
+        outs() << "[multiHoudini] Checking " << worklist.size() << " rules\n";
+      }
+
+      // Check each rule against the candidates
+      bool checkAgain = false;
+      for (auto* hr : worklist) {
+        if(hr->isQuery) continue;
+        boost::tribool res = checkRule(hr, candidates);
+
+        if(debug >= 5)
+        {
+          if (res == true) {
+            outs() << "  Rule failed: " << *hr->srcRelation 
+                  << " -> " << *hr->dstRelation << "\n\n";
+          } else if (res == false) {
+            outs() << "  Rule passed: " << *hr->srcRelation 
+                  << " -> " << *hr->dstRelation << "\n\n";
+          } else {
+            outs() << "  Rule indeterminate: " << *hr->srcRelation 
+                  << " -> " << *hr->dstRelation << "\n\n";
+          }
+        }
+        
+        if (res || indeterminate(res)) {
+
+          // CHC check failed so attempt to weaken the candidates.
+          weakenCandidates(hr, candidates);
+          checkAgain = true;
+          // return false;
+        }
+      }
+
+      if(checkAgain) {
+        if (debug >= 2) {
+          outs() << "[multiHoudini] Candidates weakened, rechecking...\n";
+        }
+        return multiHoudini(worklist, candidates); // We need to check again after weakening
+      }
+
+      if (debug >= 2) {
+        outs() << "[multiHoudini] All rules passed\n";
+      }
+      return anyProgress(worklist, candidates);
+    }
+
+    /**
+     * Weaken candidates by checking facts and inductive rules
+     */
+    void weakenCandidates(HornRuleExt* hr, map<Expr, ExprSet>& candidates) 
+    {
+      if (debug >= 2) {
+        outs() << "[weakenCandidates] Starting candidate weakening\n";
+      }
+
+      // Try to drop candidates one at a time
+      map<Expr, ExprSet> resCands;
+      for (auto& kv : candidates) {
+        Expr rel = kv.first;
+        ExprSet& cands = kv.second;
+
+        // Try removing each candidate
+        for (auto& cand : cands) {
+          if(debug >= 4) {
+            outs() << "  Checking candidate: " << cand << "\n";
+          }
+          map<Expr, ExprSet> tmpCands;
+          tmpCands[rel].insert(cand);
+          boost::tribool res = checkRule(hr, tmpCands);
+
+          if(res || indeterminate(res)) {
+            if (debug >= 2) {
+              outs() << "  Candidate failed: " << cand << " 🔥\n";
             }
           } else {
-             if (debug >= 3) outs() << "    Source solution missing for " << hr->srcRelation << ", assuming true.\n";
-             // If solution for source is missing, it implies 'true', so we don't add anything.
+            // Candidate passed, keep it
+            resCands[rel].insert(cand);
           }
-        }
-
-        // Add negated destination solution constraints if not a query
-        if (!hr->isQuery) {
-          auto dstSolnIt = m_bvSolutionMap.find(hr->dstRelation);
-          if (dstSolnIt != m_bvSolutionMap.end()) {
-             // Check if dstRelation exists in invVars before accessing
-             if (m_bvChcs.invVars.count(hr->dstRelation)) {
-                // dstSolnIt->second is the combined BV solution for the relation
-                Expr dstSolnCombined = dstSolnIt->second;
-                 // Substitute invariant variables with rule's destination variables
-                Expr dstSolnSubst = replaceAll(dstSolnCombined,
-                                          m_bvChcs.invVars.at(hr->dstRelation), // BV Invariant Vars
-                                          hr->dstVars);                         // BV Rule Destination Vars
-                exprs.insert(mkNeg(dstSolnSubst));
-                 if(debug >= 3) outs() << "    Neg Dest solution (" << hr->dstRelation << "): " << mkNeg(dstSolnSubst) << "\n"; // Updated log
-             } else {
-                 if (debug >= 2) outs() << "Warning: Destination relation " << hr->dstRelation << " not found in invVars map during multiHoudini check.\n";
-                 continue;
-             }
-          } else {
-            if (debug >= 3) outs() << "    Destination solution missing for " << hr->dstRelation << ", rule trivially satisfied.\n";
-            continue; // Skip the SAT check for this rule
-          }
-        }
-        // For query rules, we don't add a negated destination. The check is Body ^ SrcInv => false.
-        // Which means we check satisfiability of Body ^ SrcInv.
-
-        // --- Debug Print ---
-        if (debug >= 4) {
-            outs() << "    Checking SAT for: \n";
-            pprint(conjoin(exprs, m_efac));
-            outs() << "\n";
-          }
-        // --- End Debug Print ---
-
-        if (u.isSat(exprs)) {
-          // If SAT, the implication Body ^ SrcInv => DstInv (or Body ^ SrcInv => false for queries) is violated.
-          if (debug >= 3) outs() << "    CHC check failed (SAT)\n";
-          return false; // Solution is not valid for this rule
-        }
-        else {
-           if (debug >= 3) outs() << "    CHC check succeeded (UNSAT)\n";
         }
       }
 
-      // If all rules in the worklist passed the check
-      if (debug >= 3) outs() << "MultiHoudini: All checks passed.\n";
-      return true; // Solution is valid for all rules checked
-    }
-
-    bool checkSafetyInBV(map<Expr, ExprSet>& candidates) { // candidates param seems unused but kept for signature stability
+      candidates = resCands;
       if (debug >= 2) {
-        outs() << "Checking safety of BV solution\n";
-      }
-
-      vector<HornRuleExt*> worklist;
-
-      // Add all query rules to the worklist
-      for (auto& hr : m_bvChcs.chcs) {
-        // --- Modification: Add all rules, not just queries ---
-        worklist.push_back(&hr);
-        // --- End Modification ---
-      }
-
-      if (worklist.empty()) {
-        if (debug >= 2) {
-          outs() << "No rules to check (system is empty?)\n"; // Updated log
-        }
-        return true; // No rules means safe
-      }
-
-      // Call multiHoudini to check safety
-      // multiHoudini returns true if the solution satisfies all rules in the worklist (is safe)
-      // multiHoudini returns false if any rule is violated (is unsafe)
-      return multiHoudini(worklist); // Return the result directly
+        outs() << "[weakenCandidates] Candidate weakening complete\n";
+      }    
     }
+
+    void setBvCandMap(map<Expr, ExprSet>& cands) {
+      if (debug >= 2) {
+        outs() << "[setBvCandMap] Setting BV candidate map...\n";
+      }
+      for(auto& kv : cands) {
+        Expr rel = kv.first;
+        ExprSet& candsSet = kv.second;
+
+        // Normalize and simplify candidates before storing
+        ExprSet normalizedCands;
+        for (auto& cand : candsSet) {
+          Expr normalized_cand = normalizeExpr(normalizePositive(cand));
+          Expr simplified_cand = simplifyArithm(normalized_cand, false, false);
+          if (!isOpX<TRUE>(simplified_cand)) {
+            normalizedCands.insert(simplified_cand);
+          }
+        }
+        m_bvSolutionMap[rel] = conjoin(normalizedCands, m_efac);
+      }
+    }
+
+    bool checkSafetyInBV() {
+      if (debug >= 2) {
+        outs() << "[checkSafetyInBV] Starting safety check...\n";
+      }
+
+      // Create worklist with all CHCs
+      vector<HornRuleExt*> allRules;
+      for (auto& hr : m_bvChcs.chcs) {
+        allRules.push_back(&hr);
+      }
+
+      // Convert solution map to candidates format
+      map<Expr, ExprSet> candidates;
+      for (const auto& kv : m_bvSolutionMap) {
+        ExprSet candSet;
+        getConj(kv.second, candSet);
+        candidates[kv.first] = candSet;
+      }
+
+      // First check: Try with all candidates against all rules
+      if (multiHoudini(allRules, candidates)) {
+        if (debug >= 1) {
+          outs() << "[checkSafetyInBV] System is safe with initial candidates\n";
+        }
+        setBvCandMap(candidates);
+        return true;
+      }
+
+      // Update m_bvSolutionMap with weakened candidates
+      for (const auto& kv : candidates) {
+        m_bvSolutionMap[kv.first] = conjoin(kv.second, m_efac);
+      }
+
+      // Final check: Try with weakened candidates against all rules
+      bool finalResult = multiHoudini(allRules, candidates);
+      if (debug >= 1) {
+        if (finalResult) {
+          outs() << "[checkSafetyInBV] System is safe after weakening\n";
+        } else {
+          outs() << "[checkSafetyInBV] System remains unsafe after weakening\n";
+        }
+      }
+
+      return finalResult;
+    }
+    // --- End Keep the NEW checkSafetyInBV definition ---
 
     bool strengthenTransitionRelation() {
       if (debug >= 2) {
-        outs() << "Strengthening transition relation\n";
+        outs() << "[strengthenTransitionRelation] Strengthening transition relation...\n";
       }
 
       // Get lemmas for strengthening from current solution
@@ -1245,29 +1285,27 @@ namespace ufo
         newBody.insert(hr.body);
         // Substitute invariant vars with destination vars before adding
         if (m_bvChcs.invVars.count(hr.dstRelation)) {
-            // --- Modification: Substitute invariant vars with DESTINATION vars ---
-            // --- Create non-const copies ---
-            ExprVector invVars = m_bvChcs.invVars.at(hr.dstRelation);
-            ExprVector dstVars = hr.dstVars; // Use destination variables as target
-            // --- End Create non-const copies ---
+            // --- Modification: Use const references for variables ---
+            ExprVector& invVars = m_bvChcs.invVars.at(hr.dstRelation);
+            ExprVector& dstVars = hr.dstVars; // Use destination variables as target
+            // --- End Modification ---
 
             // Check if variable counts match before substitution
             if (invVars.size() == dstVars.size()) { // Check against dstVars size
                 Expr dstSolnSubst = replaceAll(dstSolnExpr,
-                                               invVars, // Variables in the solution expression (now a copy)
-                                               dstVars); // Target variables for substitution (now a copy)
+                                               invVars, // Variables in the solution expression
+                                               dstVars); // Target variables for substitution
                 newBody.insert(dstSolnSubst);
                 if (debug >= 3)
-                  outs() << "  Strengthening rule for " << hr.dstRelation
+                  outs() << "  [strengthenTransitionRelation] Strengthening rule for " << hr.dstRelation
                          << " (using dstVars) with: " << dstSolnSubst << "\n"; // Updated log
             } else {
-                if (debug >= 1) outs() << "Warning: Variable count mismatch during strengthening for rule involving "
+                if (debug >= 1) outs() << "[strengthenTransitionRelation] Warning: Variable count mismatch for rule involving "
                                        << hr.dstRelation << ". Invariant vars (" << invVars.size()
                                        << ") vs Destination vars (" << dstVars.size() << "). Skipping strengthening for this rule.\n"; // Updated log
             }
-            // --- End Modification ---
         } else {
-             if (debug >= 2) outs() << "Warning: Missing invVars for " << hr.dstRelation << " during strengthening.\n";
+             if (debug >= 2) outs() << "[strengthenTransitionRelation] Warning: Missing invVars for " << hr.dstRelation << ".\n";
         }
 
 
@@ -1276,7 +1314,7 @@ namespace ufo
       }
 
       if (debug >= 3) {
-        outs() << "Strengthened BV system:\n";
+        outs() << "[strengthenTransitionRelation] Strengthened BV system:\n";
         m_bvChcs.print(true);
       }
 
@@ -1290,26 +1328,28 @@ namespace ufo
     }
 
     // Add new method to apply solution to CHC system
-    bool applySolutionToBvSystem(map<Expr, ExprSet>& cands) {
+    // --- Remove candidates parameter ---
+    bool applySolutionToBvSystem(/* map<Expr, ExprSet>& cands - REMOVED */) {
       if (debug >= 3) {
-        outs() << "Applying solution map to BV system (for candidates map)\n";
-        outs() << "Solution map size: " << m_bvSolutionMap.size() << "\n";
+        outs() << "[applySolutionToBvSystem] Applying solution map to BV system (internal use)\n"; // Updated log
+        outs() << "  Solution map size: " << m_bvSolutionMap.size() << "\n";
       }
-      cands.clear();
-      // Convert m_bvSolutionMap to map<Expr,ExprSet> format
-      // --- Use m_bvSolutionMap ---
-      for (auto& kv : m_bvSolutionMap) {
-        // kv.first is BV relation, kv.second is combined BV solution Expr
-        cands[kv.first] = ExprSet{kv.second};
-      }
-      // --- End Use m_bvSolutionMap ---
+      // cands.clear(); // No longer needed
+      // Convert m_bvSolutionMap to map<Expr,ExprSet> format - No longer needed externally
+      // for (auto& kv : m_bvSolutionMap) {
+      //   cands[kv.first] = ExprSet{kv.second};
+      // }
+      // --- End Remove candidates parameter ---
 
+      // The method doesn't strictly need to *do* anything anymore,
+      // as the solution is stored internally in m_bvSolutionMap.
+      // It just needs to exist if called elsewhere, returning true.
       return true;
     }
   };
 
-  // Main entry point for BV translation and solving
-  inline void learnInvariants5(string smt, unsigned maxAttempts, unsigned to,
+  // Main entry point forBV translation and solving
+  inline bool learnInvariants5(string smt, unsigned maxAttempts, unsigned to,
                                bool freqs, bool aggp, int dat, int mut, bool doElim, bool doArithm,
                                bool doDisj, int doProp, int mbpEqs, bool dAllMbp, bool dAddProp,
                                bool dAddDat, bool dStrenMbp, int dFwd, bool dRec, bool dGenerous,
@@ -1324,14 +1364,14 @@ namespace ufo
     if (!ruleManager.parse(smt, doElim, doArithm))
     {
       outs() << "Error parsing input file\n";
-      return;
+      return 1;
     }
 
     // For non-serialization case, check if input is BV format
     if (!ruleManager.hasBV && !ser)
     {
       outs() << "Input is not in BV format\n";
-      return;
+      return 1;
     }
 
     // Create BitHorn solver and pass through maxAttempts parameter 
@@ -1341,19 +1381,19 @@ namespace ufo
       // Just translate and serialize
       if(debug >= 2) 
       {
-        outs() << "Translating LIA to BV.\n";
+        outs() << "[learnInvariants5] Translating LIA to BV for serialization.\n";
       }
       if (!bh.translateToBv()) {
-        outs() << "Error translating LIA to BV\n"; 
-        return;
+        outs() << "[learnInvariants5] Error translating LIA to BV\n"; 
+        return 1;
       }
       bh.getBvChcs().serialize(false);
-      if(debug >= 2) outs() << "Serialized BV translation\n";
-      return;
+      if(debug >= 2) outs() << "[learnInvariants5] Serialized BV translation\n";
+      return 0;
     }
 
     // Solve BV system with maxAttempts
-    bh.solve(to);
+    return bh.solve(to);
   }
 }
 

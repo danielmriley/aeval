@@ -202,8 +202,9 @@ int main (int argc, char ** argv)
     if (do_dl == 0) do_dl = 1;
   }
 
+  bool res = false;
   if(bv_solver)
-    learnInvariants5(string(argv[argc - 1]), max_attempts, to, densecode, aggressivepruning,
+    res = learnInvariants5(string(argv[argc - 1]), max_attempts, to, densecode, aggressivepruning,
                      do_dl, do_mu, do_elim, do_arithm, do_disj, do_prop, mbp_eqs,
                      d_m, d_p, d_d, d_s, d_f, d_r, d_g, d_se, d_lia2bv, d_horn, d_sertrans, debug);
   else if (vers4)      // MBP-based, path-sensitive algorithms
@@ -219,5 +220,7 @@ int main (int argc, char ** argv)
   else            // run the FMCAD'17 algorithm
     learnInvariants(string(argv[argc-1]), to, max_attempts,
                   kinduction, itp, densecode, addepsilon, aggressivepruning, debug);
-  return 0;
+  
+  if(res) return 0;
+  else return 1;
 }
