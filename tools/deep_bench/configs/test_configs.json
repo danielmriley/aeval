@@ -12,10 +12,10 @@
       "tool": "z3",
       "flags": "",
       "benchmarks": "../bench_horn_bv_translated/",
-      "timeout": 3
+      "timeout": 6
     },
     {
-      "name": "bv10",
+      "name": "bv6",
       "tool": "./tools/deep/freqhorn",
       "flags": "--bv",
       "benchmarks": "../bench_horn_bv_translated/",

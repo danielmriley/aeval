@@ -595,7 +595,42 @@ namespace ufo
 
         // Handle LIA arithmetic operations -> BV operations (signed)
         if (isOpX<PLUS>(e))
-          return bv::bvadd(translateExprHelper(e->left()), translateExprHelper(e->right()));
+        {
+          // Check for patterns that can be converted to BVSUB
+          Expr left = e->left();
+          Expr right = e->right();
+
+          // Pattern 1: (-A) + B  => B - A
+          if (isOpX<UN_MINUS>(left)) {
+            Expr A = left->left();
+            return mk<expr::op::BSUB>(translateExprHelper(right), translateExprHelper(A));
+          }
+          // Pattern 2: (MULT -1 A) + B => B - A
+          if (isOpX<MULT>(left) && left->arity() == 2 && isOpX<MPZ>(left->left())) {
+            mpz_class coef = getTerm<mpz_class>(left->left());
+            if (coef == -1) {
+              Expr A = left->right();
+              return mk<expr::op::BSUB>(translateExprHelper(right), translateExprHelper(A));
+            }
+          }
+
+          // Pattern 3: A + (-B) => A - B
+          if (isOpX<UN_MINUS>(right)) {
+            Expr B = right->left();
+            return mk<expr::op::BSUB>(translateExprHelper(left), translateExprHelper(B));
+          }
+          // Pattern 4: A + (MULT -1 B) => A - B
+          if (isOpX<MULT>(right) && right->arity() == 2 && isOpX<MPZ>(right->left())) {
+            mpz_class coef = getTerm<mpz_class>(right->left());
+            if (coef == -1) {
+              Expr B = right->right();
+              return mk<expr::op::BSUB>(translateExprHelper(left), translateExprHelper(B));
+            }
+          }
+
+          // Default: Translate to BVADD
+          return bv::bvadd(translateExprHelper(left), translateExprHelper(right));
+        }
         else if (isOpX<MINUS>(e))
           // Use bvsub for consistency, though mk<BSUB> might work
           return mk<expr::op::BSUB>(translateExprHelper(e->left()), translateExprHelper(e->right())); 

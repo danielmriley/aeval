@@ -671,42 +671,50 @@ namespace ufo
         outs() << "[solve] Starting BitHorn solve process...\n";
       }
 
-      // 1. Translate BV to LIA
-      if (!translateToBv()) {
-        outs() << "[solve] Error: Failed during BV to LIA translation.\n";
-        return false;
-      }
+      bool isSafe = false;
 
-      // 2. Solve LIA system 
-      bool liaSolved = solveLIA(to);
-      if (!liaSolved) {
-        if (debug >= 1) outs() << "[solve] LIA solver failed to find solution.\n";
-        return false;
-      }
-
-      // 3. Translate LIA solution back to BV
-      if (!translateSolutionToBv()) {
-        outs() << "[solve] Error: Failed translating LIA solution to BV.\n";
-        return false;
-      }
-
-      // 4. Check safety of translated solution
-      bool isSafe = checkSafetyInBV();
-
-      // 5. If unsafe, try strengthening and recheck
-      if (!isSafe && strengthenTransitionRelation()) {
-        if (debug >= 1) outs() << "[solve] Rechecking after strengthening...\n";
+      for(int i = 0; i < to; i++) {
+        if (debug >= 2) outs() << "[solve] iteration: " << i << "\n";
+      
+        // 1. Translate BV to LIA
+        if (!translateToBv()) {
+          outs() << "[solve] Error: Failed during BV to LIA translation.\n";
+          return false;
+        }
+  
+        // 2. Solve LIA system 
+        bool liaSolved = solveLIA(to);
+        if (!liaSolved) {
+          if (debug >= 1) outs() << "[solve] LIA solver failed to find solution.\n";
+          return false;
+        }
+  
+        // 3. Translate LIA solution back to BV
+        if (!translateSolutionToBv()) {
+          outs() << "[solve] Error: Failed translating LIA solution to BV.\n";
+          return false;
+        }
+  
+        // 4. Check safety of translated solution
         isSafe = checkSafetyInBV();
+  
+        if (isSafe) 
+        {
+          outs() << "\nSuccess : Safe solution found\n";
+          printSolution();
+          return true;
+        }
+        else if (i >= to)
+        {
+          outs() << "unknown\n";
+          break;
+        }
+
+        // 5. If unsafe, try strengthening and recheck
+        strengthenTransitionRelation();
       }
 
-      if (isSafe) {
-        outs() << "\n\nSuccess : Safe solution found\n";
-        printSolution();
-      } else {
-        outs() << "unknown\n";
-      }
-
-      return isSafe;
+      return false; // If we reach here, no safe solution was found
     }
     // --- End Add solve method ---
 
@@ -743,14 +751,15 @@ namespace ufo
       int dFwd = 1;
       bool dRec = false;
       bool dGen = true;
+      unsigned int maxAttempts = 100;
 
       // Create solver
-      std::unique_ptr<RndLearnerV4> solver(new RndLearnerV4(m_efac, m_z3, 
-                                        *m_liaChcs, to,
-                                        freqs, aggp, mut, da,
-                                        doDisj, mbpEqs, dAllMbp,
-                                        dAddProp, dAddDat, dStrenMbp,
-                                        dFwd, dRec, dGen, debug));
+      std::unique_ptr<RndLearnerV4> solver(new RndLearnerV4(m_efac, m_z3,
+                                                            *m_liaChcs, maxAttempts,
+                                                            freqs, aggp, mut, da,
+                                                            doDisj, mbpEqs, dAllMbp,
+                                                            dAddProp, dAddDat, dStrenMbp,
+                                                            dFwd, dRec, dGen, debug));
 
       if (!solver) {
         if (debug >= 1) outs() << "[solveLIA] Error: Failed to create solver\n";
@@ -1081,14 +1090,35 @@ namespace ufo
         }
       }
 
-      return u.isSat(checkExprs);
+      boost::tribool res = u.isSat(checkExprs);
+
+      if (debug >= 5)
+      {
+        if (res == true)
+        {
+          outs() << "  Rule failed: " << *hr->srcRelation
+                 << " -> " << *hr->dstRelation << "\n\n";
+        }
+        else if (res == false)
+        {
+          outs() << "  Rule passed: " << *hr->srcRelation
+                 << " -> " << *hr->dstRelation << "\n\n";
+        }
+        else
+        {
+          outs() << "  Rule indeterminate: " << *hr->srcRelation
+                 << " -> " << *hr->dstRelation << "\n\n";
+        }
+      }
+
+      return res;
     }
 
-    bool anyProgress(vector<HornRuleExt*>& worklist, 
+    bool checkAllOver(vector<HornRuleExt*>& worklist, 
                      map<Expr, ExprSet>& candidates) 
     {
       if(debug >= 2) {
-        outs() << "[anyProgress] Checking for progress...\n";
+        outs() << "[checkAllOver] Checking for progress...\n";
       }
       for (auto* hr : worklist) {
         boost::tribool res = checkRule(hr, candidates);
@@ -1116,28 +1146,14 @@ namespace ufo
       bool checkAgain = false;
       for (auto* hr : worklist) {
         if(hr->isQuery) continue;
+        if(candidates[hr->dstRelation].empty()) continue;
         boost::tribool res = checkRule(hr, candidates);
-
-        if(debug >= 5)
-        {
-          if (res == true) {
-            outs() << "  Rule failed: " << *hr->srcRelation 
-                  << " -> " << *hr->dstRelation << "\n\n";
-          } else if (res == false) {
-            outs() << "  Rule passed: " << *hr->srcRelation 
-                  << " -> " << *hr->dstRelation << "\n\n";
-          } else {
-            outs() << "  Rule indeterminate: " << *hr->srcRelation 
-                  << " -> " << *hr->dstRelation << "\n\n";
-          }
-        }
         
         if (res || indeterminate(res)) {
 
           // CHC check failed so attempt to weaken the candidates.
           weakenCandidates(hr, candidates);
-          checkAgain = true;
-          // return false;
+          checkAgain = true; // We need to check again after weakening
         }
       }
 
@@ -1148,10 +1164,7 @@ namespace ufo
         return multiHoudini(worklist, candidates); // We need to check again after weakening
       }
 
-      if (debug >= 2) {
-        outs() << "[multiHoudini] All rules passed\n";
-      }
-      return anyProgress(worklist, candidates);
+      return checkAllOver(worklist, candidates);
     }
 
     /**
@@ -1195,27 +1208,6 @@ namespace ufo
       }    
     }
 
-    void setBvCandMap(map<Expr, ExprSet>& cands) {
-      if (debug >= 2) {
-        outs() << "[setBvCandMap] Setting BV candidate map...\n";
-      }
-      for(auto& kv : cands) {
-        Expr rel = kv.first;
-        ExprSet& candsSet = kv.second;
-
-        // Normalize and simplify candidates before storing
-        ExprSet normalizedCands;
-        for (auto& cand : candsSet) {
-          Expr normalized_cand = normalizeExpr(normalizePositive(cand));
-          Expr simplified_cand = simplifyArithm(normalized_cand, false, false);
-          if (!isOpX<TRUE>(simplified_cand)) {
-            normalizedCands.insert(simplified_cand);
-          }
-        }
-        m_bvSolutionMap[rel] = conjoin(normalizedCands, m_efac);
-      }
-    }
-
     bool checkSafetyInBV() {
       if (debug >= 2) {
         outs() << "[checkSafetyInBV] Starting safety check...\n";
@@ -1236,17 +1228,20 @@ namespace ufo
       }
 
       // First check: Try with all candidates against all rules
-      if (multiHoudini(allRules, candidates)) {
+      bool res = multiHoudini(allRules, candidates);
+
+      // Update m_bvSolutionMap with weakened candidates
+      for (const auto &kv : candidates)
+      {
+        m_bvSolutionMap[kv.first] = conjoin(kv.second, m_efac);
+      }
+
+      if (res)
+      {
         if (debug >= 1) {
           outs() << "[checkSafetyInBV] System is safe with initial candidates\n";
         }
-        setBvCandMap(candidates);
         return true;
-      }
-
-      // Update m_bvSolutionMap with weakened candidates
-      for (const auto& kv : candidates) {
-        m_bvSolutionMap[kv.first] = conjoin(kv.second, m_efac);
       }
 
       // Final check: Try with weakened candidates against all rules
