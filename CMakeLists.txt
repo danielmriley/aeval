@@ -162,6 +162,9 @@ if ("${CMAKE_CXX_COMPILER_ID}" MATCHES "GNU")
   add_definitions( -Wno-unused-local-typedefs)
 endif ()
 
+# Suppress all compiler warnings
+add_compile_options(-w)
+
 # add the include directory from the build tree
 include_directories(BEFORE ${CMAKE_CURRENT_BINARY_DIR}/include)
 
