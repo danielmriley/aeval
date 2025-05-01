@@ -34,7 +34,7 @@ def parse_args():
                       help='Benchmark directory (default if not in config)')
     parser.add_argument('--timeout', type=int, default=2,
                       help='Timeout in seconds (default if not in config)')
-    parser.add_argument('--flags', default='--bv',
+    parser.add_argument('--flags', default='',
                       help='Additional flags (default if not in config)') 
     parser.add_argument('--pattern', default='*.smt2',
                       help='File pattern to match benchmarks')
