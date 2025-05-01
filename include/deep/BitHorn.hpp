@@ -651,7 +651,55 @@ namespace ufo
       }
     }
 
+    // --- New Method Added ---
     bool translateToBv()
+    {
+      if (debug >= 1)
+      {
+        outs() << "\n--- Translating LIA to BV (for serialization) ---\n";
+      }
+
+      // Ensure the input CHCs (stored in m_bvChcs initially) are treated as LIA
+      // The Lia2BvTranslator will handle the conversion based on the types it finds.
+      // It also detects original BV width if input.hasBV is true, which might be relevant
+      // if the input is mixed or already BV.
+
+      // Perform the translation using the Lia2BvTranslator
+      // The translate method takes the input CHCs (m_bvChcs) and returns the translated BV CHCs.
+      m_bvChcs = m_Lia2BvTranslator.translate(m_bvChcs);
+
+      // Check if translation produced a valid result (basic check)
+      if (m_bvChcs.decls.empty() && !m_bvChcs.chcs.empty()) {
+          if (debug >= 1) {
+              outs() << "  Error: LIA to BV translation resulted in CHCs with rules but no declarations.\n";
+          }
+          return false;
+      }
+
+      if (debug >= 2)
+      {
+        outs() << "  LIA to BV translation complete.\n";
+        if (debug >= 3) {
+            outs() << "    --- Translated BV System (m_bvChcs) ---\n";
+            m_bvChcs.print(true);
+            outs() << "    --- End Translated BV System ---\n";
+        }
+        outs() << "  Serializing translated BV CHCs...\n";
+      }
+
+      // Serialize the resulting BV CHCs
+      m_bvChcs.serialize(false); // Pass false to avoid adding .smt2 extension
+
+      if (debug >= 1)
+      {
+        outs() << "  Translation and serialization successful.\n";
+      }
+
+      return true;
+    }
+    // --- End New Method ---
+
+    bool translateToLia()
     {
       if (debug >= 1)
       {
@@ -812,7 +860,7 @@ namespace ufo
           outs() << "  Solve iteration: " << i << "\n";
         }
 
-        if (!translateToBv())
+        if (!translateToLia())
         {
           outs() << "Error: Failed during BV to LIA translation.\n";
           return false;
@@ -1532,17 +1580,18 @@ namespace ufo
       {
         outs() << "Translating LIA to BV for serialization.\n";
       }
+      // Call the newly implemented method
       if (!bh.translateToBv())
       {
         outs() << "Error translating LIA to BV\n";
         return 1;
       }
-      bh.getBvChcs().serialize(false);
+      // Serialization is now handled inside translateToBv
       if (debug >= 2)
       {
         outs() << "Serialized BV translation\n";
       }
-      return 0;
+      return 0; // Indicate success
     }
 
     return bh.solve(to);
