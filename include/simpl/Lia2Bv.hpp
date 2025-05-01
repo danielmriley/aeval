@@ -33,11 +33,14 @@ namespace ufo
         if (it != m_var_map.end())
             return it->second;
 
-        // Check if it's an integer constant variable before translating
-        if (!bind::isIntConst(var)) {
-             if (debug >= 3) outs() << "Kept non-Int var: " << *var << "\n";
+        // --- Fix: Check variable type, not if it's a constant literal ---
+        // Check if it's an integer variable based on its type
+        Expr varType = bind::typeOf(var);
+        if (!(isOpX<FAPP>(var) && varType && isOpX<INT_TY>(varType))) { 
+             if (debug >= 3) outs() << "Kept non-Int var: " << *var << " (type: " << (varType ? varType : Expr()) << ")\n";
              return var; // Keep non-integer vars as is
         }
+        // --- End Fix ---
             
         // Create BV variable using bv::bvConst
         Expr name = bind::fname(bind::fname(var)); // Get the name Expr
@@ -56,12 +59,15 @@ namespace ufo
         
         for (const auto &var : origVars)
         {
-            // Check if it's an integer variable before translating
-            if (!bind::isIntConst(var)) {
+            // --- Fix: Check variable type, not if it's a constant literal ---
+            // Check if it's an integer variable based on its type
+            Expr varType = bind::typeOf(var);
+            if (!(isOpX<FAPP>(var) && varType && isOpX<INT_TY>(varType))) {
                 translatedVars.push_back(var); // Keep non-Int vars
-                if (debug >= 3) outs() << "Kept non-Int invVar: " << *var << "\n";
+                if (debug >= 3) outs() << "Kept non-Int invVar: " << *var << " (type: " << (varType ? varType : Expr()) << ")\n";
                 continue;
             }
+            // --- End Fix ---
 
             // Use same translation logic as translateVar
             Expr name = bind::fname(bind::fname(var)); // Get name Expr
@@ -329,19 +335,35 @@ namespace ufo
         // 5. Handle WTO information 
         result.wtoDecls.clear();
         
-        // First translate all declarations and ensure they exist in the map
-        for (auto decl : input.wtoDecls) { // decl is the original full LIA declaration Expr
-          if (decl && !isOpX<TRUE>(decl)) {  // Only process valid declarations
-            auto it = m_decl_map.find(decl); // Find using original full decl
-            // It's possible a decl in wtoDecls is not in the main decls if simplified away
-            if (it != m_decl_map.end()) {
-                result.wtoDecls.push_back(it->second); // Store the translated full BV declaration Expr
-            } else if (decl->arg(0) != input.failDecl) { // Check name against failDecl name
-                 if (debug >= 1) outs() << "Warning: WTO decl " << *decl << " not found in map during LIA->BV translation.\n";
-                 // Decide how to handle this - skip or assert? Skipping for now.
-            }
+        // Iterate through the original LIA relation names in wtoDecls
+        for (auto liaRelName : input.wtoDecls) { // Assume liaRelName is the Expr representing the relation name (e.g., 'inv')
+
+          // Skip TRUE or failDecl names if they somehow end up here
+          if (!liaRelName || isOpX<TRUE>(liaRelName) || liaRelName == input.failDecl) {
+              if (debug >= 3) outs() << "Skipping WTO translation for special name: " << (liaRelName ? liaRelName : Expr()) << "\n";
+              continue;
+          }
+
+          // Find the original full LIA declaration using the name
+          Expr originalLiaDecl = input.getDeclByName(liaRelName);
+
+          if (!originalLiaDecl) {
+              // This can happen if the declaration was simplified away after WTO calculation
+              if (debug >= 1) outs() << "Warning: Original LIA declaration for WTO relation name '" << *liaRelName << "' not found in input.decls (likely simplified).\n";
+              continue; // Skip if the original declaration doesn't exist
+          }
+
+          // Find the translated full BV declaration in the map using the original full LIA decl as the key
+          auto it = m_decl_map.find(originalLiaDecl);
+          if (it != m_decl_map.end()) {
+              result.wtoDecls.push_back(it->second->arg(0)); // Store the translated relation NAME Expr
+              if (debug >= 3) outs() << "Mapped WTO LIA decl " << *originalLiaDecl << " to BV decl name " << *it->second->arg(0) << "\n";
+          } else {
+              // This case should ideally not happen if originalLiaDecl was found and translateDeclarations worked correctly.
+              if (debug >= 1) outs() << "Warning: Translated BV declaration for LIA decl '" << *originalLiaDecl << "' not found in m_decl_map.\n";
           }
         }
+
 
         // Clear both pointer lists before rebuilding
         result.wtoCHCs.clear();
@@ -372,10 +394,12 @@ namespace ufo
 
                 // Basic sanity check (optional but good)
                 #ifndef NDEBUG // Only include assertions in debug builds
+                // --- Modification: Handle TRUE and failDecl in assertions ---
                 Expr expectedTranslatedSrcName;
                 if (isOpX<TRUE>(origWtoRulePtr->srcRelation)) {
                     expectedTranslatedSrcName = mk<TRUE>(m_efac);
                 } else {
+                    // Only call getDeclByName for non-TRUE relations
                     Expr originalSrcDecl = input.getDeclByName(origWtoRulePtr->srcRelation); // Get original full decl by name
                     assert(originalSrcDecl && "Original WTO source declaration not found");
                     auto srcIt = m_decl_map.find(originalSrcDecl); // Find translated full decl
@@ -387,12 +411,14 @@ namespace ufo
                 if (origWtoRulePtr->dstRelation == input.failDecl) { // Compare names
                     expectedTranslatedDstName = result.failDecl; // Use result's failDecl name
                 } else {
+                    // Only call getDeclByName for non-failDecl relations
                     Expr originalDstDecl = input.getDeclByName(origWtoRulePtr->dstRelation); // Get original full decl by name
                     assert(originalDstDecl && "Original WTO destination declaration not found");
                     auto dstIt = m_decl_map.find(originalDstDecl); // Find translated full decl
                     assert(dstIt != m_decl_map.end() && "WTO Destination relation not found in decl_map");
                     expectedTranslatedDstName = dstIt->second->arg(0); // Get translated name
                 }
+                // --- End Modification ---
 
                 // Compare translated rule's name with expected translated name
                 assert(translatedRulePtr->srcRelation == expectedTranslatedSrcName && "WTO Source relation mismatch after LIA->BV translation");
@@ -521,6 +547,13 @@ namespace ufo
         output.invVars.clear();
         for (const auto &kv : input.invVars) // kv.first is relation name (Expr)
         {
+            // --- Fix: Skip special names like TRUE or failDecl ---
+            if (isOpX<TRUE>(kv.first) || kv.first == input.failDecl) {
+                if (debug >= 3) outs() << "Skipping invVar translation for special name: " << *kv.first << "\n";
+                continue;
+            }
+            // --- End Fix ---
+
             Expr originalDecl = input.getDeclByName(kv.first); // Find original full decl
             if (!originalDecl) {
                  if (debug >= 1) outs() << "Warning: Declaration for invVar " << *kv.first << " not found.\n";
@@ -539,6 +572,13 @@ namespace ufo
         output.invVarsPrime.clear();
         for (const auto &kv : input.invVarsPrime) // kv.first is relation name (Expr)
         {
+            // --- Fix: Skip special names like TRUE or failDecl ---
+            if (isOpX<TRUE>(kv.first) || kv.first == input.failDecl) {
+                 if (debug >= 3) outs() << "Skipping invVarPrime translation for special name: " << *kv.first << "\n";
+                 continue;
+            }
+            // --- End Fix ---
+
             Expr originalDecl = input.getDeclByName(kv.first); // Find original full decl
              if (!originalDecl) {
                  if (debug >= 1) outs() << "Warning: Declaration for invVarPrime " << *kv.first << " not found.\n";

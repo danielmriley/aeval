@@ -163,19 +163,37 @@ namespace ufo
         // 5. Handle WTO information
         result.wtoDecls.clear();
         
-        // First translate all declarations and ensure they exist in the map
-        for (auto decl : input.wtoDecls) { // decl is the original full declaration Expr
-          if (decl && !isOpX<TRUE>(decl)) {  // Only process valid declarations
-            auto it = m_decl_map.find(decl); // Find using original full decl
-             // It's possible a decl in wtoDecls is not in the main decls if simplified away
-            if (it != m_decl_map.end()) {
-                result.wtoDecls.push_back(it->second); // Store the translated full declaration Expr
-            } else if (decl != input.failDecl) { // Compare expressions directly instead of accessing arg(0) unsafely
-                 if (m_debug >= 1) outs() << "Warning: WTO decl " << *decl << " not found in map during BV->LIA translation.\n";
-                 // Decide how to handle this - skip or assert? Skipping for now.
-            }
+        // Iterate through the original BV relation names in wtoDecls
+        for (auto bvRelName : input.wtoDecls) { // Assume bvRelName is the Expr representing the relation name
+
+          // Skip TRUE or failDecl names
+          if (!bvRelName || isOpX<TRUE>(bvRelName) || bvRelName == input.failDecl) {
+              // --- Fix: Use Expr in ternary operator ---
+              if (m_debug >= 3) outs() << "Skipping WTO translation for special name: " << (bvRelName ? bvRelName : Expr()) << "\n";
+              // --- End Fix ---
+              continue;
+          }
+
+          // Find the original full BV declaration using the name
+          Expr originalBvDecl = input.getDeclByName(bvRelName);
+
+          if (!originalBvDecl) {
+              // This can happen if the declaration was simplified away after WTO calculation
+              if (m_debug >= 1) outs() << "Warning: Original BV declaration for WTO relation name '" << *bvRelName << "' not found in input.decls (likely simplified).\n";
+              continue; // Skip if the original declaration doesn't exist
+          }
+
+          // Find the translated full LIA declaration in the map using the original full BV decl as the key
+          auto it = m_decl_map.find(originalBvDecl);
+          if (it != m_decl_map.end()) {
+              result.wtoDecls.push_back(it->second->arg(0)); // Store the translated relation NAME Expr
+              if (m_debug >= 3) outs() << "Mapped WTO BV decl " << *originalBvDecl << " to LIA decl name " << *it->second->arg(0) << "\n";
+          } else {
+              // This case should ideally not happen if originalBvDecl was found and translateDeclarations worked correctly.
+              if (m_debug >= 1) outs() << "Warning: Translated LIA declaration for BV decl '" << *originalBvDecl << "' not found in m_decl_map.\n";
           }
         }
+
 
         // Clear both pointer lists before rebuilding
         result.wtoCHCs.clear(); 

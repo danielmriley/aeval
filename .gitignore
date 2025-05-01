@@ -8,6 +8,7 @@
 /dsa-seahorn/
 /crab-llvm/
 /bench_horn_bv_translated/
+/bench_horn_bv_translated_1/
 /.github/
 
 *.pyc
