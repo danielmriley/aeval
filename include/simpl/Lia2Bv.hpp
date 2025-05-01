@@ -5,6 +5,8 @@
 #include "ufo/Smt/EZ3.hh" // Include necessary headers
 #include "ufo/ExprBv.hh"
 #include "ufo/Expr.hpp"
+#include <cmath> // Needed for ceil and log2 (or manual calculation)
+#include <limits> // Needed for numeric_limits
 
 using namespace std;
 using namespace expr::op; // Include namespace for operators like TRUE, FALSE, etc.
@@ -75,6 +77,40 @@ namespace ufo
         }
         return translatedVars;
       }
+
+      // --- New Helper Method Added ---
+      // Rounds up to the nearest power of 2 if n > 4
+      unsigned int adjustWidth(unsigned int n)
+      {
+        if (n <= 4) {
+            return n; // Keep width if 4 or less
+        }
+        
+        // Check if n is already a power of 2
+        // (n & (n - 1)) == 0 handles n=0 incorrectly, but we ensured n > 4
+        if ((n > 0) && ((n & (n - 1)) == 0)) {
+            return n; // Already a power of 2
+        }
+
+        // Find the next power of 2
+        unsigned int p = 1;
+        // Use unsigned long long for intermediate to avoid overflow during shift
+        unsigned long long p_ll = 1; 
+        while (p_ll < n) {
+            p_ll <<= 1;
+            // Check if the result still fits in unsigned int
+            if (p_ll > std::numeric_limits<unsigned int>::max()) {
+                 if (debug >= 1) {
+                     outs() << "Warning: Power of 2 calculation overflowed for width " << n 
+                            << ". Returning original width.\n";
+                 }
+                 return n; // Return original width if overflow occurs
+            }
+        }
+        return static_cast<unsigned int>(p_ll);
+      }
+      // --- End New Helper Method ---
+
 
       // Add new helper methods for bitwidth calculation
       unsigned int binaryLog(mpz_class v)
@@ -147,13 +183,14 @@ namespace ufo
         // Ensure minimum width (e.g., 4 bits)
         maxWidth = std::max(maxWidth, (unsigned int)4);
 
-        // Optional: Round up to nearest power of 2 (common practice)
-        // unsigned int pow2 = 4;
-        // while (pow2 < maxWidth) pow2 *= 2;
-        // return pow2;
-        
-        // Or just return the calculated max width
-        return maxWidth;
+        // --- Modification: Round up to power of 2 if > 4 ---
+        unsigned int adjustedWidth = adjustWidth(maxWidth);
+        if (debug >= 3 && adjustedWidth != maxWidth) {
+            outs() << "Lia2Bv::findMinBitWidth(rules): Rounded maxWidth " << maxWidth 
+                   << " up to power of 2: " << adjustedWidth << "\n";
+        }
+        return adjustedWidth;
+        // --- End Modification ---
       }
 
       // --- New Overload Added ---
@@ -185,7 +222,18 @@ namespace ufo
           };
 
           processExpr(e);
-          return exprMaxWidth; // Just return width needed for constants in 'e'
+          
+          // Ensure minimum width (e.g., 4 bits) before rounding
+          exprMaxWidth = std::max(exprMaxWidth, (unsigned int)4);
+
+          // --- Modification: Round up to power of 2 if > 4 ---
+          unsigned int adjustedWidth = adjustWidth(exprMaxWidth);
+          if (debug >= 3 && adjustedWidth != exprMaxWidth) {
+              outs() << "Lia2Bv::findMinBitWidth(Expr): Rounded exprMaxWidth " << exprMaxWidth 
+                     << " up to power of 2: " << adjustedWidth << "\n";
+          }
+          return adjustedWidth;
+          // --- End Modification ---
       }
       // --- End New Overload ---
 
@@ -234,12 +282,13 @@ namespace ufo
 
 
         // Calculate minimum required bitwidth based on constants in the input LIA CHCs
+        // This now incorporates the power-of-2 rounding logic.
         unsigned const_width = findMinBitWidth(input.chcs);
         // --- Modification: Use max of const_width and original_bv_width ---
         m_width = std::max({const_width, m_original_bv_width, (unsigned)4}); // Ensure at least 4
         
         if (debug >= 2) {
-          outs() << "Lia2Bv::translate(CHCs): Width from constants: " << const_width 
+          outs() << "Lia2Bv::translate(CHCs): Width from constants (adjusted): " << const_width 
                  << ", Original BV width: " << m_original_bv_width 
                  << ". Using final initial width: " << m_width << "\n";
         }
@@ -380,11 +429,12 @@ namespace ufo
         unsigned target_width = width;     // Start with the explicitly provided width
 
         if (target_width == 0) { // If no width was provided by the caller
-            unsigned required_width = findMinBitWidth(e); // Calculate width needed for constants in this specific expression 'e'
+            // Calculate width needed for constants in 'e', rounded up if > 4
+            unsigned required_width = findMinBitWidth(e); 
             // Use the maximum of the width required by 'e', the default width calculated from the original CHCs, and the original BV width.
             target_width = std::max({required_width, original_width, m_original_bv_width}); 
             if (debug >= 2) {
-                 outs() << "Lia2Bv::translateExpr: No width provided. Calculated required: " << required_width 
+                 outs() << "Lia2Bv::translateExpr: No width provided. Calculated required (adjusted): " << required_width 
                         << ", CHC default: " << original_width 
                         << ", Original BV: " << m_original_bv_width 
                         << ". Using target width: " << target_width << "\n";
@@ -392,9 +442,16 @@ namespace ufo
         } else {
              // If width > 0, the caller explicitly requested a width.
              // Ensure it's not smaller than the original BV width, if one exists.
-             unsigned enforced_width = std::max(target_width, m_original_bv_width);
+             // Also round up the requested width if > 4
+             unsigned adjusted_requested_width = adjustWidth(target_width);
+             if (debug >= 3 && adjusted_requested_width != target_width) {
+                 outs() << "Lia2Bv::translateExpr: Rounded requested width " << target_width 
+                        << " up to power of 2: " << adjusted_requested_width << "\n";
+             }
+             unsigned enforced_width = std::max({adjusted_requested_width, m_original_bv_width, (unsigned)4}); // Ensure at least 4
              if (debug >= 2) {
                  outs() << "Lia2Bv::translateExpr: Width provided: " << width 
+                        << " (adjusted requested: " << adjusted_requested_width << ")"
                         << ", Original BV: " << m_original_bv_width 
                         << ". Using target width: " << enforced_width << "\n";
              }
