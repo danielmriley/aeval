@@ -26,7 +26,8 @@ def parse_args():
     parser.add_argument('--config', 
                       help='JSON config file with multiple test configurations')
     parser.add_argument('--test',
-                      help='Name of specific test configuration to run from config file')
+                      action='append', # Allow multiple --test arguments
+                      help='Name of specific test configuration(s) to run from config file')
     parser.add_argument('--tool', default='./tools/deep/freqhorn',
                       help='Path to the FreqHorn executable (default if not in config)')
     parser.add_argument('--benchmarks', default='../bench_horn_bv_translated/',
@@ -56,12 +57,19 @@ def load_configs(config_file, default_args):
     with open(config_file) as f:
         all_configs = json.load(f)['configs']
     
-    # If test name specified, filter configs
+    # If test names specified, filter configs
     if default_args.test:
-        all_configs = [c for c in all_configs if c['name'] == default_args.test]
+        # Filter configs to include only those whose names are in the default_args.test list
+        specified_tests = set(default_args.test)
+        all_configs = [c for c in all_configs if c['name'] in specified_tests]
         if not all_configs:
-            raise ValueError(f"Test configuration '{default_args.test}' not found in config file")
-    
+            raise ValueError(f"None of the specified test configurations {list(specified_tests)} found in config file")
+        # Check if all specified tests were found
+        found_tests = {c['name'] for c in all_configs}
+        missing_tests = specified_tests - found_tests
+        if missing_tests:
+             print(f"Warning: The following specified test configurations were not found: {list(missing_tests)}")
+
     # Fill in defaults for any missing values
     for config in all_configs:
         config.setdefault('tool', default_args.tool)
