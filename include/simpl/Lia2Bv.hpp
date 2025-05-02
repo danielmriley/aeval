@@ -691,6 +691,7 @@ namespace ufo
         }
 
         // Handle LIA arithmetic operations -> BV operations (signed)
+        e = normalizePositive(e, m_efac, debug); // Normalize to remove unnecessary negations
         if (isOpX<PLUS>(e))
         {
           // Check for patterns that can be converted to BVSUB
