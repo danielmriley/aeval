@@ -4029,132 +4029,7 @@ namespace ufo
     return disjoin(newDsjs, efac);
   }
 
-  inline static Expr normalizeAtom(Expr fla, ExprVector& intVars)
-  {
-    if (isOp<ComparissonOp>(fla) && isNumeric(fla->left()))
-    {
-      Expr lhs = fla->left();
-      Expr rhs = fla->right();
-
-      ExprVector all;
-      ExprVector allrhs;
-
-      getAddTerm(lhs, all);
-      getAddTerm(rhs, allrhs);
-      for (auto & a : allrhs)
-      {
-        all.push_back(additiveInverse(a));
-      }
-      ExprSet newlhs;
-      for (auto &v : intVars)
-      {
-        cpp_int coef = 0;
-        string s1 = lexical_cast<string>(v);
-        for (auto it = all.begin(); it != all.end();)
-        {
-          if (!contains(*it, v)) { ++it; continue; }
-          string s2 = lexical_cast<string>(*it);
-
-          if (s1 == s2)
-          {
-            coef++;
-            it = all.erase(it);
-          }
-          else if (isOpX<UN_MINUS>(*it))
-          {
-            string s3 = lexical_cast<string>((*it)->left());
-            if (s1 == s3)
-            {
-              coef--;
-              it = all.erase(it);
-            }
-            else
-            {
-              ++it;
-            }
-          }
-          else if (isOpX<MULT>(*it))
-          {
-            ExprVector ops;
-            getMultOps (*it, ops);
-
-            cpp_int c = 1;
-            bool success = true;
-            for (auto & a : ops)
-            {
-              if (s1 == lexical_cast<string>(a))
-              {
-                // all good!
-              }
-              else if (isOpX<MPZ>(a))
-              {
-                c = c * lexical_cast<cpp_int>(a);
-              }
-              else
-              {
-                ++it;
-                success = false;
-                break;
-              }
-            }
-            if (success)
-            {
-              coef += c;
-              it = all.erase(it);
-            }
-          }
-          else
-          {
-            ++it;
-          }
-        }
-        if (coef != 0) newlhs.insert(mk<MULT>(mkMPZ(coef, fla->getFactory()), v));
-      }
-
-      bool success = true;
-      cpp_int intconst = 0;
-
-      for (auto &e : all)
-      {
-        if (isOpX<MPZ>(e))
-        {
-          intconst += lexical_cast<cpp_int>(e);
-        }
-        else if (isOpX<MULT>(e))
-        {
-          // GF: sometimes it fails (no idea why)
-          cpp_int thisTerm = 1;
-          for (auto it = e->args_begin (), end = e->args_end (); it != end; ++it)
-          {
-            if (isOpX<MPZ>(*it))
-              thisTerm *= lexical_cast<cpp_int>(*it);
-            else
-              success = false;
-          }
-          intconst += thisTerm;
-        }
-        else
-        {
-          success = false;
-        }
-      }
-
-      if (success && newlhs.size() == 0)
-      {
-        return (evaluateCmpConsts(fla, 0, -intconst)) ? mk<TRUE>(fla->getFactory()) :
-                                                        mk<FALSE>(fla->getFactory());
-      }
-
-      if (success)
-      {
-        Expr pl = (newlhs.size() == 1) ? *newlhs.begin(): mknary<PLUS>(newlhs);
-        Expr c = mkMPZ (-intconst, fla->getFactory());
-        return reBuildCmp(fla, pl, c);
-      }
-    }
-    return fla;
-  }
-
+  // Helper function to compute GCD of two numbers
   cpp_int gcd(cpp_int x, cpp_int y)
   {
     if (x == 0)
@@ -4162,13 +4037,14 @@ namespace ufo
     return gcd(y % x, x);
   }
 
+  // Helper function to compute GCD of a vector of numbers
   cpp_int gcd(vector<cpp_int> v)
   {
     cpp_int res = 0;
     if (!v.empty())
     {
       res = v[0];
-      for (int i = 1; i < v.size(); i++)
+      for (size_t i = 1; i < v.size(); i++)
       {
         res = gcd(v[i], res);
         if (res == 1)
@@ -4178,168 +4054,214 @@ namespace ufo
     return res;
   }
 
+  // Helper function to simplify a vector of coefficients by their GCD
   void simplifyVec(vector<cpp_int> &v, cpp_int g)
   {
-    if (!v.empty())
+    if (!v.empty() && g != 0)
     {
-      for (int i = 0; i < v.size(); i++)
+      for (size_t i = 0; i < v.size(); i++)
       {
-        v[i] = v[i] / g;
+        v[i] /= g;
       }
     }
   }
 
-  // follows similar procedure to normalizeAtom above but will set the lhs to lhsVar
-  // and the rhs to the remaining expr.
-  inline static Expr normalizeAtom(Expr fla, ExprVector &intVars, Expr lhsVar)
+  // Combined normalizeAtom method
+  inline static Expr normalizeAtom(Expr fla, ExprVector &intVars, Expr lhsVar = nullptr)
   {
-    // Handles cases of lhsVar being specified and when one is not specified.
-    // Normalizes with consts on the RHS in all cases except when lhsVar coefs add to zero.
-    // then the form is 0 = ...
-    fla = simplifyArithm(fla);
     if (isOp<ComparissonOp>(fla) && isNumeric(fla->left()))
     {
       Expr lhs = fla->left();
       Expr rhs = fla->right();
 
-      // if(isOpX<MULT>(lhs) || isOpX<MULT>(rhs)) {
-      //   return fla;
-      // }
-
-      bool nullvar = false;
-      bool isEqOp = isOpX<EQ>(fla);
-
-      if (lhsVar == 0)
-      {
-        nullvar = true;
-        lhsVar = mkMPZ(0, fla->getFactory()); // should have type associated with it INT.
-        lhs = mk<PLUS>(lhs, lhsVar);
-      }
-
-      bool onLhs = contains(lhs, lhsVar);
-      bool onRhs = contains(rhs, lhsVar);
-      if (!onLhs && !onRhs)
-        return normalizeAtom(fla, intVars);
-
-      ExprVector lhsVec;
+      // Collect all terms from LHS and RHS
       ExprVector all;
-      getAddTerm(lhs, lhsVec);
-      getAddTerm(rhs, all);
-
-      for (auto &a : lhsVec)
+      getAddTerm(lhs, all);
+      ExprVector allrhs;
+      getAddTerm(rhs, allrhs);
+      for (auto &a : allrhs)
       {
         all.push_back(additiveInverse(a));
       }
 
-      vector<cpp_int> coefs;
-      map<Expr, cpp_int> allMap;
+      // Map to store coefficients for each variable and the constant
+      map<Expr, cpp_int> coefMap;
+      cpp_int constant = 0;
+
+      // Collect coefficients for variables and constant
       for (auto &e : all)
       {
-        cpp_int c = 1;
         if (isOpX<MPZ>(e))
         {
-          c = c * lexical_cast<cpp_int>(e);
-          allMap[mkMPZ(0, fla->getFactory())] += c;
+          constant += lexical_cast<cpp_int>(e);
+        }
+        else if (isOpX<UN_MINUS>(e) && isOpX<MPZ>(e->left()))
+        {
+          constant -= lexical_cast<cpp_int>(e->left());
         }
         else if (isOpX<MULT>(e))
         {
-          ExprVector ops;
-          getMultOps(e, ops);
-          for (auto &a : ops)
+          Expr coeff = nullptr;
+          Expr var = nullptr;
+          for (auto it = e->args_begin(), end = e->args_end(); it != end; ++it)
           {
-            if (isOpX<MPZ>(a))
-            {
-              c = c * lexical_cast<cpp_int>(a);
-              if (isOpX<MPZ>(e->right()))
-                allMap[mkMPZ(0, fla->getFactory())] += c;
-              else
-                allMap[e->right()] += c;
-            }
+            if (isOpX<MPZ>(*it))
+              coeff = *it;
+            else
+              var = *it;
+          }
+          if (coeff == nullptr)
+            coeff = mkMPZ(1, fla->getFactory());
+          if (var && find(intVars.begin(), intVars.end(), var) != intVars.end())
+          {
+            coefMap[var] += lexical_cast<cpp_int>(coeff);
+          }
+          else
+          {
+            constant += lexical_cast<cpp_int>(coeff);
           }
         }
-        else if (isOpX<UN_MINUS>(e))
+        else if (isOpX<UN_MINUS>(e) && isOpX<MULT>(e->left()))
         {
-          allMap[additiveInverse(e)] += -1;
+          Expr mult = e->left();
+          Expr coeff = nullptr;
+          Expr var = nullptr;
+          for (auto it = mult->args_begin(), end = mult->args_end(); it != end; ++it)
+          {
+            if (isOpX<MPZ>(*it))
+              coeff = *it;
+            else
+              var = *it;
+          }
+          if (coeff == nullptr)
+            coeff = mkMPZ(1, fla->getFactory());
+          if (var && find(intVars.begin(), intVars.end(), var) != intVars.end())
+          {
+            coefMap[var] -= lexical_cast<cpp_int>(coeff);
+          }
+          else
+          {
+            constant -= lexical_cast<cpp_int>(coeff);
+          }
         }
-        else
+        else if (find(intVars.begin(), intVars.end(), e) != intVars.end())
         {
-          allMap[e] += 1;
+          coefMap[e] += 1;
+        }
+        else if (isOpX<UN_MINUS>(e) && find(intVars.begin(), intVars.end(), e->left()) != intVars.end())
+        {
+          coefMap[e->left()] -= 1;
         }
       }
 
-      coefs.clear();
-      for (auto &e : allMap)
+      // Simplify coefficients using GCD
+      vector<cpp_int> coefs;
+      for (auto &e : coefMap)
+      {
         coefs.push_back(e.second);
+      }
+      coefs.push_back(constant);
       cpp_int g = gcd(coefs);
       if (g > 1)
-        simplifyVec(coefs, g);
-      int w = 0;
-      for (auto &e : allMap)
       {
-        e.second = coefs[w++];
+        for (auto &e : coefMap)
+        {
+          e.second /= g;
+        }
+        constant /= g;
       }
 
-      bool flip = false;
-      if (allMap[lhsVar] > 0 && !nullvar)
+      if (lhsVar == nullptr)
       {
-        flip = true;
-        for (auto &e : allMap)
+        // Case 1: No lhsVar specified - all variables on LHS, constants on RHS
+        ExprVector newlhs;
+        for (auto &v : intVars)
         {
-          e.second = e.second * -1;
+          if (coefMap.count(v) && coefMap[v] != 0)
+          {
+            if (coefMap[v] == 1)
+              newlhs.push_back(v);
+            else
+              newlhs.push_back(mk<MULT>(mkMPZ(coefMap[v], fla->getFactory()), v));
+          }
         }
+        if (newlhs.empty())
+        {
+          // No variables, evaluate constant comparison
+          return evaluateCmpConsts(fla, 0, -constant) ? mk<TRUE>(fla->getFactory()) : mk<FALSE>(fla->getFactory());
+        }
+        Expr pl = (newlhs.size() == 1) ? newlhs[0] : mknary<PLUS>(newlhs);
+        Expr c = mkMPZ(-constant, fla->getFactory());
+        return reBuildCmp(fla, pl, c);
       }
-
-      ExprVector newRhs, newLhs;
-      for (auto &e : allMap)
+      else
       {
-        if (e.first == lhsVar && !nullvar)
+        // Case 2: lhsVar specified - isolate lhsVar on LHS
+        if (coefMap.count(lhsVar) == 0 || coefMap[lhsVar] == 0)
         {
-          if (e.second == 0)
-          { // LHS needs to have an Expr so set it to zero.
-            newLhs.push_back(mkMPZ(0, fla->getFactory()));
-          }
-          else
+          // Coefficient of lhsVar is zero, set LHS to 0
+          Expr zero = mkMPZ(0, fla->getFactory());
+          ExprVector newrhs;
+          for (auto &v : intVars)
           {
-            (e.second == 1) ? newLhs.push_back(additiveInverse(e.first))
-                            : newLhs.push_back(additiveInverse(mk<MULT>(mkMPZ(e.second, fla->getFactory()), e.first)));
+            if (coefMap.count(v) && coefMap[v] != 0)
+            {
+              if (coefMap[v] == 1)
+                newrhs.push_back(v);
+              else
+                newrhs.push_back(mk<MULT>(mkMPZ(coefMap[v], fla->getFactory()), v));
+            }
           }
-        }
-        else if (find(intVars.begin(), intVars.end(), e.first) != intVars.end())
-        {
-          if (e.second == 0)
-          {
-            continue;
-          }
-          (e.second == 1) ? newRhs.push_back(e.first)
-                          : newRhs.push_back(mk<MULT>(mkMPZ(e.second, fla->getFactory()), e.first));
+          if (constant != 0)
+            newrhs.push_back(mkMPZ(constant, fla->getFactory()));
+          if (newrhs.empty())
+            newrhs.push_back(mkMPZ(0, fla->getFactory()));
+          Expr r = (newrhs.size() == 1) ? newrhs[0] : mknary<PLUS>(newrhs);
+          return reBuildCmp(fla, zero, r);
         }
         else
         {
-          outs() << "e.first" << e.first << "\n";
-          assert(e.first == mkMPZ(0, fla->getFactory()));
-          if (nullvar)
+          // Isolate lhsVar on LHS with positive coefficient
+          cpp_int coef = coefMap[lhsVar];
+          bool flip = (coef > 0);
+          if (flip)
           {
-            newLhs.push_back(mkMPZ(-e.second, fla->getFactory()));
+            for (auto &e : coefMap)
+            {
+              e.second = -e.second;
+            }
+            constant = -constant;
+            coef = -coef;
           }
+          ExprVector newlhs;
+          if (coef == 1)
+            newlhs.push_back(lhsVar);
           else
+            newlhs.push_back(mk<MULT>(mkMPZ(coef, fla->getFactory()), lhsVar));
+          ExprVector newrhs;
+          for (auto &v : intVars)
           {
-            newRhs.push_back(mkMPZ(e.second, fla->getFactory()));
+            if (v != lhsVar && coefMap.count(v) && coefMap[v] != 0)
+            {
+              if (coefMap[v] == 1)
+                newrhs.push_back(v);
+              else if (coefMap[v] == -1)
+                newrhs.push_back(additiveInverse(v));
+              else
+                newrhs.push_back(mk<MULT>(mkMPZ(-coefMap[v], fla->getFactory()), v));
+            }
           }
+          if (constant != 0)
+            newrhs.push_back(mkMPZ(-constant, fla->getFactory()));
+          if (newrhs.empty())
+            newrhs.push_back(mkMPZ(0, fla->getFactory()));
+          Expr l = (newlhs.size() == 1) ? newlhs[0] : mknary<PLUS>(newlhs);
+          Expr r = (newrhs.size() == 1) ? newrhs[0] : mknary<PLUS>(newrhs);
+          if (flip && !isOpX<EQ>(fla))
+            return reBuildCmpSym(fla, r, l);
+          return reBuildCmp(fla, l, r);
         }
       }
-      if (newRhs.size() == 0)
-      {
-        newRhs.push_back(mkMPZ(0, fla->getFactory()));
-      }
-      Expr r = (newRhs.size() == 1) ? *newRhs.begin() : mknary<PLUS>(newRhs);
-      Expr l = (newLhs.size() == 1) ? *newLhs.begin() : mknary<PLUS>(newLhs);
-
-      if (nullvar)
-        return reBuildCmp(fla, additiveInverse(r), additiveInverse(l));
-      if (flip && !isEqOp)
-        return reBuildCmpSym(fla, r, l);
-      else
-        return reBuildCmp(fla, l, r);
     }
     return fla;
   }

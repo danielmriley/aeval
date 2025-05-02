@@ -191,8 +191,8 @@ def run_config(config, dirs, timestamp, position):
     results = []
     
     # Run benchmarks sequentially within this config's process
-    # Use tqdm to show progress for this specific config
-    print(f"\nStarting configuration '{config['name']}' ({len(bench_files)} benchmarks)...") # Add print statement here
+    # Restore the print statement and the tqdm wrapper
+    print(f"\nStarting configuration '{config['name']}' ({len(bench_files)} benchmarks)...") # RESTORE THIS LINE
     for args in tqdm(run_args, 
                      total=len(run_args), 
                      unit="test",
@@ -315,6 +315,7 @@ def main():
     # Use ProcessPoolExecutor to run configurations in parallel
     with concurrent.futures.ProcessPoolExecutor(max_workers=max_workers) as executor:
         # Submit all config runs to the executor, passing the position index (idx + 1)
+        # This position is now used by the inner tqdm loop in run_config
         future_to_config = {executor.submit(run_config, config, dirs, timestamp, idx + 1): config['name'] 
                             for idx, config in enumerate(configs)}
         

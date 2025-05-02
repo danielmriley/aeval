@@ -10,6 +10,9 @@
 
 #include <cmath>
 #include <vector>
+#include <numeric> // For std::iota
+#include <stdexcept> // For exceptions
+#include <iomanip> // For printing doubles
 #include <algorithm>
 
 #include "Horn.hpp"
@@ -23,10 +26,11 @@ using namespace boost::multiprecision;
 typedef boost::multiprecision::cpp_int CPPINT;
 typedef boost::multiprecision::cpp_rational RATIONAL;
 typedef vector<vector<RATIONAL>> matrix;
+typedef vector<vector<double>> matrix_double; // For linear regression
 
 namespace ufo
 {
-  class basisFinder
+  class BasisFinder
   {
   private:
     int numVars;
@@ -334,7 +338,7 @@ namespace ufo
     }
 
   public:
-    basisFinder(matrix &_A, int dbg = 0) : A(_A), debug(dbg)
+    BasisFinder(matrix &_A, int dbg = 0) : A(_A), debug(dbg)
     {
       if (A.empty())
       {
@@ -396,7 +400,446 @@ namespace ufo
 
       return basis;
     }
-  }; // End class basisFinder
+  }; // End class BasisFinder
+
+
+  // --- Updated LinearRegressor Class ---
+  class LinearRegressor
+  {
+  private:
+      vector<RATIONAL> coefficients; // Use RATIONAL
+      int debug;
+      const int STRASSEN_THRESHOLD = 64; // Threshold for switching to naive multiplication
+
+      // --- Matrix Operations for RATIONAL matrices ---
+
+      // Naive matrix multiplication (for base case and smaller matrices)
+      matrix multiply_naive(const matrix& A, const matrix& B) {
+          if (A.empty() || B.empty()) return {};
+          size_t rowsA = A.size();
+          size_t colsA = A[0].size();
+          size_t rowsB = B.size();
+          size_t colsB = B[0].size();
+
+          if (colsA != rowsB) {
+              throw std::runtime_error("Matrix dimensions mismatch for naive multiplication");
+          }
+
+          matrix C(rowsA, vector<RATIONAL>(colsB, 0));
+          for (size_t i = 0; i < rowsA; ++i) {
+              for (size_t j = 0; j < colsB; ++j) {
+                  for (size_t k = 0; k < colsA; ++k) {
+                      C[i][j] += A[i][k] * B[k][j];
+                  }
+              }
+          }
+          return C;
+      }
+
+      // Matrix addition: C = A + B
+      void add(matrix& C, const matrix& A, const matrix& B) {
+          size_t n = A.size();
+          for (size_t i = 0; i < n; ++i) {
+              for (size_t j = 0; j < n; ++j) {
+                  C[i][j] = A[i][j] + B[i][j];
+              }
+          }
+      }
+
+      // Matrix subtraction: C = A - B
+      void subtract(matrix& C, const matrix& A, const matrix& B) {
+          size_t n = A.size();
+          for (size_t i = 0; i < n; ++i) {
+              for (size_t j = 0; j < n; ++j) {
+                  C[i][j] = A[i][j] - B[i][j];
+              }
+          }
+      }
+
+      // Partition matrix M into four sub-matrices A, B, C, D
+      void partition(const matrix& M, matrix& A, matrix& B, matrix& C, matrix& D, int half_size) {
+          for (int i = 0; i < half_size; ++i) {
+              for (int j = 0; j < half_size; ++j) {
+                  A[i][j] = M[i][j];
+                  B[i][j] = M[i][j + half_size];
+                  C[i][j] = M[i + half_size][j];
+                  D[i][j] = M[i + half_size][j + half_size];
+              }
+          }
+      }
+
+      // Combine four sub-matrices A, B, C, D into matrix M
+      void combine(matrix& M, const matrix& A, const matrix& B, const matrix& C, const matrix& D, int half_size) {
+          for (int i = 0; i < half_size; ++i) {
+              for (int j = 0; j < half_size; ++j) {
+                  M[i][j] = A[i][j];
+                  M[i][j + half_size] = B[i][j];
+                  M[i + half_size][j] = C[i][j];
+                  M[i + half_size][j + half_size] = D[i][j];
+              }
+          }
+      }
+
+       // Recursive Strassen multiplication
+      matrix multiply_strassen(const matrix& A, const matrix& B) {
+          size_t n = A.size();
+          matrix C(n, vector<RATIONAL>(n));
+
+          // Base case
+          if (n <= STRASSEN_THRESHOLD) {
+              return multiply_naive(A, B);
+          }
+
+          int half_size = n / 2;
+
+          // Allocate sub-matrices
+          matrix A11(half_size, vector<RATIONAL>(half_size));
+          matrix A12(half_size, vector<RATIONAL>(half_size));
+          matrix A21(half_size, vector<RATIONAL>(half_size));
+          matrix A22(half_size, vector<RATIONAL>(half_size));
+          matrix B11(half_size, vector<RATIONAL>(half_size));
+          matrix B12(half_size, vector<RATIONAL>(half_size));
+          matrix B21(half_size, vector<RATIONAL>(half_size));
+          matrix B22(half_size, vector<RATIONAL>(half_size));
+
+          // Partition A and B
+          partition(A, A11, A12, A21, A22, half_size);
+          partition(B, B11, B12, B21, B22, half_size);
+
+          // Temporary matrices for intermediate results
+          matrix temp1(half_size, vector<RATIONAL>(half_size));
+          matrix temp2(half_size, vector<RATIONAL>(half_size));
+
+          // Calculate Strassen products P1-P7 recursively
+          subtract(temp1, B12, B22); // S1 = B12 - B22
+          matrix P1 = multiply_strassen(A11, temp1); // P1 = A11 * S1
+
+          add(temp1, A11, A12); // S2 = A11 + A12
+          matrix P2 = multiply_strassen(temp1, B22); // P2 = S2 * B22
+
+          add(temp1, A21, A22); // S3 = A21 + A22
+          matrix P3 = multiply_strassen(temp1, B11); // P3 = S3 * B11
+
+          subtract(temp1, B21, B11); // S4 = B21 - B11
+          matrix P4 = multiply_strassen(A22, temp1); // P4 = A22 * S4
+
+          add(temp1, A11, A22); // S5 = A11 + A22
+          add(temp2, B11, B22); // S6 = B11 + B22
+          matrix P5 = multiply_strassen(temp1, temp2); // P5 = S5 * S6
+
+          subtract(temp1, A12, A22); // S7 = A12 - A22
+          add(temp2, B21, B22);      // S8 = B21 + B22
+          matrix P6 = multiply_strassen(temp1, temp2); // P6 = S7 * S8
+
+          subtract(temp1, A11, A21); // S9 = A11 - A21
+          add(temp2, B11, B12);      // S10 = B11 + B12
+          matrix P7 = multiply_strassen(temp1, temp2); // P7 = S9 * S10
+
+          // Calculate result quadrants C11, C12, C21, C22
+          matrix C11(half_size, vector<RATIONAL>(half_size));
+          matrix C12(half_size, vector<RATIONAL>(half_size));
+          matrix C21(half_size, vector<RATIONAL>(half_size));
+          matrix C22(half_size, vector<RATIONAL>(half_size));
+
+          // C11 = P5 + P4 - P2 + P6
+          add(temp1, P5, P4);
+          subtract(temp2, temp1, P2);
+          add(C11, temp2, P6);
+
+          // C12 = P1 + P2
+          add(C12, P1, P2);
+
+          // C21 = P3 + P4
+          add(C21, P3, P4);
+
+          // C22 = P5 + P1 - P3 - P7
+          add(temp1, P5, P1);
+          subtract(temp2, temp1, P3);
+          subtract(C22, temp2, P7);
+
+          // Combine result quadrants into C
+          combine(C, C11, C12, C21, C22, half_size);
+
+          return C;
+      }
+
+      // Helper to find next power of 2
+      int nextPowerOf2(int n) {
+          int power = 1;
+          while (power < n) {
+              power *= 2;
+          }
+          return power;
+      }
+
+      // Pad matrix with zeros
+      matrix pad(const matrix& M, int new_size) {
+          size_t rows = M.size();
+          size_t cols = rows > 0 ? M[0].size() : 0;
+          matrix Padded(new_size, vector<RATIONAL>(new_size, 0));
+          for (size_t i = 0; i < rows; ++i) {
+              for (size_t j = 0; j < cols; ++j) {
+                  Padded[i][j] = M[i][j];
+              }
+          }
+          return Padded;
+      }
+
+      // Unpad matrix
+      matrix unpad(const matrix& M, int orig_rows, int orig_cols) {
+          matrix Unpadded(orig_rows, vector<RATIONAL>(orig_cols));
+          for (int i = 0; i < orig_rows; ++i) {
+              for (int j = 0; j < orig_cols; ++j) {
+                  Unpadded[i][j] = M[i][j];
+              }
+          }
+          return Unpadded;
+      }
+
+
+      matrix transpose(const matrix& A) { // Input/Output is matrix (RATIONAL)
+          if (A.empty()) return {};
+          size_t rows = A.size();
+          size_t cols = A[0].size();
+          matrix T(cols, vector<RATIONAL>(rows)); // Use RATIONAL
+          for (size_t i = 0; i < rows; ++i) {
+              for (size_t j = 0; j < cols; ++j) {
+                  T[j][i] = A[i][j];
+              }
+          }
+          return T;
+      }
+
+      // Main multiply function using Strassen
+      matrix multiply(const matrix& A, const matrix& B) {
+           if (A.empty() || B.empty()) return {};
+           size_t rowsA = A.size();
+           size_t colsA = A[0].size();
+           size_t rowsB = B.size();
+           size_t colsB = B[0].size();
+
+           if (colsA != rowsB) {
+               throw std::runtime_error("Matrix dimensions mismatch for multiplication");
+           }
+
+           // For Strassen, we ideally work with square matrices.
+           // Find max dimension and pad to next power of 2.
+           int max_dim = std::max({rowsA, colsA, rowsB, colsB});
+           int padded_size = nextPowerOf2(max_dim);
+
+           matrix APadded = pad(A, padded_size);
+           matrix BPadded = pad(B, padded_size);
+
+           matrix CPadded = multiply_strassen(APadded, BPadded);
+
+           // Unpad the result to the original expected size (rowsA x colsB)
+           return unpad(CPadded, rowsA, colsB);
+      }
+
+
+      // Inversion using Gaussian elimination with RATIONAL
+      matrix invert(matrix A) { // Input/Output is matrix (RATIONAL)
+          size_t n = A.size();
+          if (n == 0 || A[0].size() != n) {
+              throw std::runtime_error("Matrix must be square for inversion");
+          }
+
+          matrix I(n, vector<RATIONAL>(n, 0)); // Use RATIONAL
+          for (size_t i = 0; i < n; ++i) I[i][i] = 1;
+
+          for (size_t i = 0; i < n; ++i) {
+              // Find pivot (row with largest absolute value in current column)
+              size_t pivot = i;
+              for (size_t j = i + 1; j < n; ++j) {
+                  // Using abs() for rationals
+                  if (boost::multiprecision::abs(A[j][i]) > boost::multiprecision::abs(A[pivot][i])) {
+                      pivot = j;
+                  }
+              }
+              std::swap(A[i], A[pivot]);
+              std::swap(I[i], I[pivot]);
+
+              // Check for singularity (pivot is zero)
+              if (A[i][i] == 0) {
+                  return {}; // Return empty matrix indicating singular
+              }
+
+              // Normalize row i (make pivot 1)
+              RATIONAL div = A[i][i]; // Use RATIONAL
+              for (size_t j = 0; j < n; ++j) {
+                  A[i][j] /= div;
+                  I[i][j] /= div;
+              }
+
+              // Eliminate other rows
+              for (size_t j = 0; j < n; ++j) {
+                  if (i != j) {
+                      RATIONAL mult = A[j][i]; // Use RATIONAL
+                      if (mult == 0) continue; // Skip if element is already zero
+                      for (size_t k = 0; k < n; ++k) {
+                          A[j][k] -= mult * A[i][k];
+                          I[j][k] -= mult * I[i][k];
+                      }
+                  }
+              }
+          }
+          return I;
+      }
+
+      // Print RATIONAL matrix
+      void printMatrixR(const matrix& A, const string& label = "Matrix") {
+          if (debug < 2) return;
+          outs() << "== " << label << " ==\n";
+          if (A.empty()) {
+              outs() << "  (empty)\n";
+              return;
+          }
+          int n = A.size();
+          int m = A[0].size();
+          for (int i = 0; i < n; i++) {
+              outs() << "  ";
+              for (int j = 0; j < m; j++) {
+                  // Potentially simplify output for readability if needed
+                  outs() << A[i][j] << " ";
+              }
+              outs() << "\n";
+          }
+      }
+
+  public:
+      LinearRegressor(int dbg = 0) : debug(dbg) {}
+
+      // Performs linear regression: y = X * beta
+      // models_rational: rows are data points, columns are variables (using RATIONAL)
+      // y_col_idx: index of the dependent variable column
+      // Returns true on success, false on failure
+      bool performRegression(const matrix& models_rational, int y_col_idx) { // Input is matrix (RATIONAL)
+          coefficients.clear();
+          if (models_rational.empty()) return false;
+
+          size_t num_points = models_rational.size();
+          size_t num_vars_total = models_rational[0].size();
+
+          if (y_col_idx < 0 || y_col_idx >= num_vars_total) {
+              outs() << "Error: Invalid dependent variable index.\n";
+              return false;
+          }
+
+          size_t num_independent_vars = num_vars_total - 1;
+           if (num_points <= num_independent_vars) {
+               if (debug >= 1) outs() << "Warning: Not enough data points (" << num_points
+                                      << ") for regression with " << num_independent_vars
+                                      << " independent variables. Need > " << num_independent_vars << ".\n";
+              return false;
+          }
+
+          // Prepare X matrix (independent vars + intercept column) and y vector using RATIONAL
+          matrix X(num_points, vector<RATIONAL>(num_independent_vars + 1));
+          matrix y(num_points, vector<RATIONAL>(1));
+
+          for (size_t i = 0; i < num_points; ++i) {
+              y[i][0] = models_rational[i][y_col_idx];
+              int current_x_col = 0;
+              for (size_t j = 0; j < num_vars_total; ++j) {
+                  if (j != y_col_idx) {
+                      X[i][current_x_col++] = models_rational[i][j];
+                  }
+              }
+              X[i][num_independent_vars] = 1; // Intercept term (RATIONAL 1)
+          }
+
+          if (debug >= 2) {
+              printMatrixR(X, "X Matrix (Rational)");
+              printMatrixR(y, "y Vector (Rational)");
+          }
+
+          try {
+              matrix Xt = transpose(X);
+              printMatrixR(Xt, "X Transpose (Rational)");
+
+              matrix XtX = multiply(Xt, X); // Uses Strassen potentially
+              printMatrixR(XtX, "X_Transpose * X (Rational)");
+
+              matrix XtX_inv = invert(XtX); // Uses RATIONAL inversion
+               if (XtX_inv.empty()) {
+                   if (debug >= 1) outs() << "Warning: (X^T * X) matrix is singular, cannot perform regression.\n";
+                   return false;
+               }
+              printMatrixR(XtX_inv, "(X_Transpose * X)^-1 (Rational)");
+
+              matrix XtY = multiply(Xt, y); // Uses Strassen potentially
+              printMatrixR(XtY, "X_Transpose * y (Rational)");
+
+              matrix beta_matrix = multiply(XtX_inv, XtY); // Uses Strassen potentially
+              printMatrixR(beta_matrix, "Beta Coefficients Matrix (Rational)");
+
+              // Extract coefficients
+              coefficients.resize(beta_matrix.size());
+              for(size_t i = 0; i < beta_matrix.size(); ++i) {
+                  coefficients[i] = beta_matrix[i][0]; // Store RATIONAL coefficients
+              }
+
+              if (debug >= 1) {
+                  outs() << "Regression Coefficients (Beta - Rational): [";
+                  for(size_t i=0; i < coefficients.size(); ++i) {
+                      outs() << coefficients[i] << (i == coefficients.size() - 1 ? "" : ", ");
+                  }
+                  outs() << "]\n";
+              }
+              return true;
+
+          } catch (const std::exception& e) {
+              outs() << "Error during regression calculation: " << e.what() << "\n";
+              return false;
+          }
+      }
+
+      // Constructs an expression like y = c0*x0 + c1*x1 + ... + intercept using RATIONAL
+      Expr getRegressionExpr(const ExprVector& invVars, int y_col_idx, ExprFactory& efac) {
+          if (coefficients.empty()) return mk<TRUE>(efac);
+
+          size_t num_vars_total = invVars.size();
+          if (y_col_idx < 0 || y_col_idx >= num_vars_total) return mk<TRUE>(efac);
+
+          Expr y_var = invVars[y_col_idx];
+          ExprVector rhs_terms;
+
+          int coeff_idx = 0;
+          for (size_t i = 0; i < num_vars_total; ++i) {
+              if (i == y_col_idx) continue;
+
+              // Use RATIONAL coefficient directly
+              RATIONAL coeff_rat = coefficients[coeff_idx];
+              Expr coeff_expr = mkMPZ(numerator(coeff_rat), denominator(coeff_rat), efac);
+
+              if (numerator(coeff_rat) != 0) {
+                 rhs_terms.push_back(mk<MULT>(coeff_expr, invVars[i]));
+              }
+              coeff_idx++;
+          }
+
+          // Handle intercept (last coefficient)
+          if (coeff_idx < coefficients.size()) {
+             RATIONAL intercept_rat = coefficients[coeff_idx];
+             if (numerator(intercept_rat) != 0) {
+               rhs_terms.push_back(mkMPZ(numerator(intercept_rat), denominator(intercept_rat), efac));
+             }
+          }
+
+          Expr rhs_expr = mkplus(rhs_terms, efac);
+          Expr regression_eq = mk<EQ>(y_var, rhs_expr);
+
+          Expr norm_expr = normalize(regression_eq);
+
+          if (debug >= 1) {
+              outs() << "Generated Regression Equation (Rational): " << *norm_expr << "\n";
+          }
+
+          return norm_expr;
+      }
+  };
+  // --- End LinearRegressor Class ---
+
 
   class DataLearner2
   {
@@ -405,7 +848,7 @@ namespace ufo
     BndExpl bnd;
     ExprFactory &m_efac;
     map<Expr, matrix> basis;
-    map<Expr, vector<vector<double>>> models;
+    map<Expr, vector<vector<double>>> models; // Changed to matrix_double
     map<Expr, ExprVector> invVars;
     map<Expr, ExprSet> dataCands;
     vector<RATIONAL> firstRow;
@@ -417,7 +860,7 @@ namespace ufo
       if(debug >= 3) 
       {
         matrix A = doubleToRational(models[srcRel]);
-        basisFinder bf(A, debug);
+        BasisFinder bf(A, debug);
         bf.printMatrix(A);
       }
 
@@ -570,40 +1013,65 @@ namespace ufo
       dataCands[srcRel].insert(cands.begin(), cands.end());
     }
 
-    matrix doubleToRational(vector<vector<double>> models)
+    matrix doubleToRational(const matrix_double& models_double) // Updated signature
     {
       matrix A;
-      for (int i = 0; i < models.size(); i++)
+      if (models_double.empty()) return A;
+      for (int i = 0; i < models_double.size(); i++)
       {
         vector<RATIONAL> temp;
         temp.push_back(static_cast<RATIONAL>(1));
-        for (int j = 0; j < models[0].size(); j++)
+        for (int j = 0; j < models_double[0].size(); j++)
         {
-          temp.push_back(static_cast<RATIONAL>(models[i][j]));
+          // Handle potential precision issues or provide better conversion if needed
+          temp.push_back(static_cast<RATIONAL>(models_double[i][j]));
         }
         A.push_back(temp);
       }
       return A;
     }
 
+    // Helper to convert double matrix to rational matrix for regression
+    matrix doubleToRationalForRegression(const matrix_double& models_double)
+    {
+      matrix A;
+      if (models_double.empty()) return A;
+      size_t rows = models_double.size();
+      size_t cols = models_double[0].size();
+      A.resize(rows, vector<RATIONAL>(cols));
+      for (size_t i = 0; i < rows; i++)
+      {
+        for (size_t j = 0; j < cols; j++)
+        {
+          // Direct conversion, consider precision needs if required
+          A[i][j] = static_cast<RATIONAL>(models_double[i][j]);
+        }
+      }
+      return A;
+    }
+
+
     void computeData(Expr srcRel)
     {
-      matrix A = doubleToRational(models[srcRel]);
+      // Convert double models to rational for BasisFinder (includes leading 1)
+      matrix A_basis = doubleToRational(models[srcRel]);
 
-      if (A.empty())
+      if (A_basis.empty())
         return;
-      basisFinder bf(A, debug);
+      BasisFinder bf(A_basis, debug);
 
-      firstRow = *A.begin();
-      auto row = firstRow;
+      // Keep track of the first row if needed (already rational here)
+      firstRow = *A_basis.begin();
+      // auto row = firstRow; // This seems unused later, maybe remove?
 
-      if (row.empty())
-        return;
+      // if (row.empty()) // Check based on A_basis instead
+      //   return;
 
-      // dotProduct(srcRel, row);
+      // dotProduct(srcRel, row); // This seems to use only the first row, purpose unclear?
+
       // Now make cands from the reduced matrix.
-      basis[srcRel] = bf.findKernelBasis();
-      candsFromBasis(srcRel);
+      basis[srcRel] = bf.findKernelBasis(); // bf works on A_basis
+      candsFromBasis(srcRel); // Uses basis[srcRel]
     }
 
   public:
@@ -611,7 +1079,8 @@ namespace ufo
 
     boost::tribool connectPhase(Expr src, Expr dst, int k = 1,
                     Expr srcRel = NULL, Expr block = NULL, Expr invs = NULL,
-                    Expr preCond = NULL, bool doGJ = false, bool doConnect = false)
+                    Expr preCond = NULL, bool doGJ = false, bool doConnect = false,
+                    bool doRegression = false) // Added doRegression flag
       {
         // Get data matrix.
         // Refactor so that the matrix isn't built over and over.
@@ -632,9 +1101,57 @@ namespace ufo
       // firstRow = models[srcRel][0];
       if(doConnect) connectCands(srcRel);
       if(doGJ) computeData(srcRel); // Gauss Jordan Elimination method.
+      if(doRegression) computeLinearRegressionCands(srcRel); // Linear Regression method
 
       return res;
     }
+
+    // --- Updated method to compute linear regression candidates ---
+    void computeLinearRegressionCands(Expr srcRel) {
+        if (debug >= 1) outs() << "\n======== COMPUTE LINEAR REGRESSION (RATIONAL) ========\n";
+        if (models.find(srcRel) == models.end() || invVars.find(srcRel) == invVars.end()) {
+            if (debug >= 1) outs() << "No model or variables found for " << *srcRel << "\n";
+            return;
+        }
+
+        const matrix_double& model_data_double = models[srcRel]; // Still double from BndExpl
+        const ExprVector& variables = invVars[srcRel];
+
+        if (model_data_double.empty() || variables.empty()) {
+             if (debug >= 1) outs() << "Model data or variables are empty for " << *srcRel << "\n";
+            return;
+        }
+
+        size_t num_vars = variables.size();
+        if (num_vars < 2) {
+             if (debug >= 1) outs() << "Need at least 2 variables for linear regression.\n";
+            return; // Need at least one independent and one dependent variable
+        }
+
+        // Convert model data from double to rational for the regressor
+        matrix model_data_rational = doubleToRationalForRegression(model_data_double);
+
+        LinearRegressor regressor(debug);
+
+        // Try regressing each variable against the others using rational data
+        for (size_t y_idx = 0; y_idx < num_vars; ++y_idx) {
+            if (debug >= 1) outs() << "--- Regressing on variable: " << *variables[y_idx] << " (Rational) ---\n";
+            // Pass the rational matrix to performRegression
+            bool success = regressor.performRegression(model_data_rational, y_idx);
+            if (success) {
+                Expr cand_expr = regressor.getRegressionExpr(variables, y_idx, m_efac);
+                if (!isOpX<TRUE>(cand_expr)) { // Avoid adding trivial TRUE
+                   dataCands[srcRel].insert(cand_expr);
+                   if (debug >= 1) outs() << "Added regression candidate: " << *cand_expr << "\n";
+                }
+            } else {
+                 if (debug >= 1) outs() << "Regression failed for variable " << *variables[y_idx] << "\n";
+            }
+        }
+         if (debug >= 1) outs() << "=====================================================\n";
+    }
+    // --- End updated method ---
+
 
     ExprVector exprForRows(Expr srcRel)
     {
@@ -651,7 +1168,7 @@ namespace ufo
       return rowsExpr;
     }
 
-    boost::tribool computeData(Expr srcRel, map<Expr, ExprVector> &arrRanges, map<Expr, ExprSet> &constr)
+    boost::tribool computeData(Expr srcRel, map<Expr, ExprVector> &arrRanges, map<Expr, ExprSet> &constr, bool doRegression = false, bool doConnect = true)
     {
       if (debug >= 1)
         outs() << "\n======== COMPUTE DATA ========\n";
@@ -667,11 +1184,13 @@ namespace ufo
       }
 
       computeData(srcRel);
+      if(doRegression) computeLinearRegressionCands(srcRel); // Linear Regression method
+      if(doConnect) connectCands(srcRel); // Connect phase
 
       return res;
     }
 
-    boost::tribool computeDataPhase(Expr srcRel, Expr splitter, Expr invs, bool fwd, ExprSet &constr)
+    boost::tribool computeDataPhase(Expr srcRel, Expr splitter, Expr invs, bool fwd, ExprSet &constr, bool doRegression = false, bool doConnect = true)
     {
       if (debug >= 1)
         outs() << "\n======== COMPUTE DATA PHASE ========\n";
@@ -688,6 +1207,8 @@ namespace ufo
       }
 
       computeData(srcRel);
+      if(doRegression) computeLinearRegressionCands(srcRel); // Linear Regression method
+      if(doConnect) connectCands(srcRel); // Connect phase
 
       return res;
     }

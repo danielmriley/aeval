@@ -999,7 +999,7 @@ namespace ufo
       DataLearner dl(ruleManager, m_z3, to, printLog);
       vector<map<Expr, ExprSet>> poly;
       if (phaseGuard == NULL)
-      {
+    {
         // run at the beginning, compute data once
         map<Expr, ExprVector> m;
         getArrRanges(m);

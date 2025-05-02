@@ -2324,9 +2324,16 @@ namespace expr
       inline bool isRealConst (Expr v) { return isConst<REAL_TY> (v); }
       inline bool isAdtConst (Expr v) { return isConst<AD_TY> (v); }
 
+      
       Expr mkMPZ(boost::multiprecision::cpp_int a, ExprFactory& efac)
       {
         return mkTerm (mpz_class (boost::lexical_cast<std::string>(a)), efac);
+      }
+
+      Expr mkMPZ(boost::multiprecision::cpp_int n, boost::multiprecision::cpp_int d, ExprFactory& efac)
+      {
+        boost::multiprecision::cpp_int b = n / d; 
+        return mkMPZ(b, efac);
       }
 
       Expr mkMPZ(int a, ExprFactory& efac)

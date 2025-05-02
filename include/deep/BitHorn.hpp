@@ -21,6 +21,8 @@ namespace ufo
     SMTUtils u;
     Lia2BvTranslator m_Lia2BvTranslator;
     Bv2LiaTranslator m_Bv2LiaTranslator;
+    bool d2;
+    bool doReg;
     int debug;
     std::vector<ExprSet> m_learnedLemmas; // Stores learned lemmas per iteration
     unsigned m_original_bv_width = 0;
@@ -369,15 +371,17 @@ namespace ufo
     }
 
   public:
-    BitHorn(ExprFactory &efac, EZ3 &z3, CHCs &input, int _debug = 0) : m_efac(efac),
-                                                                       m_z3(z3),
-                                                                       m_liaChcs(new CHCs(efac, z3, _debug)),
-                                                                       m_bvChcs(input),
-                                                                       u(efac),
-                                                                       m_Lia2BvTranslator(efac, z3, 4, _debug),
-                                                                       m_Bv2LiaTranslator(efac, z3, 4, _debug),
-                                                                       debug(_debug),
-                                                                       m_learnedLemmas(1)
+    BitHorn(ExprFactory &efac, EZ3 &z3, CHCs &input, bool _d2, bool _doReg, int _debug = 0) : m_efac(efac),
+      m_z3(z3),
+      m_liaChcs(new CHCs(efac, z3, _debug)),
+      m_bvChcs(input),
+      u(efac),
+      m_Lia2BvTranslator(efac, z3, 4, _debug),
+      m_Bv2LiaTranslator(efac, z3, 4, _debug),
+      m_learnedLemmas(1),
+      d2(_d2),
+      doReg(_doReg),
+      debug(_debug)
     {
       if (debug >= 1)
       {
@@ -751,7 +755,7 @@ namespace ufo
                                                             freqs, aggp, mut, da,
                                                             doDisj, mbpEqs, dAllMbp,
                                                             dAddProp, dAddDat, dStrenMbp,
-                                                            dFwd, dRec, dGen, debug));
+                                                            dFwd, dRec, dGen, d2, doReg, debug));
 
       if (!solver)
       {
@@ -1359,7 +1363,7 @@ namespace ufo
                                bool freqs, bool aggp, int dat, int mut, bool doElim, bool doArithm,
                                bool doDisj, int doProp, int mbpEqs, bool dAllMbp, bool dAddProp,
                                bool dAddDat, bool dStrenMbp, int dFwd, bool dRec, bool dGenerous,
-                               bool dSee, bool ser, bool horn, bool serTrans, int debug)
+                               bool dSee, bool ser, bool horn, bool serTrans, bool d2, bool doReg, int debug)
   {
     ExprFactory efac;
     EZ3 z3(efac);
@@ -1377,7 +1381,7 @@ namespace ufo
       return 1;
     }
 
-    BitHorn bh(efac, z3, ruleManager, debug);
+    BitHorn bh(efac, z3, ruleManager, d2, doReg, debug);
 
     if (ser)
     {
