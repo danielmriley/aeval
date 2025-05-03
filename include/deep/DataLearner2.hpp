@@ -408,6 +408,25 @@ namespace ufo
   {
   private:
       vector<RATIONAL> coefficients; // Use RATIONAL
+      // Store the mapping of coefficient index to term type/variable indices
+      // 0: linear (var_idx), 1: square (var_idx), 2: interaction (var_idx1, var_idx2), 3: intercept
+      struct TermInfo {
+          int type; // 0: linear, 1: square, 2: interaction, 3: intercept
+          int idx1 = -1, idx2 = -1; // Original variable indices (relative to independent vars)
+
+          // Default constructor (optional, but good practice)
+          TermInfo() : type(-1), idx1(-1), idx2(-1) {}
+
+          // Constructor for intercept (type 3)
+          TermInfo(int t) : type(t), idx1(-1), idx2(-1) {}
+
+          // Constructor for linear (type 0) and square (type 1)
+          TermInfo(int t, int i1) : type(t), idx1(i1), idx2(-1) {}
+
+          // Constructor for interaction (type 2)
+          TermInfo(int t, int i1, int i2) : type(t), idx1(i1), idx2(i2) {}
+      };
+      vector<TermInfo> term_mapping;
       int debug;
       const int STRASSEN_THRESHOLD = 64; // Threshold for switching to naive multiplication
 
@@ -709,12 +728,14 @@ namespace ufo
   public:
       LinearRegressor(int dbg = 0) : debug(dbg) {}
 
-      // Performs linear regression: y = X * beta
+      // Performs linear regression: y = X * beta, potentially adding quadratic features
       // models_rational: rows are data points, columns are variables (using RATIONAL)
       // y_col_idx: index of the dependent variable column
+      // add_quadratic_terms: flag to enable adding x_i^2 and x_i*x_j terms
       // Returns true on success, false on failure
-      bool performRegression(const matrix& models_rational, int y_col_idx) { // Input is matrix (RATIONAL)
+      bool performRegression(const matrix& models_rational, int y_col_idx, bool add_quadratic_terms = true) { // Added add_quadratic_terms flag
           coefficients.clear();
+          term_mapping.clear();
           if (models_rational.empty()) return false;
 
           size_t num_points = models_rational.size();
@@ -726,49 +747,119 @@ namespace ufo
           }
 
           size_t num_independent_vars = num_vars_total - 1;
-           if (num_points <= num_independent_vars) {
-               if (debug >= 1) outs() << "Warning: Not enough data points (" << num_points
-                                      << ") for regression with " << num_independent_vars
-                                      << " independent variables. Need > " << num_independent_vars << ".\n";
-              return false;
+          if (num_independent_vars == 0) {
+               if (debug >= 1) outs() << "Warning: No independent variables for regression.\n";
+               return false; // Need at least one independent variable
           }
 
-          // Prepare X matrix (independent vars + intercept column) and y vector using RATIONAL
-          matrix X(num_points, vector<RATIONAL>(num_independent_vars + 1));
+          // --- Prepare initial X matrix (independent vars only) and y vector ---
+          matrix X_orig(num_points, vector<RATIONAL>(num_independent_vars));
           matrix y(num_points, vector<RATIONAL>(1));
+          vector<int> independent_var_indices; // Store original indices of independent vars
 
           for (size_t i = 0; i < num_points; ++i) {
               y[i][0] = models_rational[i][y_col_idx];
               int current_x_col = 0;
               for (size_t j = 0; j < num_vars_total; ++j) {
                   if (j != y_col_idx) {
-                      X[i][current_x_col++] = models_rational[i][j];
+                      X_orig[i][current_x_col++] = models_rational[i][j];
+                      if (i == 0) independent_var_indices.push_back(j); // Store indices on first pass
                   }
               }
-              X[i][num_independent_vars] = 1; // Intercept term (RATIONAL 1)
           }
 
+          // --- Augment X matrix with non-linear terms and intercept ---
+          size_t num_augmented_features = 0;
+          vector<vector<RATIONAL>> X_augmented_data(num_points); // Build row by row
+
+          // 1. Add Linear Terms
+          for(size_t j=0; j < num_independent_vars; ++j) {
+              term_mapping.push_back(TermInfo(0, (int)j)); // Use constructor
+              num_augmented_features++;
+          }
+
+          // 2. Add Quadratic Terms (if enabled)
+          if (add_quadratic_terms) {
+              // 2a. Squared terms (x_i^2)
+              for(size_t j=0; j < num_independent_vars; ++j) {
+                  term_mapping.push_back(TermInfo(1, (int)j)); // Use constructor
+                  num_augmented_features++;
+              }
+              // 2b. Interaction terms (x_i * x_j, i < j)
+              for(size_t j=0; j < num_independent_vars; ++j) {
+                  for (size_t k = j + 1; k < num_independent_vars; ++k) {
+                      term_mapping.push_back(TermInfo(2, (int)j, (int)k)); // Use constructor
+                      num_augmented_features++;
+                  }
+              }
+          }
+
+          // 3. Add Intercept Term placeholder
+          term_mapping.push_back(TermInfo(3)); // Use constructor
+          num_augmented_features++;
+
+          // Check if enough data points for the number of features
+          if (num_points <= num_augmented_features -1) { // Need points > features
+               if (debug >= 1) outs() << "Warning: Not enough data points (" << num_points
+                                      << ") for regression with " << num_augmented_features
+                                      << " features (including intercept). Need > " << num_augmented_features -1 << ".\n";
+              return false;
+          }
+
+
+          // Populate the augmented matrix data
+          for (size_t i = 0; i < num_points; ++i) {
+              X_augmented_data[i].resize(num_augmented_features);
+              int current_aug_col = 0;
+
+              // 1. Linear terms
+              for(size_t j=0; j < num_independent_vars; ++j) {
+                  X_augmented_data[i][current_aug_col++] = X_orig[i][j];
+              }
+
+              // 2. Quadratic terms (if enabled)
+              if (add_quadratic_terms) {
+                  // 2a. Squared terms
+                  for(size_t j=0; j < num_independent_vars; ++j) {
+                      X_augmented_data[i][current_aug_col++] = X_orig[i][j] * X_orig[i][j];
+                  }
+                  // 2b. Interaction terms
+                  for(size_t j=0; j < num_independent_vars; ++j) {
+                      for (size_t k = j + 1; k < num_independent_vars; ++k) {
+                          X_augmented_data[i][current_aug_col++] = X_orig[i][j] * X_orig[i][k];
+                      }
+                  }
+              }
+
+              // 3. Intercept term
+              X_augmented_data[i][current_aug_col++] = 1; // RATIONAL 1
+          }
+
+          // Create the final augmented matrix object
+          matrix X_augmented = X_augmented_data;
+
+
           if (debug >= 2) {
-              printMatrixR(X, "X Matrix (Rational)");
+              printMatrixR(X_augmented, "X Augmented Matrix (Rational)");
               printMatrixR(y, "y Vector (Rational)");
           }
 
           try {
-              matrix Xt = transpose(X);
-              printMatrixR(Xt, "X Transpose (Rational)");
+              matrix Xt = transpose(X_augmented); // Use augmented matrix
+              printMatrixR(Xt, "X_Augmented Transpose (Rational)");
 
-              matrix XtX = multiply(Xt, X); // Uses Strassen potentially
-              printMatrixR(XtX, "X_Transpose * X (Rational)");
+              matrix XtX = multiply(Xt, X_augmented); // Use augmented matrix
+              printMatrixR(XtX, "X_Augmented_Transpose * X_Augmented (Rational)");
 
-              matrix XtX_inv = invert(XtX); // Uses RATIONAL inversion
+              matrix XtX_inv = invert(XtX); // Use RATIONAL inversion
                if (XtX_inv.empty()) {
-                   if (debug >= 1) outs() << "Warning: (X^T * X) matrix is singular, cannot perform regression.\n";
+                   if (debug >= 1) outs() << "Warning: (X_Augmented^T * X_Augmented) matrix is singular, cannot perform regression.\n";
                    return false;
                }
-              printMatrixR(XtX_inv, "(X_Transpose * X)^-1 (Rational)");
+              printMatrixR(XtX_inv, "(X_Augmented_Transpose * X_Augmented)^-1 (Rational)");
 
               matrix XtY = multiply(Xt, y); // Uses Strassen potentially
-              printMatrixR(XtY, "X_Transpose * y (Rational)");
+              printMatrixR(XtY, "X_Augmented_Transpose * y (Rational)");
 
               matrix beta_matrix = multiply(XtX_inv, XtY); // Uses Strassen potentially
               printMatrixR(beta_matrix, "Beta Coefficients Matrix (Rational)");
@@ -785,6 +876,17 @@ namespace ufo
                       outs() << coefficients[i] << (i == coefficients.size() - 1 ? "" : ", ");
                   }
                   outs() << "]\n";
+                  if (debug >= 2) {
+                      outs() << "Coefficient Term Mapping:\n";
+                      for(size_t i=0; i < coefficients.size(); ++i) {
+                          outs() << "  coeff[" << i << "] (" << coefficients[i] << "): ";
+                          const auto& term = term_mapping[i];
+                          if (term.type == 0) outs() << "linear(x" << term.idx1 << ")\n";
+                          else if (term.type == 1) outs() << "square(x" << term.idx1 << "^2)\n";
+                          else if (term.type == 2) outs() << "interaction(x" << term.idx1 << "*x" << term.idx2 << ")\n";
+                          else if (term.type == 3) outs() << "intercept\n";
+                      }
+                  }
               }
               return true;
 
@@ -794,9 +896,11 @@ namespace ufo
           }
       }
 
-      // Constructs an expression like y = c0*x0 + c1*x1 + ... + intercept using RATIONAL
+      // Constructs an expression like y = c0*x0 + c1*x1 + ... + c_k*x0^2 + c_{k+1}*x0*x1 + ... + intercept using RATIONAL
       Expr getRegressionExpr(const ExprVector& invVars, int y_col_idx, ExprFactory& efac) {
-          if (coefficients.empty()) return mk<TRUE>(efac);
+          if (coefficients.empty() || term_mapping.empty() || coefficients.size() != term_mapping.size()) {
+              return mk<TRUE>(efac);
+          }
 
           size_t num_vars_total = invVars.size();
           if (y_col_idx < 0 || y_col_idx >= num_vars_total) return mk<TRUE>(efac);
@@ -804,35 +908,54 @@ namespace ufo
           Expr y_var = invVars[y_col_idx];
           ExprVector rhs_terms;
 
-          int coeff_idx = 0;
-          for (size_t i = 0; i < num_vars_total; ++i) {
-              if (i == y_col_idx) continue;
-
-              // Use RATIONAL coefficient directly
-              RATIONAL coeff_rat = coefficients[coeff_idx];
-              Expr coeff_expr = mkMPZ(numerator(coeff_rat), denominator(coeff_rat), efac);
-
-              if (numerator(coeff_rat) != 0) {
-                 rhs_terms.push_back(mk<MULT>(coeff_expr, invVars[i]));
+          // Map independent variable indices from original list (invVars) to the 0-based indices used in regression (X_orig)
+          vector<Expr> independent_vars_exprs;
+          vector<int> independent_var_orig_indices;
+          for(size_t i = 0; i < num_vars_total; ++i) {
+              if (i != y_col_idx) {
+                  independent_vars_exprs.push_back(invVars[i]);
+                  independent_var_orig_indices.push_back(i);
               }
-              coeff_idx++;
           }
 
-          // Handle intercept (last coefficient)
-          if (coeff_idx < coefficients.size()) {
-             RATIONAL intercept_rat = coefficients[coeff_idx];
-             if (numerator(intercept_rat) != 0) {
-               rhs_terms.push_back(mkMPZ(numerator(intercept_rat), denominator(intercept_rat), efac));
-             }
+          // Build RHS terms based on coefficients and term_mapping
+          for (size_t coeff_idx = 0; coeff_idx < coefficients.size(); ++coeff_idx) {
+              RATIONAL coeff_rat = coefficients[coeff_idx];
+              if (numerator(coeff_rat) == 0) continue; // Skip zero coefficients
+
+              Expr coeff_expr = mkMPZ(numerator(coeff_rat), denominator(coeff_rat), efac);
+              const auto& term = term_mapping[coeff_idx];
+              Expr term_expr;
+
+              if (term.type == 0) { // Linear term: coeff * x_i
+                  term_expr = mk<MULT>(coeff_expr, independent_vars_exprs[term.idx1]);
+              } else if (term.type == 1) { // Squared term: coeff * x_i^2
+                  Expr var = independent_vars_exprs[term.idx1];
+                  term_expr = mk<MULT>(coeff_expr, mk<MULT>(var, var));
+              } else if (term.type == 2) { // Interaction term: coeff * x_i * x_j
+                  Expr var1 = independent_vars_exprs[term.idx1];
+                  Expr var2 = independent_vars_exprs[term.idx2];
+                  term_expr = mk<MULT>(coeff_expr, mk<MULT>(var1, var2));
+              } else if (term.type == 3) { // Intercept term: coeff
+                  term_expr = coeff_expr;
+              }
+
+              if (term_expr) {
+                  rhs_terms.push_back(term_expr);
+              }
           }
+
 
           Expr rhs_expr = mkplus(rhs_terms, efac);
+          // Handle case where all coefficients were zero (or only intercept was zero)
+          if (!rhs_expr) rhs_expr = mkMPZ(0, efac);
+
           Expr regression_eq = mk<EQ>(y_var, rhs_expr);
 
           Expr norm_expr = normalize(regression_eq);
 
           if (debug >= 1) {
-              outs() << "Generated Regression Equation (Rational): " << *norm_expr << "\n";
+              outs() << "Generated Regression Equation (Rational, potentially non-linear): " << *norm_expr << "\n";
           }
 
           return norm_expr;
@@ -1108,7 +1231,7 @@ namespace ufo
 
     // --- Updated method to compute linear regression candidates ---
     void computeLinearRegressionCands(Expr srcRel) {
-        if (debug >= 1) outs() << "\n======== COMPUTE LINEAR REGRESSION (RATIONAL) ========\n";
+        if (debug >= 1) outs() << "\n======== COMPUTE LINEAR REGRESSION (RATIONAL, QUADRATIC ENABLED) ========\n";
         if (models.find(srcRel) == models.end() || invVars.find(srcRel) == invVars.end()) {
             if (debug >= 1) outs() << "No model or variables found for " << *srcRel << "\n";
             return;
@@ -1135,9 +1258,9 @@ namespace ufo
 
         // Try regressing each variable against the others using rational data
         for (size_t y_idx = 0; y_idx < num_vars; ++y_idx) {
-            if (debug >= 1) outs() << "--- Regressing on variable: " << *variables[y_idx] << " (Rational) ---\n";
-            // Pass the rational matrix to performRegression
-            bool success = regressor.performRegression(model_data_rational, y_idx);
+            if (debug >= 1) outs() << "--- Regressing on variable: " << *variables[y_idx] << " (Rational, Quadratic) ---\n";
+            // Pass the rational matrix to performRegression, enable quadratic terms (default)
+            bool success = regressor.performRegression(model_data_rational, y_idx, true); // Pass true for quadratic
             if (success) {
                 Expr cand_expr = regressor.getRegressionExpr(variables, y_idx, m_efac);
                 if (!isOpX<TRUE>(cand_expr)) { // Avoid adding trivial TRUE
@@ -1148,7 +1271,7 @@ namespace ufo
                  if (debug >= 1) outs() << "Regression failed for variable " << *variables[y_idx] << "\n";
             }
         }
-         if (debug >= 1) outs() << "=====================================================\n";
+         if (debug >= 1) outs() << "=======================================================================\n";
     }
     // --- End updated method ---
 
@@ -1168,7 +1291,7 @@ namespace ufo
       return rowsExpr;
     }
 
-    boost::tribool computeData(Expr srcRel, map<Expr, ExprVector> &arrRanges, map<Expr, ExprSet> &constr, bool doRegression = false, bool doConnect = true)
+    boost::tribool computeData(Expr srcRel, map<Expr, ExprVector> &arrRanges, map<Expr, ExprSet> &constr, bool doRegression = false, bool doConnect = false)
     {
       if (debug >= 1)
         outs() << "\n======== COMPUTE DATA ========\n";
@@ -1190,7 +1313,7 @@ namespace ufo
       return res;
     }
 
-    boost::tribool computeDataPhase(Expr srcRel, Expr splitter, Expr invs, bool fwd, ExprSet &constr, bool doRegression = false, bool doConnect = true)
+    boost::tribool computeDataPhase(Expr srcRel, Expr splitter, Expr invs, bool fwd, ExprSet &constr, bool doRegression = false, bool doConnect = false)
     {
       if (debug >= 1)
         outs() << "\n======== COMPUTE DATA PHASE ========\n";

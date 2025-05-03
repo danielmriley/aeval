@@ -181,8 +181,9 @@ int main (int argc, char ** argv)
   bool d_sertrans = getBoolValue(OPT_SERTRANS, false, argc, argv);
   bool d_lia2bv = getBoolValue(OPT_LIA2BV, false, argc, argv);
   bool d_horn = getBoolValue(OPT_HORN, false, argc, argv);
-  bool d2 = getBoolValue("--d2", false, argc, argv);
+  bool d2 = getBoolValue("--dl2", false, argc, argv);
   bool doReg = getBoolValue("--lin-reg", false, argc, argv);
+  bool doCon = getBoolValue("--connect", false, argc, argv);
   int debug = getIntValue(OPT_DEBUG, 0, argc, argv);
 
   if (d_m || d_p || d_d || d_s) do_disj = true;
@@ -207,12 +208,12 @@ int main (int argc, char ** argv)
   bool res = false;
   if(bv_solver)
     res = learnInvariants5(string(argv[argc - 1]), max_attempts, to, densecode, aggressivepruning,
-                     do_dl, do_mu, do_elim, do_arithm, do_disj, do_prop, mbp_eqs,
-                     d_m, d_p, d_d, d_s, d_f, d_r, d_g, d_se, d_lia2bv, d_horn, d_sertrans, d2, doReg, debug);
+                           do_dl, do_mu, do_elim, do_arithm, do_disj, do_prop, mbp_eqs,
+                           d_m, d_p, d_d, d_s, d_f, d_r, d_g, d_se, d_lia2bv, d_horn, d_sertrans, d2, doReg, doCon, debug);
   else if (vers4)      // MBP-based, path-sensitive algorithms
     learnInvariants4(string(argv[argc-1]), max_attempts, to, densecode, aggressivepruning,
                    do_dl, do_mu, do_elim, do_arithm, do_disj, do_prop, mbp_eqs,
-                   d_m, d_p, d_d, d_s, d_f, d_r, d_g, d_se, d_ser, d2, doReg, debug);
+                   d_m, d_p, d_d, d_s, d_f, d_r, d_g, d_se, d_ser, d2, doReg, doCon, debug);
   else if (vers3) // FMCAD'18 + CAV'19 + experiments with data
     learnInvariants3(string(argv[argc-1]), max_attempts, to, densecode, aggressivepruning,
                      do_dl, do_mu, do_elim, do_arithm, do_prop, d_se, d_ser, debug);

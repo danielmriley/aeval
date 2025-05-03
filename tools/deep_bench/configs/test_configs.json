@@ -5,7 +5,7 @@
       "tool": "./tools/deep/freqhorn",
       "flags": "--bv",
       "benchmarks": "../bench_horn_bv_translated/",
-      "timeout": 3
+      "timeout": 4
     },
     {
       "name": "z3",
@@ -26,21 +26,42 @@
       "tool": "./tools/deep/freqhorn",
       "flags": "--v4 --data",
       "benchmarks": "../bench_horn/",
-      "timeout": 3
+      "timeout": 300
     },
     {
       "name": "dl2",
       "tool": "./tools/deep/freqhorn",
-      "flags": "--v4 --data --d2",
+      "flags": "--v4 --data --dl2",
       "benchmarks": "../bench_horn/",
-      "timeout": 3
+      "timeout": 300
     },
     {
       "name": "dl2-linreg",
       "tool": "./tools/deep/freqhorn",
-      "flags": "--v4 --data --d2 --lin-reg",
+      "flags": "--v4 --data --dl2 --lin-reg",
       "benchmarks": "../bench_horn/",
-      "timeout": 3
+      "timeout": 300
+    },
+    {
+      "name": "dl2-connect",
+      "tool": "./tools/deep/freqhorn",
+      "flags": "--v4 --data --dl2 --connect",
+      "benchmarks": "../bench_horn/",
+      "timeout": 300
+    },
+    {
+      "name": "dl2-linreg-connect",
+      "tool": "./tools/deep/freqhorn",
+      "flags": "--v4 --data --dl2 --connect --lin-reg",
+      "benchmarks": "../bench_horn/",
+      "timeout": 300
+    },
+    {
+      "name": "dl2-linreg-connect-phase",
+      "tool": "./tools/deep/freqhorn",
+      "flags": "--v4 --data --phase-data --all-mbp --dl2 --connect --lin-reg",
+      "benchmarks": "../bench_horn/",
+      "timeout": 300
     }
   ]
 }
