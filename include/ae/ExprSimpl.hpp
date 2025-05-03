@@ -3495,6 +3495,201 @@ namespace ufo
     return disjoin(newDsjs, efac);
   }
 
+  Expr normalizePositive(Expr e, ExprFactory &m_efac, int debug = 0)
+  {
+    if (!isOp<ComparissonOp>(e) || !isNumeric(e->left()))
+    {
+      return e;
+    }
+
+    if (debug >= 4)
+    {
+      outs() << "\n--- Normalizing Positive: " << *e << " ---\n";
+    }
+    if (debug >= 4)
+    {
+      outs() << "  Input to normalizePositive: " << *e << "\n";
+    }
+
+    ExprVector vars;
+    filter(e, bind::IsConst(), inserter(vars, vars.begin()));
+    if (vars.empty())
+    {
+      if (debug >= 4)
+      {
+        outs() << "  No variables found in: " << *e << "\n";
+      }
+      return simplifyArithm(e);
+    }
+
+    Expr normalized = normalizeAtom(e, vars);
+    if (debug >= 4)
+    {
+      outs() << "  After normalizeAtom: " << *normalized << "\n";
+    }
+
+    if (isOpX<TRUE>(normalized) || isOpX<FALSE>(normalized))
+    {
+      return normalized;
+    }
+
+    if (!isOp<ComparissonOp>(normalized) || !isNumeric(normalized->left()) || !isNumeric(normalized->right()))
+    {
+      if (debug >= 1)
+      {
+        outs() << "  Warning: normalizeAtom did not produce expected form for: " << *e << ". Got: " << *normalized << "\n";
+      }
+      return simplifyArithm(e);
+    }
+
+    Expr lhs = normalized->left();
+    Expr rhs = normalized->right();
+    const Operator &op = normalized->op();
+
+    map<Expr, cpp_int> termCoefficients;
+    cpp_int constantPart = 0;
+
+    ExprVector terms;
+    getAddTerm(lhs, terms);
+
+    for (Expr term : terms)
+    {
+      cpp_int coef = 1;
+      Expr varPart = term;
+      if (isOpX<MULT>(term) && term->arity() == 2 && isOpX<MPZ>(term->left()))
+      {
+        coef = lexical_cast<cpp_int>(term->left());
+        varPart = term->right();
+      }
+      else if (isOpX<UN_MINUS>(term) && term->arity() == 1)
+      {
+        coef = -1;
+        varPart = term->left();
+      }
+      else if (isOpX<MPZ>(term))
+      {
+        constantPart += lexical_cast<cpp_int>(term);
+        if (debug >= 3)
+        {
+          outs() << "  Found constant " << *term << " on LHS of normalized expr.\n";
+        }
+        continue;
+      }
+
+      if (bind::IsConst()(varPart))
+      {
+        termCoefficients[varPart] += coef;
+      }
+      else
+      {
+        if (debug >= 3)
+        {
+          outs() << "  Treating non-variable term " << *varPart << " as atomic.\n";
+        }
+        termCoefficients[varPart] += coef;
+      }
+    }
+
+    if (isOpX<MPZ>(rhs))
+    {
+      constantPart -= cpp_int(getTerm<mpz_class>(rhs).get_str());
+    }
+    else
+    {
+      if (debug >= 1)
+      {
+        outs() << "  Warning: RHS is not an MPZ constant: " << *rhs << "\n";
+      }
+      return simplifyArithm(e);
+    }
+
+    if (debug >= 4)
+    {
+      outs() << "  Coefficients map:\n";
+      for (auto const &pair : termCoefficients)
+      {
+        outs() << "    " << *pair.first << ": " << pair.second << "\n";
+      }
+      outs() << "  Constant part (LHS - C): " << constantPart << "\n";
+    }
+
+    ExprVector finalLhsTerms;
+    ExprVector finalRhsTerms;
+    for (auto const &pair : termCoefficients)
+    {
+      Expr var = pair.first;
+      cpp_int coef = pair.second;
+      if (coef > 0)
+      {
+        if (coef == 1)
+        {
+          finalLhsTerms.push_back(var);
+        }
+        else
+        {
+          finalLhsTerms.push_back(mk<MULT>(mkMPZ(coef, m_efac), var));
+        }
+      }
+      else if (coef < 0)
+      {
+        cpp_int posCoef = -coef;
+        if (posCoef == 1)
+        {
+          finalRhsTerms.push_back(var);
+        }
+        else
+        {
+          finalRhsTerms.push_back(mk<MULT>(mkMPZ(posCoef, m_efac), var));
+        }
+      }
+    }
+
+    if (constantPart > 0)
+    {
+      finalLhsTerms.push_back(mkMPZ(constantPart, m_efac));
+    }
+    else if (constantPart < 0)
+    {
+      finalRhsTerms.push_back(mkMPZ(-constantPart, m_efac));
+    }
+
+    Expr finalLhs, finalRhs;
+    if (finalLhsTerms.empty())
+    {
+      finalLhs = mkMPZ(0, m_efac);
+    }
+    else if (finalLhsTerms.size() == 1)
+    {
+      finalLhs = finalLhsTerms[0];
+    }
+    else
+    {
+      finalLhs = simplifyArithm(mknary<PLUS>(finalLhsTerms.begin(), finalLhsTerms.end()));
+    }
+
+    if (finalRhsTerms.empty())
+    {
+      finalRhs = mkMPZ(0, m_efac);
+    }
+    else if (finalRhsTerms.size() == 1)
+    {
+      finalRhs = finalRhsTerms[0];
+    }
+    else
+    {
+      finalRhs = simplifyArithm(mknary<PLUS>(finalRhsTerms.begin(), finalRhsTerms.end()));
+    }
+
+    ExprVector args = {finalLhs, finalRhs};
+    Expr result = m_efac.mkNary(op, args);
+    if (debug >= 4)
+    {
+      outs() << "  Result of normalizePositive: " << *result << "\n";
+    }
+
+    return simplifyArithm(result);
+  }
+
   inline static Expr normalizeAtom(Expr fla, ExprVector& intVars)
   {
     if (isOp<ComparissonOp>(fla) && isNumeric(fla->left()))
