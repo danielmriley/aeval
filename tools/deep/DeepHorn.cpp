@@ -70,6 +70,9 @@ int main (int argc, char ** argv)
   const char *OPT_ADD_EPSILON = "--eps";
   const char *OPT_AGG_PRUNING = "--aggp";
   const char *OPT_DATA_LEARNING = "--data";
+  const char *OPT_DATA_LEARNING2 = "--data2";
+  const char *OPT_LINEAR_REG = "--linreg";
+  const char *OPT_CONNECT = "--connect";
   const char *OPT_MUT = "--mut";
   const char *OPT_PROP = "--prop";
   const char *OPT_DISJ = "--disj";
@@ -82,6 +85,7 @@ int main (int argc, char ** argv)
   const char *OPT_REC = "--re";
   const char *OPT_MBP = "--eqs-mbp";
   const char *OPT_SER = "--serialize";
+  const char *OPT_HORN = "--horn";
   const char *OPT_DEBUG = "--debug";
 
   if (getBoolValue(OPT_HELP, false, argc, argv) || argc == 1){
@@ -94,7 +98,8 @@ int main (int argc, char ** argv)
         "Options:\n" <<
         " " << OPT_V1 << "                            original version (one-by-one sampling)\n"
         " " << OPT_V2 << "                            optimized version for transition systems (+ bootstrapping)\n"
-        " " << OPT_V3 << " (default)                  optimized version (+ bootstrapping, propagation, and data candidates)\n"
+        " " << OPT_V3 << "                            optimized version (+ bootstrapping, propagation, and data candidates)\n"
+        " " << OPT_V4 << " (default)                  optimized version (+ multi-phase loops)\n"
         " " << OPT_GET_FREQS << "                         calculate frequency distributions and sample from them\n" <<
         " " << OPT_AGG_PRUNING << "                          prioritize and prune the search space aggressively\n" <<
         "                                 (if not specified, sample from uniform distributions)\n" <<
@@ -170,6 +175,10 @@ int main (int argc, char ** argv)
   bool d_g = !getBoolValue(OPT_D6, false, argc, argv);
   bool d_r = getBoolValue(OPT_REC, false, argc, argv);
   bool d_ser = getBoolValue(OPT_SER, false, argc, argv);
+  bool d_horn = getBoolValue(OPT_HORN, false, argc, argv);
+  bool d2 = getBoolValue(OPT_DATA_LEARNING2, false, argc, argv);
+  bool doReg = getBoolValue(OPT_LINEAR_REG, false, argc, argv);
+  bool doCon = getBoolValue(OPT_CONNECT, false, argc, argv);
   int debug = getIntValue(OPT_DEBUG, 0, argc, argv);
 
   if (d_m || d_p || d_d || d_s) do_disj = true;
@@ -191,10 +200,13 @@ int main (int argc, char ** argv)
     if (do_dl == 0) do_dl = 1;
   }
 
+  if(d2) do_dl = 1;
+
+  bool res = false;
   if (vers4)      // MBP-based, path-sensitive algorithms
     learnInvariants4(string(argv[argc-1]), max_attempts, to, densecode, aggressivepruning,
                    do_dl, do_mu, do_elim, do_arithm, do_disj, do_prop, mbp_eqs,
-                   d_m, d_p, d_d, d_s, d_f, d_r, d_g, d_se, d_ser, debug);
+                   d_m, d_p, d_d, d_s, d_f, d_r, d_g, d_se, d_ser, d2, doReg, doCon, debug);
   else if (vers3) // FMCAD'18 + CAV'19 + experiments with data
     learnInvariants3(string(argv[argc-1]), max_attempts, to, densecode, aggressivepruning,
                      do_dl, do_mu, do_elim, do_arithm, do_prop, d_se, d_ser, debug);
@@ -204,5 +216,7 @@ int main (int argc, char ** argv)
   else            // run the FMCAD'17 algorithm
     learnInvariants(string(argv[argc-1]), to, max_attempts,
                   kinduction, itp, densecode, addepsilon, aggressivepruning, debug);
-  return 0;
+  
+  if(res) return 0;
+  else return 1;
 }
