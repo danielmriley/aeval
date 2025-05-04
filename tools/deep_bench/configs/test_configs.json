@@ -1,0 +1,60 @@
+{
+  "configs": [
+    {
+      "name": "freqhorn",
+      "tool": "freqhorn",
+      "flags": "--data",
+      "benchmarks": "../bench_horn/",
+      "timeout": 300
+    },
+    {
+      "name": "z3",
+      "tool": "z3",
+      "flags": "",
+      "benchmarks": "../bench_horn/",
+      "timeout": 300
+    },
+    {
+      "name": "data1",
+      "tool": "./tools/deep/freqhorn",
+      "flags": "--v4 --data",
+      "benchmarks": "../bench_horn/",
+      "timeout": 300
+    },
+    {
+      "name": "data2",
+      "tool": "./tools/deep/freqhorn",
+      "flags": "--v4 --data2",
+      "benchmarks": "../bench_horn/",
+      "timeout": 300
+    },
+    {
+      "name": "data2-linreg",
+      "tool": "./tools/deep/freqhorn",
+      "flags": "--v4 --data2 --lin-reg",
+      "benchmarks": "../bench_horn/",
+      "timeout": 300
+    },
+    {
+      "name": "data2-connect",
+      "tool": "./tools/deep/freqhorn",
+      "flags": "--v4 --data2 --connect",
+      "benchmarks": "../bench_horn/",
+      "timeout": 300
+    },
+    {
+      "name": "data2-linreg-connect",
+      "tool": "./tools/deep/freqhorn",
+      "flags": "--v4 --data2 --connect --lin-reg",
+      "benchmarks": "../bench_horn/",
+      "timeout": 300
+    },
+    {
+      "name": "data2-linreg-connect-phase",
+      "tool": "./tools/deep/freqhorn",
+      "flags": "--v4 --phase-data --all-mbp --data2 --connect --lin-reg",
+      "benchmarks": "../bench_horn/",
+      "timeout": 300
+    }
+  ]
+}
