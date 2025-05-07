@@ -1203,7 +1203,7 @@ namespace ufo
     boost::tribool connectPhase(Expr src, Expr dst, int k = 1,
                     Expr srcRel = NULL, Expr block = NULL, Expr invs = NULL,
                     Expr preCond = NULL, bool doGJ = false, bool doConnect = false,
-                    bool doRegression = false) // Added doRegression flag
+                    bool doRegression = false) 
       {
         // Get data matrix.
         // Refactor so that the matrix isn't built over and over.
@@ -1229,7 +1229,6 @@ namespace ufo
       return res;
     }
 
-    // --- Updated method to compute linear regression candidates ---
     void computeLinearRegressionCands(Expr srcRel) {
         if (debug >= 1) outs() << "\n======== COMPUTE LINEAR REGRESSION (RATIONAL, QUADRATIC ENABLED) ========\n";
         if (models.find(srcRel) == models.end() || invVars.find(srcRel) == invVars.end()) {
@@ -1273,7 +1272,6 @@ namespace ufo
         }
          if (debug >= 1) outs() << "=======================================================================\n";
     }
-    // --- End updated method ---
 
 
     ExprVector exprForRows(Expr srcRel)
@@ -1291,7 +1289,8 @@ namespace ufo
       return rowsExpr;
     }
 
-    boost::tribool computeData(Expr srcRel, map<Expr, ExprVector> &arrRanges, map<Expr, ExprSet> &constr, bool doRegression = false, bool doConnect = false)
+    boost::tribool computeData(Expr srcRel, map<Expr, ExprVector> &arrRanges, map<Expr, ExprSet> &constr,
+                               bool doGJ = true, bool doRegression = false, bool doConnect = false)
     {
       if (debug >= 1)
         outs() << "\n======== COMPUTE DATA ========\n";
@@ -1306,14 +1305,15 @@ namespace ufo
         return res;
       }
 
-      computeData(srcRel);
+      if(doGJ) computeData(srcRel);
       if(doRegression) computeLinearRegressionCands(srcRel); // Linear Regression method
       if(doConnect) connectCands(srcRel); // Connect phase
 
       return res;
     }
 
-    boost::tribool computeDataPhase(Expr srcRel, Expr splitter, Expr invs, bool fwd, ExprSet &constr, bool doRegression = false, bool doConnect = false)
+    boost::tribool computeDataPhase(Expr srcRel, Expr splitter, Expr invs, bool fwd, ExprSet &constr, 
+                   bool doGJ = true, bool doRegression = false, bool doConnect = false)
     {
       if (debug >= 1)
         outs() << "\n======== COMPUTE DATA PHASE ========\n";
@@ -1329,7 +1329,7 @@ namespace ufo
         return res;
       }
 
-      computeData(srcRel);
+      if(doGJ) computeData(srcRel);
       if(doRegression) computeLinearRegressionCands(srcRel); // Linear Regression method
       if(doConnect) connectCands(srcRel); // Connect phase
 

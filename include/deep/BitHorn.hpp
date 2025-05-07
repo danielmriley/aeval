@@ -24,6 +24,7 @@ namespace ufo
     bool d2;
     bool doReg;
     bool doConnect;
+    bool doGJ;
     int debug;
     std::vector<ExprSet> m_learnedLemmas; // Stores learned lemmas per iteration
     unsigned m_original_bv_width = 0;
@@ -372,7 +373,7 @@ namespace ufo
     }
 
   public:
-    BitHorn(ExprFactory &efac, EZ3 &z3, CHCs &input, bool _d2, bool _doReg, bool _doCon, int _debug = 0) : 
+    BitHorn(ExprFactory &efac, EZ3 &z3, CHCs &input, bool _d2, bool _doGJ, bool _doReg, bool _doCon, int _debug = 0) : 
       m_efac(efac),
       m_z3(z3),
       m_liaChcs(new CHCs(efac, z3, _debug)),
@@ -382,6 +383,7 @@ namespace ufo
       m_Bv2LiaTranslator(efac, z3, 4, _debug),
       m_learnedLemmas(1),
       d2(_d2),
+      doGJ(_doGJ),
       doReg(_doReg),
       doConnect(_doCon),
       debug(_debug)
@@ -756,7 +758,7 @@ namespace ufo
       std::unique_ptr<RndLearnerV4> solver(new RndLearnerV4(m_efac, m_z3,
         *m_liaChcs, maxAttempts, freqs, aggp, mut, da,
         doDisj, mbpEqs, dAllMbp, dAddProp, dAddDat, dStrenMbp,
-        dFwd, dRec, dGen, d2, doReg, doConnect, debug));
+        dFwd, dRec, dGen, d2, doGJ, doReg, doConnect, debug));
 
       if (!solver)
       {
@@ -1364,8 +1366,8 @@ namespace ufo
                                bool freqs, bool aggp, int dat, int mut, bool doElim, bool doArithm,
                                bool doDisj, int doProp, int mbpEqs, bool dAllMbp, bool dAddProp,
                                bool dAddDat, bool dStrenMbp, int dFwd, bool dRec, bool dGenerous,
-                               bool dSee, bool ser, bool horn, bool serTrans, bool d2, bool doReg,
-                               bool doCon, int debug)
+                               bool dSee, bool ser, bool horn, bool serTrans, bool d2, bool doGJ, 
+                               bool doReg, bool doCon, int debug)
   {
     ExprFactory efac;
     EZ3 z3(efac);
@@ -1383,7 +1385,7 @@ namespace ufo
       return 1;
     }
 
-    BitHorn bh(efac, z3, ruleManager, d2, doReg, doCon, debug);
+    BitHorn bh(efac, z3, ruleManager, d2, doGJ, doReg, doCon, debug);
 
     if (ser)
     {
