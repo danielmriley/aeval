@@ -480,7 +480,16 @@ namespace ufo
 
           // Handle variables (constants in Expr terminology)
           if (bind::IsConst()(e))
-            return translateVar(e); // Uses m_var_map
+          {
+            // --- Add check for BOOL_TY variables ---
+            Expr varType = bind::typeOf(e);
+            if (varType && isOpX<BOOL_TY>(varType)) {
+                if (m_debug >= 3) outs() << "Kept BOOL var: " << *e << "\n";
+                return e; // Keep BOOL variables as is
+            }
+            // --- End check for BOOL_TY variables ---
+            return translateVar(e); // Uses m_var_map for other variable types
+          }
 
           // Handle BV numeric constants
           if (bv::is_bvnum(e)) {
@@ -595,20 +604,104 @@ namespace ufo
           
           // Special bitvector operations
           else if (isOpX<BNEG>(e)) // Bitwise negation - No direct LIA equivalent, maybe handle as error or approximation?
+          {
              // Often used for two's complement negation: ~x + 1 == -x
              // If it's just bitwise NOT, it doesn't map well to LIA.
              // Let's translate as unary minus for now, assuming it represents negation.
              return mk<UN_MINUS>(translateExprHelper(e->left()));
-          else if (isOpX<expr::op::BCONCAT>(e) || isOpX<expr::op::BEXTRACT>(e) || 
-                   isOpX<expr::op::BASHR>(e) || isOpX<expr::op::BLSHR>(e) || isOpX<expr::op::BSHL>(e) ||
-                   isOpX<expr::op::BXOR>(e) || isOpX<expr::op::BNAND>(e) || isOpX<expr::op::BNOR>(e) || isOpX<expr::op::BXNOR>(e) ||
-                   isOpX<expr::op::BSEXT>(e) || isOpX<expr::op::BZEXT>(e) || // Add expr::op:: prefix here again
-                   isOpX<BAND>(e) || isOpX<BOR>(e)) // Bitwise AND/OR don't map directly
+          }
+          // Bitwise SHL (Shift Left)
+          else if (isOpX<BSHL>(e))
           {
-              // These operations don't have direct LIA equivalents.
-              // Return TRUE or handle as an error/approximation.
-              if (m_debug >= 1) outs() << "Warning: Unsupported BV operation encountered: " << e->op() << "\n";
-              return mk<TRUE>(m_efac); 
+            if (e->arity() == 2)
+            {
+              Expr lia_val = translateExprHelper(e->left());
+              Expr lia_shift_amount_expr = translateExprHelper(e->right());
+
+              if (isOpX<MPZ>(lia_shift_amount_expr))
+              {
+                mpz_class n = getTerm<mpz_class>(lia_shift_amount_expr);
+                if (mpz_sgn(n.get_mpz_t()) >= 0 && mpz_fits_ulong_p(n.get_mpz_t()))
+                {
+                  unsigned long shift_val = n.get_ui();
+                  mpz_class factor = expr::op::bv::power(2, shift_val);
+                  return mk<MULT>(lia_val, mkTerm(factor, m_efac));
+                }
+                else
+                {
+                  if (m_debug >= 1) outs() << "Warning: BSHL shift amount " << n.get_str() << " is negative or too large. Abstracting to LIA 0.\n";
+                  return mkTerm(mpz_class(0), m_efac); // Changed from mk<TRUE>
+                }
+              }
+              else
+              {
+                if (m_debug >= 1) outs() << "Warning: BSHL shift amount is not a constant. Abstracting to LIA 0.\n";
+                return mkTerm(mpz_class(0), m_efac); // Changed from mk<TRUE>
+              }
+            }
+            if (m_debug >= 1) outs() << "Warning: Malformed BSHL expression encountered. Abstracting to LIA 0.\n";
+            return mkTerm(mpz_class(0), m_efac); // Changed from mk<TRUE>
+          }
+          // Bitwise LSHR (Logical Shift Right)
+          else if (isOpX<BLSHR>(e))
+          {
+            if (e->arity() == 2)
+            {
+              Expr lia_val = translateExprHelper(e->left());
+              Expr lia_shift_amount_expr = translateExprHelper(e->right());
+
+              if (isOpX<MPZ>(lia_shift_amount_expr))
+              {
+                mpz_class n = getTerm<mpz_class>(lia_shift_amount_expr);
+                if (mpz_sgn(n.get_mpz_t()) >= 0 && mpz_fits_ulong_p(n.get_mpz_t()))
+                {
+                  unsigned long shift_val = n.get_ui();
+                  mpz_class divisor = expr::op::bv::power(2, shift_val);
+                  if (mpz_sgn(divisor.get_mpz_t()) == 0) 
+                  {
+                     if (m_debug >= 1) outs() << "Warning: BLSHR divisor is zero. Abstracting to LIA 0.\n";
+                     return mkTerm(mpz_class(0), m_efac); // Changed from mk<TRUE>
+                  }
+                  return mk<DIV>(lia_val, mkTerm(divisor, m_efac));
+                }
+                else
+                {
+                  if (m_debug >= 1) outs() << "Warning: BLSHR shift amount " << n.get_str() << " is negative or too large. Abstracting to LIA 0.\n";
+                  return mkTerm(mpz_class(0), m_efac); // Changed from mk<TRUE>
+                }
+              }
+              else
+              {
+                if (m_debug >= 1) outs() << "Warning: BLSHR shift amount is not a constant. Abstracting to LIA 0.\n";
+                return mkTerm(mpz_class(0), m_efac); // Changed from mk<TRUE>
+              }
+            }
+            if (m_debug >= 1) outs() << "Warning: Malformed BLSHR expression encountered. Abstracting to LIA 0.\n";
+            return mkTerm(mpz_class(0), m_efac); // Changed from mk<TRUE>
+          }
+          else if(isOpX<BAND>(e))
+          {
+            if (m_debug >= 1) outs() << "Warning: Unsupported BV operation BAND encountered. Abstracting to LIA 0.\n";
+            return mkTerm(mpz_class(0), m_efac); // Changed
+          }
+          else if(isOpX<BOR>(e))
+          {
+            if (m_debug >= 1) outs() << "Warning: Unsupported BV operation BOR encountered. Abstracting to LIA 0.\n";
+            return mkTerm(mpz_class(0), m_efac); // Changed
+          }
+          // BNEG is handled above by UN_MINUS.
+          // The BNOT that was here previously was likely an error as expr::op::BNOT doesn't exist.
+          // SMT-LIB bvnot (bitwise flip) would fall into the general unsupported case below.
+          else if (isOpX<expr::op::BCONCAT>(e) || isOpX<expr::op::BEXTRACT>(e) || 
+                   isOpX<expr::op::BASHR>(e) || isOpX<expr::op::BXOR>(e) || 
+                   isOpX<expr::op::BNAND>(e) || isOpX<expr::op::BNOR>(e) || 
+                   isOpX<expr::op::BXNOR>(e) || isOpX<expr::op::BSEXT>(e) || 
+                   isOpX<expr::op::BZEXT>(e))
+          {
+              // These operations don't have direct LIA equivalents that are simple arithmetic.
+              // Abstract their result to the LIA integer 0.
+              if (m_debug >= 1) outs() << "Warning: Unsupported BV operation " << e->op() << " encountered. Abstracting to LIA 0.\n";
+              return mkTerm(mpz_class(0), m_efac); // Changed from mk<TRUE>
           }
 
 

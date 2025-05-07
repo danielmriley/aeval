@@ -181,7 +181,7 @@ int main (int argc, char ** argv)
   bool d_sertrans = getBoolValue(OPT_SERTRANS, false, argc, argv);
   bool d_lia2bv = getBoolValue(OPT_LIA2BV, false, argc, argv);
   bool d_horn = getBoolValue(OPT_HORN, false, argc, argv);
-  bool d2 = getBoolValue("--dl2", false, argc, argv);
+  bool d2 = getBoolValue("--data2", false, argc, argv);
   bool doReg = getBoolValue("--lin-reg", false, argc, argv);
   bool doCon = getBoolValue("--connect", false, argc, argv);
   int debug = getIntValue(OPT_DEBUG, 0, argc, argv);

@@ -680,7 +680,16 @@ namespace ufo
         
         // Handle variables (constants in Expr terminology)
         if (bind::IsConst()(e))
-          return translateVar(e); // Uses m_var_map
+        {
+          // --- Add check for BOOL_TY variables ---
+          Expr varType = bind::typeOf(e);
+          if (varType && isOpX<BOOL_TY>(varType)) {
+              if (debug >= 3) outs() << "Kept BOOL var: " << *e << "\n";
+              return e; // Keep BOOL variables as is
+          }
+          // --- End check for BOOL_TY variables ---
+          return translateVar(e); // Uses m_var_map for other variable types
+        }
 
         // Handle integer literals (MPZ)
         if (isOpX<MPZ>(e))
@@ -762,6 +771,15 @@ namespace ufo
         }
         else if (isOpX<UN_MINUS>(e)) // LIA unary minus -> BV negation
           return bv::bvneg(translateExprHelper(e->left()));
+        // Handle BV operators if they appear in the input
+        else if (isOpX<BAND>(e))
+          return mk<BAND>(translateExprHelper(e->left()), translateExprHelper(e->right()));
+        else if (isOpX<BOR>(e))
+          return mk<BOR>(translateExprHelper(e->left()), translateExprHelper(e->right()));
+        else if (isOpX<BSHL>(e))
+          return mk<BSHL>(translateExprHelper(e->left()), translateExprHelper(e->right()));
+        else if (isOpX<BLSHR>(e))
+          return mk<BLSHR>(translateExprHelper(e->left()), translateExprHelper(e->right()));
           
         // Handle LIA comparisons -> Signed BV comparisons
         else if (isOpX<LEQ>(e))
