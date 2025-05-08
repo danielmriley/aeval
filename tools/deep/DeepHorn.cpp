@@ -71,6 +71,7 @@ int main (int argc, char ** argv)
   const char *OPT_AGG_PRUNING = "--aggp";
   const char *OPT_DATA_LEARNING = "--data";
   const char *OPT_DATA_LEARNING2 = "--data2";
+  const char *OPT_GAUSS_JORDAN = "--gj";
   const char *OPT_LIN_REG = "--lin-reg";
   const char *OPT_CONNECT = "--connect";
   const char *OPT_MUT = "--mut";
@@ -174,6 +175,7 @@ int main (int argc, char ** argv)
   bool d_r = getBoolValue(OPT_REC, false, argc, argv);
   bool d_ser = getBoolValue(OPT_SER, false, argc, argv);
   bool d_dl2 = getBoolValue(OPT_DATA_LEARNING2, false, argc, argv);
+  bool d_gaussjordan = getBoolValue(OPT_GAUSS_JORDAN, false, argc, argv);
   bool d_linreg = getBoolValue(OPT_LIN_REG, false, argc, argv);
   bool d_connect = getBoolValue(OPT_CONNECT, false, argc, argv);
   int debug = getIntValue(OPT_DEBUG, 0, argc, argv);
@@ -197,12 +199,28 @@ int main (int argc, char ** argv)
     if (do_dl == 0) do_dl = 1;
   }
 
-  if(d_dl2) do_dl = 1;
+  if((d_gaussjordan || d_connect || d_linreg) && do_dl == 0)
+  {
+    if (debug) errs() << "WARNING: \"" << OPT_GAUSS_JORDAN << "\", \"" << OPT_CONNECT << "\", or \"" << OPT_LIN_REG
+                      << "\" is enabled, but \"" << OPT_DATA_LEARNING2 << "\" is not. "
+                      << "Enabling \"" << OPT_DATA_LEARNING2 << "\".\n";
+    do_dl = 1;
+    d_dl2 = true;
+  }
+
+  if(d_dl2 && !d_gaussjordan && !d_connect && !d_linreg)
+  {
+    if (debug) errs() << "WARNING: \"" << OPT_DATA_LEARNING2 << "\" is enabled, but \"" << OPT_GAUSS_JORDAN << "\", \""
+                      << OPT_CONNECT << "\", or \"" << OPT_LIN_REG << "\" is not. "
+                      << "Enabling \"" << OPT_GAUSS_JORDAN << "\".\n";
+    d_gaussjordan = true;
+    if(do_dl < 1) do_dl = 1;
+  } 
 
   if (vers4)      // MBP-based, path-sensitive algorithms
     learnInvariants4(string(argv[argc-1]), max_attempts, to, densecode, aggressivepruning,
                    do_dl, do_mu, do_elim, do_arithm, do_disj, do_prop, mbp_eqs, d_m, d_p, 
-                   d_d, d_s, d_f, d_r, d_g, d_se, d_ser, d_dl2, d_linreg, d_connect, debug);
+                   d_d, d_s, d_f, d_r, d_g, d_se, d_ser, d_dl2, d_gaussjordan, d_linreg, d_connect, debug);
   else if (vers3) // FMCAD'18 + CAV'19 + experiments with data
     learnInvariants3(string(argv[argc-1]), max_attempts, to, densecode, aggressivepruning,
                      do_dl, do_mu, do_elim, do_arithm, do_prop, d_se, d_ser, debug);

@@ -1291,7 +1291,8 @@ namespace ufo
       return rowsExpr;
     }
 
-    boost::tribool computeData(Expr srcRel, map<Expr, ExprVector> &arrRanges, map<Expr, ExprSet> &constr, bool doRegression = false, bool doConnect = false)
+    boost::tribool computeData(Expr srcRel, map<Expr, ExprVector> &arrRanges, map<Expr, ExprSet> &constr, 
+                               bool doGJ = true, bool doRegression = false, bool doConnect = false)
     {
       if (debug >= 1)
         outs() << "\n======== COMPUTE DATA ========\n";
@@ -1306,14 +1307,15 @@ namespace ufo
         return res;
       }
 
-      computeData(srcRel);
+      if(doGJ) computeData(srcRel);
       if(doRegression) computeLinearRegressionCands(srcRel); // Linear Regression method
       if(doConnect) connectCands(srcRel); // Connect phase
 
       return res;
     }
 
-    boost::tribool computeDataPhase(Expr srcRel, Expr splitter, Expr invs, bool fwd, ExprSet &constr, bool doRegression = false, bool doConnect = false)
+    boost::tribool computeDataPhase(Expr srcRel, Expr splitter, Expr invs, bool fwd, ExprSet &constr,
+                                    bool doGJ = true, bool doRegression = false, bool doConnect = false)
     {
       if (debug >= 1)
         outs() << "\n======== COMPUTE DATA PHASE ========\n";
@@ -1329,7 +1331,7 @@ namespace ufo
         return res;
       }
 
-      computeData(srcRel);
+      if(doGJ) computeData(srcRel);
       if(doRegression) computeLinearRegressionCands(srcRel); // Linear Regression method
       if(doConnect) connectCands(srcRel); // Connect phase
 

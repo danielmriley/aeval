@@ -65,7 +65,7 @@ def load_configs(config_file, default_args):
         found_tests = {c['name'] for c in all_configs}
         missing_tests = specified_tests - found_tests
         if missing_tests:
-             print(f"Warning: The following specified test configurations were not found: {list(missing_tests)}")
+             tqdm.write(f"Warning: The following specified test configurations were not found: {list(missing_tests)}")
 
     for config in all_configs:
         config.setdefault('tool', default_args.tool)
@@ -199,7 +199,7 @@ def run_config(config, dirs, timestamp, position, progress_dict, message_list):
             results.append(BenchmarkResult(bench_file, "Executor Crash", 0, error=str(exc)))
             progress_dict[config_name] = i + 1  # Still increment progress on failure
 
-    return config_name, results
+    return config['name'], results
 
 def write_comparative_results(all_results, dirs, timestamp):
     results_file = dirs['results'] / f'results_{timestamp}.csv'
@@ -272,7 +272,7 @@ def main():
     try:
         configs = load_configs(args.config, args)
     except (FileNotFoundError, ValueError, json.JSONDecodeError) as e:
-        print(f"Error loading configuration: {e}")
+        tqdm.write(f"Error loading configuration: {e}")
         return 1
         
     dirs = setup_output_dirs(timestamp)
@@ -280,8 +280,8 @@ def main():
     all_results = {}
     
     max_workers = max(1, os.cpu_count() - 2 if os.cpu_count() else 1) 
-    print(f"Running up to {max_workers} configurations in parallel.")
-    print()
+    tqdm.write(f"Running up to {max_workers} configurations in parallel.")
+    tqdm.write("")
 
     # Set up multiprocessing manager for shared progress and messages
     manager = multiprocessing.Manager()
@@ -319,7 +319,7 @@ def main():
         while completed_configs < len(configs):
             # Display new messages
             while message_list:
-                print(message_list.pop(0))
+                tqdm.write(message_list.pop(0))
             
             # Update each configuration's progress bar
             for config_name, bar in bars.items():
@@ -336,19 +336,21 @@ def main():
                     if returned_name == config_name:
                         all_results[config_name] = results_list
                     else:
-                        print(f"Warning: Mismatched config name returned. Expected '{config_name}', got '{returned_name}'. Storing under expected name.")
+                        tqdm.write(f"Warning: Mismatched config name returned. Expected '{config_name}', got '{returned_name}'. Storing under expected name.")
                         all_results[config_name] = results_list
                     completed_configs += 1
                     overall_bar.n = completed_configs
                     overall_bar.refresh()
                     bars[config_name].close()  # Close the bar for this config
+                    tqdm.write(f"Configuration '{config_name}' completed with {len(results_list)} results.")
                 except Exception as exc:
-                    print(f"Configuration '{config_name}' generated an exception during execution: {exc}")
+                    tqdm.write(f"Configuration '{config_name}' generated an exception during execution: {exc}")
                     all_results[config_name] = []
                     completed_configs += 1
                     overall_bar.n = completed_configs
                     overall_bar.refresh()
                     bars[config_name].close()
+                    tqdm.write(f"Configuration '{config_name}' failed with exception: {exc}")
             
             time.sleep(0.1)  # Small delay to prevent overwhelming the terminal
         
@@ -357,17 +359,17 @@ def main():
             bar.close()
         overall_bar.close()
 
-    print()
+    tqdm.write("")
     if not all_results or all(not res for res in all_results.values()):
-        print("No benchmark results were collected.")
+        tqdm.write("No benchmark results were collected.")
     else:
         try:
             write_comparative_results(all_results, dirs, timestamp)
-            print(f"Results saved to {dirs['results']}")
+            tqdm.write(f"Results saved to {dirs['results']}")
         except Exception as e:
-            print(f"Error writing results file: {e}")
+            tqdm.write(f"Error writing results file: {e}")
     
-    print(f"Detailed outputs saved to {dirs['output']}")
+    tqdm.write(f"Detailed outputs saved to {dirs['output']}")
     
     return 0
 

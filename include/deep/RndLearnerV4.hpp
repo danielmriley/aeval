@@ -20,6 +20,7 @@ namespace ufo
     bool dRecycleCands;
     bool dGenerous;
     bool d2;
+    bool doGJ;
     bool doReg;
     bool doConnect;
     int dFwd;
@@ -36,12 +37,12 @@ namespace ufo
     RndLearnerV4 (ExprFactory &_e, EZ3 &_z3, CHCs& _r, unsigned _to, bool _freqs,
                   bool _aggp, int _mu, int _da, bool _d, int _m, bool _dAllMbp,
                   bool _dAddProp, bool _dAddDat, bool _dStrenMbp, int _dFwd,
-                  bool _dR, bool _dG, bool _d2, bool _doReg, bool _dCon, int _debug) :
+                  bool _dR, bool _dG, bool _d2, bool _doGJ, bool _doReg, bool _dCon, int _debug) :
       RndLearnerV3 (_e, _z3, _r, _to, _freqs, _aggp, _mu, _da, _debug),
                   dDisj(_d), mbpEqs(_m), dAllMbp(_dAllMbp),
                   dAddProp(_dAddProp), dAddDat(_dAddDat), dStrenMbp(_dStrenMbp),
                   dFwd(_dFwd), dRecycleCands(_dR), dGenerous(_dG), d2(_d2), doReg(_doReg),
-                  doConnect(_dCon)  {}
+                  doConnect(_dCon), doGJ(_doGJ)  {}
 
     bool simplLemmas() { return !dDisj; }
 
@@ -997,7 +998,7 @@ namespace ufo
           {
             // Compute data and basis candidates for the current relation 'dcl'
             // Note: computeData might need adjustment if arrRanges/constr are per-relation
-            if (!dl.computeData(dcl, m, constr, doReg, doConnect))
+            if (!dl.computeData(dcl, m, constr, doGJ, doReg, doConnect))
               continue; // Pass dcl, ranges, constraints
 
             ExprSet tmp;
@@ -1025,7 +1026,7 @@ namespace ufo
           poly.push_back(map<Expr, ExprSet>()); // Store results for this iteration
 
           // Compute data and basis candidates for the specific phase
-          dl.computeDataPhase(srcRel, phaseGuard, invs, fwd, constr, doReg, doConnect);
+          dl.computeDataPhase(srcRel, phaseGuard, invs, fwd, constr, doGJ, doReg, doConnect);
 
           ExprSet tmp;
           dl.getDataCands(tmp, srcRel); // Retrieve candidates for srcRel
@@ -1079,7 +1080,7 @@ namespace ufo
        bool freqs, bool aggp, int dat, int mut, bool doElim, bool doArithm,
        bool doDisj, int doProp, int mbpEqs, bool dAllMbp, bool dAddProp,
        bool dAddDat, bool dStrenMbp, int dFwd, bool dRec, bool dGenerous,
-       bool dSee, bool ser, bool d2, bool doReg, bool doCon, int debug)
+       bool dSee, bool ser, bool d2, bool doGJ, bool doReg, bool doCon, int debug)
   {
     ExprFactory m_efac;
     EZ3 z3(m_efac);
@@ -1106,7 +1107,7 @@ namespace ufo
 
     RndLearnerV4 ds(m_efac, z3, ruleManager, to, freqs, aggp, mut, dat,
                     doDisj, mbpEqs, dAllMbp, dAddProp, dAddDat, dStrenMbp,
-                    dFwd, dRec, dGenerous, d2, doReg, doCon, debug);
+                    dFwd, dRec, dGenerous, d2, doGJ, doReg, doCon, debug);
 
     map<Expr, ExprSet> cands;
     for (auto& cyc : ruleManager.cycles)
