@@ -160,12 +160,12 @@ def run_benchmark(args):
         result.error = str(e)
         return result
 
-def run_config(config, dirs, timestamp, position, progress_dict, message_list):
+def run_config(config, dirs, timestamp, position, progress_queue):
     bench_dir = Path(config['benchmarks'])
     bench_files = list(bench_dir.glob(config['pattern'])) 
     
     if not bench_files:
-        message_list.append(f"No benchmark files found for config '{config['name']}' in {bench_dir} matching '{config['pattern']}'")
+        progress_queue.put(('message', f"No benchmark files found for config '{config['name']}' in {bench_dir} matching '{config['pattern']}'"))
         return config['name'], []
     
     run_args = [(config['tool'], f, config['timeout'], config['flags']) 
@@ -173,9 +173,8 @@ def run_config(config, dirs, timestamp, position, progress_dict, message_list):
     
     results = []
     config_name = config['name']
-    progress_dict[config_name] = 0  # Initialize progress
     
-    message_list.append(f"Starting configuration '{config_name}' ({len(bench_files)} benchmarks)...")
+    progress_queue.put(('message', f"Starting configuration '{config_name}' ({len(bench_files)} benchmarks)..."))
     
     for i, args in enumerate(run_args):
         try:
@@ -191,13 +190,12 @@ def run_config(config, dirs, timestamp, position, progress_dict, message_list):
                 f.write(f"Result:\n{result.result}\n\n")
                 f.write(f"Errors:\n{result.error}")
             
-            # Update progress
-            progress_dict[config_name] = i + 1
+            progress_queue.put(('progress', config_name, i + 1))
         except Exception as exc:
             bench_file = args[1]
-            message_list.append(f"Benchmark {os.path.basename(bench_file)} generated an exception: {exc}")
+            progress_queue.put(('message', f"Benchmark {os.path.basename(bench_file)} generated an exception: {exc}"))
             results.append(BenchmarkResult(bench_file, "Executor Crash", 0, error=str(exc)))
-            progress_dict[config_name] = i + 1  # Still increment progress on failure
+            progress_queue.put(('progress', config_name, i + 1))
 
     return config['name'], results
 
@@ -285,24 +283,23 @@ def main():
 
     # Set up multiprocessing manager for shared progress and messages
     manager = multiprocessing.Manager()
-    progress_dict = manager.dict()  # Tracks completed benchmarks per config
-    message_list = manager.list()   # Collects messages from workers
+    progress_queue = manager.Queue()
     
     # Submit all configurations to the executor
     with concurrent.futures.ProcessPoolExecutor(max_workers=max_workers) as executor:
         future_to_config = {
-            executor.submit(run_config, config, dirs, timestamp, idx + 1, progress_dict, message_list): config['name']
+            executor.submit(run_config, config, dirs, timestamp, idx + 1, progress_queue): config['name']
             for idx, config in enumerate(configs)
         }
         
-        # Initialize progress bars in the main process
+        # Initialize progress bars
         bars = {
             config['name']: tqdm(
                 total=len(list(Path(config['benchmarks']).glob(config['pattern']))),
                 desc=f"Config {config['name']:<10}",
                 unit="test",
                 position=idx + 1,
-                leave=True
+                leave=False  # Bars disappear when done
             )
             for idx, config in enumerate(configs)
         }
@@ -314,21 +311,25 @@ def main():
             leave=True
         )
         
-        # Process messages and update progress bars
+        active_configs = set(config['name'] for config in configs)
+        pending = set(future_to_config.keys())
         completed_configs = 0
-        while completed_configs < len(configs):
-            # Display new messages
-            while message_list:
-                tqdm.write(message_list.pop(0))
+        
+        while pending:
+            done, pending = concurrent.futures.wait(pending, timeout=0.1, return_when=concurrent.futures.FIRST_COMPLETED)
             
-            # Update each configuration's progress bar
-            for config_name, bar in bars.items():
-                current_progress = progress_dict.get(config_name, 0)
-                bar.n = current_progress
-                bar.refresh()
+            # Process queue for messages and progress
+            while not progress_queue.empty():
+                item = progress_queue.get()
+                if item[0] == 'message':
+                    tqdm.write(item[1])
+                elif item[0] == 'progress':
+                    config_name, progress = item[1], item[2]
+                    if config_name in active_configs:
+                        bars[config_name].n = progress
+                        bars[config_name].refresh()
             
-            # Check completed futures and update overall progress
-            done, _ = concurrent.futures.wait(future_to_config, timeout=0.1, return_when=concurrent.futures.FIRST_COMPLETED)
+            # Process completed futures
             for future in done:
                 config_name = future_to_config[future]
                 try:
@@ -341,8 +342,9 @@ def main():
                     completed_configs += 1
                     overall_bar.n = completed_configs
                     overall_bar.refresh()
-                    bars[config_name].close()  # Close the bar for this config
+                    bars[config_name].close()
                     tqdm.write(f"Configuration '{config_name}' completed with {len(results_list)} results.")
+                    active_configs.remove(config_name)
                 except Exception as exc:
                     tqdm.write(f"Configuration '{config_name}' generated an exception during execution: {exc}")
                     all_results[config_name] = []
@@ -351,12 +353,10 @@ def main():
                     overall_bar.refresh()
                     bars[config_name].close()
                     tqdm.write(f"Configuration '{config_name}' failed with exception: {exc}")
+                    active_configs.remove(config_name)
             
-            time.sleep(0.1)  # Small delay to prevent overwhelming the terminal
+            time.sleep(0.1)
         
-        # Ensure all bars are closed
-        for bar in bars.values():
-            bar.close()
         overall_bar.close()
 
     tqdm.write("")
@@ -370,6 +370,7 @@ def main():
             tqdm.write(f"Error writing results file: {e}")
     
     tqdm.write(f"Detailed outputs saved to {dirs['output']}")
+    tqdm.write("Benchmark run completed successfully.")
     
     return 0
 
