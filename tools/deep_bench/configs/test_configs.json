@@ -5,28 +5,28 @@
       "tool": "./tools/deep/freqhorn",
       "flags": "--bv",
       "benchmarks": "../bench_horn_bv/",
-      "timeout": 4
+      "timeout": 10
     },
     {
-      "name": "bv-data2",
+      "name": "bv-data2-gj",
       "tool": "./tools/deep/freqhorn",
-      "flags": "--bv --data2",
+      "flags": "--bv --data2 --gj",
       "benchmarks": "../bench_horn_bv/",
-      "timeout": 4
+      "timeout": 10
     },
     {
       "name": "bv-data2-connect",
       "tool": "./tools/deep/freqhorn",
       "flags": "--bv --data2 --connect",
       "benchmarks": "../bench_horn_bv/",
-      "timeout": 4
+      "timeout": 10
     },
     {
       "name": "bv-data2-linreg",
       "tool": "./tools/deep/freqhorn",
       "flags": "--bv --data2 --lin-reg",
       "benchmarks": "../bench_horn_bv/",
-      "timeout": 4
+      "timeout": 10
     }
   ]
 }

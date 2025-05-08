@@ -686,8 +686,9 @@ namespace ufo
           if (debug >= 1)
           {
             outs() << "  LIA solver failed to find solution.\n";
+            outs() << "  Attempting to strengthen transition relation...\n";
           }
-          return false;
+          // return false;
         }
 
         if (!translateSolutionToBv())
@@ -710,7 +711,36 @@ namespace ufo
           break;
         }
 
-        strengthenTransitionRelation();
+        if(debug >= 5) {
+          outs() << "  Iteration " << i << " completed. No solution found yet.\n";
+          for(auto& b: m_bvSolutionMap) {
+            outs() << "    Relation: " << *b.first << "\n";
+            outs() << "    Solution: " << *b.second << "\n";
+          }
+        }
+
+        if(!strengthenTransitionRelation())
+        {
+          if (debug >= 1)
+          {
+            outs() << "  Failed to strengthen transition relation.\n";
+            outs() << "  Synthesizing alternative invariants...\n";
+          }
+          // Attempt to synthesize alternative invariants
+          // This is a placeholder for the actual synthesis process
+          // In a real implementation, this would involve more complex logic
+          // to generate new invariants based on the current state of the system
+          // For now, we just print a message and exit
+          applyAbduction();
+        }
+        else
+        {
+          if (debug >= 1)
+          {
+            outs() << "  Successfully strengthened transition relation.\n";
+          }
+        }
+        exit(0);
       }
 
       outs() << "Failed to find a safe solution after " << to << " iterations.\n";
@@ -1302,7 +1332,7 @@ namespace ufo
 
       for (auto &hr : m_bvChcs.chcs)
       {
-        if (hr.isQuery)
+        if (hr.isQuery ||hr.isFact)
           continue;
 
         auto it = m_bvSolutionMap.find(hr.dstRelation);
@@ -1312,27 +1342,22 @@ namespace ufo
         Expr dstSolnExpr = it->second;
 
         ExprSet newBody;
-        newBody.insert(hr.body);
         if (m_bvChcs.invVars.count(hr.dstRelation))
         {
           ExprVector &invVars = m_bvChcs.invVars.at(hr.dstRelation);
-          ExprVector &dstVars = hr.dstVars;
+          ExprVector &srcVars = hr.srcVars;
 
-          if (invVars.size() == dstVars.size())
+          if (invVars.size() == srcVars.size())
           {
-            Expr dstSolnSubst = replaceAll(dstSolnExpr, invVars, dstVars);
+            Expr dstSolnSubst = replaceAll(dstSolnExpr, invVars, srcVars);
             newBody.insert(dstSolnSubst);
-            if (debug >= 3)
-            {
-              outs() << "  Strengthening rule for " << *hr.dstRelation << " with: " << *dstSolnSubst << "\n";
-            }
           }
           else
           {
             if (debug >= 1)
             {
               outs() << "  Warning: Variable count mismatch for rule involving " << *hr.dstRelation
-                     << ". Invariant vars (" << invVars.size() << ") vs Destination vars (" << dstVars.size() << ").\n";
+                     << ". Invariant vars (" << invVars.size() << ") vs Destination vars (" << srcVars.size() << ").\n";
             }
           }
         }
@@ -1344,7 +1369,23 @@ namespace ufo
           }
         }
 
-        hr.body = conjoin(newBody, m_efac);
+        Expr newBodyExpr = conjoin(newBody, m_efac);
+        if (debug >= 3)
+        {
+          outs() << "  Strengthening rule for " << *hr.dstRelation << " with: " << newBodyExpr << "\n";
+        }
+
+        if(newBodyExpr == mk<TRUE>(m_efac))
+        {
+          if (debug >= 2)
+          {
+            outs() << "  Warning: New body is TRUE for rule " << *hr.dstRelation << "\n";
+          }
+          return false;
+        }
+        newBody.insert(hr.body);
+        newBodyExpr = conjoin(newBody, m_efac);
+        hr.body = newBodyExpr;
       }
 
       if (debug >= 3)
@@ -1359,6 +1400,56 @@ namespace ufo
     void printSolution()
     {
       printBvSolutionMap(m_bvSolutionMap);
+    }
+
+    void applyAbduction()
+    {
+        if (debug >= 2)
+        {
+            outs() << "  Attempting abduction on the transition relation...\n";
+        }
+
+        // Construct the transition relation by conjoining the bodies of isFact and isInductive clauses
+        ExprSet transitionRelationSet;
+        Expr goal = mk<TRUE>(m_efac); // Default to TRUE if no query is found
+        for (const auto &hr : m_bvChcs.chcs)
+        {
+            if (hr.isFact || hr.isInductive)
+            {
+                transitionRelationSet.insert(hr.body);
+            }
+            if (hr.isQuery)
+            {
+                goal = hr.body;
+                if (debug >= 2)
+                {
+                    outs() << "  Found goal from query clause: " << *goal << "\n";
+                }
+            }
+        }
+        Expr transitionRelation = conjoin(transitionRelationSet, m_efac);
+
+        // Perform abduction to find a hypothesis
+        Expr hypothesis = abduce(goal, transitionRelation);
+
+        if (hypothesis != NULL)
+        {
+            if (debug >= 2)
+            {
+                outs() << "  Abduction successful. Hypothesis:\n";
+                pprint(hypothesis, 4);
+            }
+
+            // Strengthen the transition relation with the abducted hypothesis
+            m_bvSolutionMap[mk<TRUE>(m_efac)] = hypothesis;
+        }
+        else
+        {
+            if (debug >= 1)
+            {
+                outs() << "  Abduction failed. No hypothesis generated.\n";
+            }
+        }
     }
   };
 
