@@ -1402,6 +1402,134 @@ namespace ufo
       printBvSolutionMap(m_bvSolutionMap);
     }
 
+    Expr abduce(Expr goal, Expr assm)
+    {
+      if (debug >= 2)
+      {
+        outs() << "\n--- Starting Abduction Process ---\n";
+        outs() << "  Goal: " << *goal << "\n";
+        outs() << "  Assumption: " << *assm << "\n";
+      }
+
+      ExprFactory &efac = goal->getFactory();
+      SMTUtils u(efac);
+      ExprSet complex;
+      findComplexNumerics(assm, complex);
+      findComplexNumerics(goal, complex);
+      
+      if (debug >= 3)
+      {
+        outs() << "  Found " << complex.size() << " complex numeric expressions to replace\n";
+        if (debug >= 4)
+        {
+          for (auto &expr : complex)
+          {
+            outs() << "    Complex expr: " << *expr << "\n";
+          }
+        }
+      }
+      
+      ExprMap repls;
+      ExprMap replsRev;
+      for (auto &a : complex)
+      {
+        Expr repl = bind::intConst(mkTerm<string>("__repl_" + lexical_cast<string>(repls.size()), efac));
+        repls[a] = repl;
+        replsRev[repl] = a;
+        
+        if (debug >= 5)
+        {
+          outs() << "    Replacing: " << *a << " with " << *repl << "\n";
+        }
+      }
+      
+      Expr goalTmp = replaceAll(goal, repls);
+      Expr assmTmp = replaceAll(assm, repls);
+      
+      if (debug >= 4)
+      {
+        outs() << "  Simplified goal: " << *goalTmp << "\n";
+        outs() << "  Simplified assumption: " << *assmTmp << "\n";
+      }
+
+      ExprSet vars;
+      filter(assmTmp, bind::IsConst(), inserter(vars, vars.begin()));
+      
+      if (debug >= 3)
+      {
+        outs() << "  Eliminating quantifiers over " << vars.size() << " variables\n";
+      }
+      
+      Expr tmp = mkNeg(eliminateQuantifiers(mkNeg(mk<IMPL>(assmTmp, goalTmp)), vars));
+      tmp = replaceAll(tmp, replsRev);
+      
+      if (debug >= 2)
+      {
+        outs() << "  Raw abduction result: " << *tmp << "\n";
+      }
+
+      if (isOpX<FALSE>(tmp))
+      {
+        if (debug >= 1)
+        {
+          outs() << "  Abduction failed: result is FALSE\n";
+        }
+        return NULL; // abduction unsuccessful
+      }
+
+      // sanity check:
+      if (!u.implies(mk<AND>(tmp, assm), goal))
+      {
+        if (debug >= 1)
+        {
+          outs() << "  WARNING: Abduction failed sanity check: " << *mk<AND>(tmp, assm) 
+                 << "\n  does not imply\n  " << *goal << "\n";
+        }
+        return NULL;
+      }
+      
+      if (debug >= 2)
+      {
+        outs() << "  Abduction successful: " << *tmp << "\n";
+      }
+      
+      return tmp;
+    }
+    // inline static Expr abduce(Expr goal, Expr assm)
+    // {
+    //   ExprFactory &efac = goal->getFactory();
+    //   SMTUtils u(efac);
+    //   ExprSet complex;
+    //   findComplexNumerics(assm, complex);
+    //   findComplexNumerics(goal, complex);
+    //   ExprMap repls;
+    //   ExprMap replsRev;
+    //   for (auto &a : complex)
+    //   {
+    //     Expr repl = bind::intConst(mkTerm<string>("__repl_" + lexical_cast<string>(repls.size()), efac));
+    //     repls[a] = repl;
+    //     replsRev[repl] = a;
+    //   }
+    //   Expr goalTmp = replaceAll(goal, repls);
+    //   Expr assmTmp = replaceAll(assm, repls);
+
+    //   ExprSet vars;
+    //   filter(assmTmp, bind::IsConst(), inserter(vars, vars.begin()));
+    //   Expr tmp = mkNeg(eliminateQuantifiers(mkNeg(mk<IMPL>(assmTmp, goalTmp)), vars));
+    //   tmp = replaceAll(tmp, replsRev);
+
+    //   if (isOpX<FALSE>(tmp))
+    //     return NULL; // abduction unsuccessful
+
+    //   // sanity check:
+    //   if (!u.implies(mk<AND>(tmp, assm), goal))
+    //   {
+    //     errs() << "WARNING: abduction fail: " << *mk<AND>(tmp, assm) << "   does not imply " << *goal << "\n";
+    //     return NULL;
+    //   }
+    //   return tmp;
+    // }
+
     void applyAbduction()
     {
         if (debug >= 2)
@@ -1412,7 +1540,7 @@ namespace ufo
         // Construct the transition relation by conjoining the bodies of isFact and isInductive clauses
         ExprSet transitionRelationSet;
         Expr goal = mk<TRUE>(m_efac); // Default to TRUE if no query is found
-        for (const auto &hr : m_bvChcs.chcs)
+        for (const auto &hr : m_liaChcs->chcs)
         {
             if (hr.isFact || hr.isInductive)
             {
@@ -1451,7 +1579,7 @@ namespace ufo
             }
         }
     }
-  };
+  }; // End BitHorn class
 
   inline bool learnInvariants5(string smt, unsigned maxAttempts, unsigned to,
                                bool freqs, bool aggp, int dat, int mut, bool doElim, bool doArithm,

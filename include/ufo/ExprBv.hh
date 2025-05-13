@@ -86,6 +86,8 @@ namespace expr
 
     namespace bv
     {
+      inline bool isBvSort(Expr e) { return isOpX<BVSORT>(e); }
+      
       inline Expr bvsort(unsigned width, ExprFactory &efac)
       {
         return mkTerm<const BvSort>(BvSort(width), efac);
