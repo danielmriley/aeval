@@ -121,7 +121,7 @@ namespace ufo
         m_width(width), 
         m_debug(debug) {}
 
-      CHCs translate(CHCs &input)
+      CHCs translate(CHCs &input, bool includeBounds = false)
       {
         // Clear maps before translation
         m_var_map.clear();
@@ -152,7 +152,12 @@ namespace ufo
         // 3. Translate CHC rules (pass input and result)
         result.chcs = translateClauses(input.chcs, input, result);
 
-        // 4. Copy cycle information 
+        // 4. Add bit-width bounds to all variable constraints if requested
+        if (includeBounds) {
+          addBitWidthBounds(result);
+        }
+
+        // 5. Copy cycle information 
         result.cycleSearchDone = input.cycleSearchDone;
         result.loopheads = input.loopheads;
         result.cycles = input.cycles;
@@ -270,6 +275,126 @@ namespace ufo
         result.findCycles(); // This rebuilds outgs internally
 
         return result;
+      }
+
+      // Add method to apply bit-width bounds to all variables in all clauses
+      void addBitWidthBounds(CHCs &result) 
+      {
+        if (m_debug >= 1) outs() << "Adding bit-width bounds for " << m_width << "-bit variables\n";
+        
+        // Calculate upper and lower bounds
+        mpz_class upperBound, lowerBound;
+        
+        // Support both signed and unsigned bounds - determine by checking operations in rules
+        bool hasSigned = containsSignedOperations(result);
+        
+        if (hasSigned) {
+          // For signed bitvectors: [-2^(width-1), 2^(width-1) - 1]
+          upperBound = expr::op::bv::power(2, m_width-1) - 1;
+          lowerBound = -expr::op::bv::power(2, m_width-1);
+          if (m_debug >= 1) outs() << "Using signed bounds: [" << lowerBound.get_str() << ", " 
+                                   << upperBound.get_str() << "]\n";
+        } else {
+          // For unsigned bitvectors: [0, 2^width - 1]
+          upperBound = expr::op::bv::power(2, m_width) - 1;
+          lowerBound = 0;
+          if (m_debug >= 1) outs() << "Using unsigned bounds: [" << lowerBound.get_str() << ", " 
+                                   << upperBound.get_str() << "]\n";
+        }
+        
+        Expr upperBoundExpr = mkTerm(upperBound, m_efac);
+        Expr lowerBoundExpr = mkTerm(lowerBound, m_efac);
+
+        // Add bounds to each rule by modifying their body constraints
+        for (auto &rule : result.chcs) {
+          ExprSet boundsConstraints;
+          
+          // Add bounds for source variables
+          for (auto var : rule.srcVars) {
+            if (isOpX<FAPP>(var) && isOpX<INT_TY>(bind::typeOf(var))) {
+              boundsConstraints.insert(mk<AND>(
+                mk<LEQ>(var, upperBoundExpr),
+                mk<GEQ>(var, lowerBoundExpr)
+              ));
+            }
+          }
+          
+          // Add bounds for destination variables
+          for (auto var : rule.dstVars) {
+            if (isOpX<FAPP>(var) && isOpX<INT_TY>(bind::typeOf(var))) {
+              boundsConstraints.insert(mk<AND>(
+                mk<LEQ>(var, upperBoundExpr),
+                mk<GEQ>(var, lowerBoundExpr)
+              ));
+            }
+          }
+          
+          // Add bounds for local variables
+          for (auto var : rule.locVars) {
+            if (isOpX<FAPP>(var) && isOpX<INT_TY>(bind::typeOf(var))) {
+              boundsConstraints.insert(mk<AND>(
+                mk<LEQ>(var, upperBoundExpr),
+                mk<GEQ>(var, lowerBoundExpr)
+              ));
+            }
+          }
+          
+          // Update the rule's body with additional bounds constraints
+          if (!boundsConstraints.empty()) {
+            ExprVector allConstraints;
+            allConstraints.push_back(rule.body);
+            
+            for (auto constraint : boundsConstraints) {
+              allConstraints.push_back(constraint);
+            }
+            
+            rule.body = mknary<AND>(allConstraints);
+            
+            if (m_debug >= 3) {
+              outs() << "Added " << boundsConstraints.size() << " bound constraints to rule: ";
+              outs() << rule.srcRelation << " -> " << *rule.dstRelation << "\n";
+            }
+          }
+        }
+      }
+      
+      // Helper to detect signed operations in CHCs
+      bool containsSignedOperations(const CHCs &result) const
+      {
+        for (const auto &rule : result.chcs) {
+          if (containsSignedOp(rule.body)) {
+            return true;
+          }
+        }
+        return false;
+      }
+      
+      // Recursively check for signed operations in an expression
+      bool containsSignedOp(Expr e) const
+      {
+        if (!e) return false;
+        
+        // Original expressions that indicate signed operations
+        if (isOpX<BSLT>(e) || isOpX<BSLE>(e) || 
+            isOpX<BSGT>(e) || isOpX<BSGE>(e) || 
+            isOpX<BSDIV>(e) || isOpX<BSREM>(e) || 
+            isOpX<BSMOD>(e) || isOpX<BASHR>(e)) {
+          return true;
+        }
+        
+        // Check for UN_MINUS in the translated expression (often from signed operations)
+        if (isOpX<UN_MINUS>(e)) {
+          return true;
+        }
+        
+        // Recurse through subexpressions
+        for (unsigned i = 0; i < e->arity(); i++) {
+          if (containsSignedOp(e->arg(i))) {
+            return true;
+          }
+        }
+        
+        return false;
       }
 
       // Add public method to translate individual expressions

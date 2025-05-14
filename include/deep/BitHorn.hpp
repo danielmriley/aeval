@@ -465,7 +465,6 @@ namespace ufo
       }
     }
 
-    // --- New Method Added ---
     bool translateToBv()
     {
       if (debug >= 1)
@@ -511,9 +510,8 @@ namespace ufo
 
       return true;
     }
-    // --- End New Method ---
 
-    bool translateToLia()
+    bool translateToLia(bool addBitWidthBounds = false)
     {
       if (debug >= 1)
       {
@@ -524,7 +522,7 @@ namespace ufo
       origLiaVarsPrime.clear();
 
       delete m_liaChcs;
-      m_liaChcs = new CHCs(m_Bv2LiaTranslator.translate(m_bvChcs));
+      m_liaChcs = new CHCs(m_Bv2LiaTranslator.translate(m_bvChcs, addBitWidthBounds));
 
       if (!m_liaChcs)
       {
@@ -674,7 +672,7 @@ namespace ufo
           outs() << "  Solve iteration: " << i << "\n";
         }
 
-        if (!translateToLia())
+        if (!translateToLia(i > 0))
         {
           outs() << "Error: Failed during BV to LIA translation.\n";
           return false;
@@ -740,7 +738,6 @@ namespace ufo
             outs() << "  Successfully strengthened transition relation.\n";
           }
         }
-        exit(0);
       }
 
       outs() << "Failed to find a safe solution after " << to << " iterations.\n";
