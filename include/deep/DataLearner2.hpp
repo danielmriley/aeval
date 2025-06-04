@@ -12,7 +12,6 @@
 #include <vector>
 #include <numeric> // For std::iota
 #include <stdexcept> // For exceptions
-#include <iomanip> // For printing doubles
 #include <algorithm>
 
 #include "Horn.hpp"
@@ -37,30 +36,18 @@ namespace ufo
     int numRows;
     matrix A;
     vector<bool> freeVars;
+    vector<int> pivotColumns;
     int debug;
 
-    RATIONAL rmod(RATIONAL x, RATIONAL y)
-    { // Modulus for rationals
-      RATIONAL res;
-      res = x / y;
-
-      while (res >= 1)
-      {
-        res -= 1;
-      }
-      return res;
-    }
-
     RATIONAL gcd(RATIONAL x, RATIONAL y)
-    { // GCD for rationals
+    {
       RATIONAL g = boost::multiprecision::gcd(numerator(x), numerator(y));
       RATIONAL l = boost::multiprecision::lcm(denominator(x), denominator(y));
-      RATIONAL res = g / l;
-      return res;
+      return g / l;
     }
 
     RATIONAL gcd(vector<RATIONAL> v)
-    { // GCD for a vector of rationals
+    {
       RATIONAL res = 0;
       if (!v.empty())
       {
@@ -78,7 +65,6 @@ namespace ufo
     cpp_int lcm(vector<cpp_int> v)
     {
       cpp_int res = 1;
-
       if (!v.empty())
       {
         res = v[0];
@@ -100,106 +86,76 @@ namespace ufo
       return -1;
     }
 
-    int rowToSwap(matrix &A, const int p)
+    void removeZeroRows(matrix &A)
     {
-      int pivotRow = p;
-
-      for (int i = p; i < numRows; i++)
-      {
-        if (A[i][p] != 0)
-        {
-          pivotRow = i;
-          break;
-        }
-      }
-
-      return pivotRow;
+      A.erase(std::remove_if(A.begin(), A.end(), [](const vector<RATIONAL> &row)
+                             { return all_of(row.begin(), row.end(), [](RATIONAL val)
+                                             { return val == 0; }); }),
+              A.end());
+      numRows = A.size();
     }
 
     void reducedRowEchelonForm(matrix &A)
     {
       unsigned int cur_row = 0;
-      unsigned int cur_col = 0;
-
-      while (cur_row < numRows && cur_col < numVars)
+      for (unsigned int cur_col = 0; cur_col < numVars && cur_row < numRows; ++cur_col)
       {
-        if (A[cur_row][cur_col] == 0)
+        int pivot_row = cur_row;
+        for (int i = cur_row; i < numRows; ++i)
         {
-          int r = rowToSwap(A, cur_col);
-          if (r == cur_col)
+          if (A[i][cur_col] != 0)
           {
-            cur_col++;
-            continue;
+            pivot_row = i;
+            break;
           }
-          std::swap(A[r], A[cur_row]);
+        }
+        if (A[pivot_row][cur_col] == 0)
+          continue; // Skip column with no pivot
+
+        if (pivot_row != cur_row)
+        {
+          std::swap(A[pivot_row], A[cur_row]);
         }
 
-        // reduce pivot to 1
-        if (A[cur_row][cur_col] != 1)
+        // Normalize pivot to 1
+        RATIONAL divisor = A[cur_row][cur_col];
+        for (int j = 0; j < numVars; ++j)
         {
-          RATIONAL divisor = A[cur_row][cur_col];
-          if (divisor == 0)
-            continue;
-          for (int i = cur_col; i < numVars; i++)
-          {
-            A[cur_row][i] /= divisor;
-          }
+          A[cur_row][j] /= divisor;
         }
-        // Now reduce rows below
-        for (int i = cur_row + 1; i < numRows; i++)
-        {
-          RATIONAL divisor = A[i][cur_col];
-          if (divisor == 0)
-            continue;
-          for (int j = cur_col; j < numVars; j++)
-          {
-            A[i][j] /= divisor;
-            A[i][j] = A[cur_row][j] - A[i][j] * A[cur_row][cur_col];
-          }
-          A[i][cur_col] = 0;
-        }
-        cur_row++;
-        cur_col++;
-      }
 
-      // reduce above
-      while (cur_row > 1)
-      {
-        cur_row--;
-        int cur_col = pivotIndex(A, cur_row);
-        if (cur_col < 0)
-          continue;
-
-        for (int i = cur_row - 1; i >= 0; i--)
+        // Eliminate above and below
+        for (int i = 0; i < numRows; ++i)
         {
-          RATIONAL divisor = A[i][cur_col];
-          if (divisor == 0)
-            continue;
-          for (int j = numVars - 1; j >= cur_col; j--)
+          if (i != cur_row && A[i][cur_col] != 0)
           {
-            A[i][j] = A[i][j] - A[cur_row][j] * divisor;
+            RATIONAL factor = A[i][cur_col];
+            for (int j = 0; j < numVars; ++j)
+            {
+              A[i][j] -= factor * A[cur_row][j];
+            }
           }
         }
+        ++cur_row;
       }
     }
 
     void initFreeVars()
     {
-      for (int i = 0; i < numVars; i++)
-      {
-        freeVars.push_back(true);
-      }
+      freeVars.assign(numVars, true);
     }
 
     void determineFreeVars(matrix &A)
     {
       initFreeVars();
+      pivotColumns.clear();
       for (int i = 0; i < numRows; i++)
       {
         int pivot = pivotIndex(A, i);
         if (pivot >= 0)
         {
           freeVars[pivot] = false;
+          pivotColumns.push_back(pivot);
         }
       }
     }
@@ -235,74 +191,45 @@ namespace ufo
     matrix kernelBasis(matrix &A)
     {
       matrix basis;
-      vector<RATIONAL> basisVector;
+      vector<RATIONAL> basisVector(numVars, 0);
 
       for (int b = 0; b < freeVars.size(); b++)
       {
         if (!freeVars[b])
           continue;
-        for (int i = 0; i < numVars; i++)
+        fill(basisVector.begin(), basisVector.end(), 0);
+        basisVector[b] = 1;
+        for (int i = 0; i < pivotColumns.size(); i++)
         {
-          if (b == i)
-          {
-            basisVector.push_back(1);
-          }
-          else
-          {
-            basisVector.push_back(0);
-          }
-        } // fill in zeros for all vector vars.
-        // Change var values that are not zero. Namely values from pivot rows and a 1 for the var itself.
-        for (int i = 0; i < numRows; i++)
-        {
-          int pivot = pivotIndex(A, i);
-          if (pivot >= 0 && basisVector[pivot] == 0)
+          int pivot = pivotColumns[i];
+          if (pivot < b)
           {
             RATIONAL val = A[i][b];
-            if (val == 0)
-              basisVector[pivot] = val;
-            else
-              basisVector[pivot] = -val;
-          }
-          else
-          {
-            break;
+            basisVector[pivot] = -val;
           }
         }
         basis.push_back(basisVector);
         if (debug >= 1)
           printVector(basisVector);
-        basisVector.clear();
       }
       return basis;
     }
 
     matrix findBasis(matrix &A)
     {
-      // identify free vars and extract basis vectors
       determineFreeVars(A);
       if (debug >= 1)
       {
         printFreeVars();
         cout << "\n";
       }
-      matrix basis = kernelBasis(A);
-      return basis;
+      return kernelBasis(A);
     }
 
     void printCands(matrix &B)
     {
       int n = B.size();
-      int m;
-      if (n == 0)
-      {
-        m = 0;
-      }
-      else
-      {
-        m = B[0].size();
-      }
-
+      int m = n > 0 ? B[0].size() : 0;
       cout << "==  CANDS  ==\n";
       for (int i = 0; i < n; i++)
       {
@@ -316,18 +243,22 @@ namespace ufo
 
     void removeFractions(matrix &A)
     {
-      for (int i = 0; i < A.size(); i++)
+      if (A.empty())
+        return;
+      vector<cpp_int> denominators;
+      for (const auto &row : A)
       {
-        vector<cpp_int> denominators;
-        for (int j = 0; j < A[i].size(); j++)
+        for (const auto &val : row)
         {
-          cpp_int d = denominator(A[i][j]);
-          denominators.push_back(d);
+          denominators.push_back(denominator(val));
         }
-        cpp_int multiplier = lcm(denominators);
-        for (int j = 0; j < numVars; j++)
+      }
+      cpp_int multiplier = lcm(denominators);
+      for (auto &row : A)
+      {
+        for (auto &val : row)
         {
-          A[i][j] = A[i][j] * multiplier;
+          val *= multiplier;
         }
       }
       if (debug >= 1)
@@ -342,11 +273,9 @@ namespace ufo
     {
       if (A.empty())
       {
-        numVars = 0;
-        numRows = 0;
+        numVars = numRows = 0;
         return;
       }
-
       numVars = A[0].size();
       numRows = A.size();
     }
@@ -367,43 +296,31 @@ namespace ufo
         }
         cout << "\n";
       }
-      //  cout << "\n";
     }
 
     matrix findKernelBasis()
     {
-      numVars = A[0].size();
-      numRows = A.size();
-
-      if (debug >= 1)
-      {
-        printMatrix(A);
-        cout << "\n";
-      }
-
+      if (A.empty())
+        return matrix();
+      removeZeroRows(A);
+      if (A.empty())
+        return matrix(); // All rows were zero
       reducedRowEchelonForm(A);
-
+      removeZeroRows(A);
       if (debug >= 1)
       {
         printMatrix(A);
         cout << "\n";
       }
-
-      // Now find basis vectors.
       matrix basis = findBasis(A);
       if (!basis.empty())
         removeFractions(basis);
       if (debug >= 1)
-      {
         printCands(basis);
-      }
-
       return basis;
     }
   }; // End class BasisFinder
 
-
-  // --- Updated LinearRegressor Class ---
   class LinearRegressor
   {
   private:
@@ -414,7 +331,6 @@ namespace ufo
           int type; // 0: linear, 1: square, 2: interaction, 3: intercept
           int idx1 = -1, idx2 = -1; // Original variable indices (relative to independent vars)
 
-          // Default constructor (optional, but good practice)
           TermInfo() : type(-1), idx1(-1), idx2(-1) {}
 
           // Constructor for intercept (type 3)
@@ -844,56 +760,51 @@ namespace ufo
               printMatrixR(y, "y Vector (Rational)");
           }
 
-          try {
-              matrix Xt = transpose(X_augmented); // Use augmented matrix
-              printMatrixR(Xt, "X_Augmented Transpose (Rational)");
+          matrix Xt = transpose(X_augmented); // Use augmented matrix
+          printMatrixR(Xt, "X_Augmented Transpose (Rational)");
 
-              matrix XtX = multiply(Xt, X_augmented); // Use augmented matrix
-              printMatrixR(XtX, "X_Augmented_Transpose * X_Augmented (Rational)");
+          matrix XtX = multiply(Xt, X_augmented); // Use augmented matrix
+          printMatrixR(XtX, "X_Augmented_Transpose * X_Augmented (Rational)");
 
-              matrix XtX_inv = invert(XtX); // Use RATIONAL inversion
-               if (XtX_inv.empty()) {
-                   if (debug >= 1) outs() << "Warning: (X_Augmented^T * X_Augmented) matrix is singular, cannot perform regression.\n";
-                   return false;
-               }
-              printMatrixR(XtX_inv, "(X_Augmented_Transpose * X_Augmented)^-1 (Rational)");
+          matrix XtX_inv = invert(XtX); // Use RATIONAL inversion
+            if (XtX_inv.empty()) {
+                if (debug >= 1) outs() << "Warning: (X_Augmented^T * X_Augmented) matrix is singular, cannot perform regression.\n";
+                return false;
+            }
+          printMatrixR(XtX_inv, "(X_Augmented_Transpose * X_Augmented)^-1 (Rational)");
 
-              matrix XtY = multiply(Xt, y); // Uses Strassen potentially
-              printMatrixR(XtY, "X_Augmented_Transpose * y (Rational)");
+          matrix XtY = multiply(Xt, y); // Uses Strassen potentially
+          printMatrixR(XtY, "X_Augmented_Transpose * y (Rational)");
 
-              matrix beta_matrix = multiply(XtX_inv, XtY); // Uses Strassen potentially
-              printMatrixR(beta_matrix, "Beta Coefficients Matrix (Rational)");
+          matrix beta_matrix = multiply(XtX_inv, XtY); // Uses Strassen potentially
+          printMatrixR(beta_matrix, "Beta Coefficients Matrix (Rational)");
 
-              // Extract coefficients
-              coefficients.resize(beta_matrix.size());
-              for(size_t i = 0; i < beta_matrix.size(); ++i) {
-                  coefficients[i] = beta_matrix[i][0]; // Store RATIONAL coefficients
-              }
-
-              if (debug >= 1) {
-                  outs() << "Regression Coefficients (Beta - Rational): [";
-                  for(size_t i=0; i < coefficients.size(); ++i) {
-                      outs() << coefficients[i] << (i == coefficients.size() - 1 ? "" : ", ");
-                  }
-                  outs() << "]\n";
-                  if (debug >= 2) {
-                      outs() << "Coefficient Term Mapping:\n";
-                      for(size_t i=0; i < coefficients.size(); ++i) {
-                          outs() << "  coeff[" << i << "] (" << coefficients[i] << "): ";
-                          const auto& term = term_mapping[i];
-                          if (term.type == 0) outs() << "linear(x" << term.idx1 << ")\n";
-                          else if (term.type == 1) outs() << "square(x" << term.idx1 << "^2)\n";
-                          else if (term.type == 2) outs() << "interaction(x" << term.idx1 << "*x" << term.idx2 << ")\n";
-                          else if (term.type == 3) outs() << "intercept\n";
-                      }
-                  }
-              }
-              return true;
-
-          } catch (const std::exception& e) {
-              outs() << "Error during regression calculation: " << e.what() << "\n";
-              return false;
+          // Extract coefficients
+          coefficients.resize(beta_matrix.size());
+          for(size_t i = 0; i < beta_matrix.size(); ++i) {
+              coefficients[i] = beta_matrix[i][0]; // Store RATIONAL coefficients
           }
+
+          if (debug >= 1) {
+              outs() << "Regression Coefficients (Beta - Rational): [";
+              for(size_t i=0; i < coefficients.size(); ++i) {
+                  outs() << coefficients[i] << (i == coefficients.size() - 1 ? "" : ", ");
+              }
+              outs() << "]\n";
+              if (debug >= 2) {
+                  outs() << "Coefficient Term Mapping:\n";
+                  for(size_t i=0; i < coefficients.size(); ++i) {
+                      outs() << "  coeff[" << i << "] (" << coefficients[i] << "): ";
+                      const auto& term = term_mapping[i];
+                      if (term.type == 0) outs() << "linear(x" << term.idx1 << ")\n";
+                      else if (term.type == 1) outs() << "square(x" << term.idx1 << "^2)\n";
+                      else if (term.type == 2) outs() << "interaction(x" << term.idx1 << "*x" << term.idx2 << ")\n";
+                      else if (term.type == 3) outs() << "intercept\n";
+                  }
+              }
+          }
+          return true;
+
       }
 
       // Constructs an expression like y = c0*x0 + c1*x1 + ... + c_k*x0^2 + c_{k+1}*x0*x1 + ... + intercept using RATIONAL
@@ -960,9 +871,7 @@ namespace ufo
 
           return norm_expr;
       }
-  };
-  // --- End LinearRegressor Class ---
-
+  }; // End class LinearRegressor
 
   class DataLearner2
   {
@@ -1154,26 +1063,6 @@ namespace ufo
       return A;
     }
 
-    // Helper to convert double matrix to rational matrix for regression
-    matrix doubleToRationalForRegression(const matrix_double& models_double)
-    {
-      matrix A;
-      if (models_double.empty()) return A;
-      size_t rows = models_double.size();
-      size_t cols = models_double[0].size();
-      A.resize(rows, vector<RATIONAL>(cols));
-      for (size_t i = 0; i < rows; i++)
-      {
-        for (size_t j = 0; j < cols; j++)
-        {
-          // Direct conversion, consider precision needs if required
-          A[i][j] = static_cast<RATIONAL>(models_double[i][j]);
-        }
-      }
-      return A;
-    }
-
-
     void computeData(Expr srcRel)
     {
       // Convert double models to rational for BasisFinder (includes leading 1)
@@ -1200,6 +1089,7 @@ namespace ufo
   public:
     DataLearner2(CHCs &r, EZ3 &z3, int _debug = 0) : ruleManager(r), bnd(ruleManager, (_debug > 0)), m_efac(r.m_efac), debug(_debug) {}
 
+    // DR: unrollAndExecuteTermPhase is not used in this version of BndExpl. To be added later.
     // boost::tribool connectPhase(Expr src, Expr dst, int k = 1,
     //                 Expr srcRel = NULL, Expr block = NULL, Expr invs = NULL,
     //                 Expr preCond = NULL, bool doGJ = false, bool doConnect = false,
@@ -1229,7 +1119,6 @@ namespace ufo
     //   return res;
     // }
 
-    // --- Updated method to compute linear regression candidates ---
     void computeLinearRegressionCands(Expr srcRel) {
         if (debug >= 1) outs() << "\n======== COMPUTE LINEAR REGRESSION (RATIONAL, QUADRATIC ENABLED) ========\n";
         if (models.find(srcRel) == models.end() || invVars.find(srcRel) == invVars.end()) {
@@ -1237,7 +1126,7 @@ namespace ufo
             return;
         }
 
-        const matrix_double& model_data_double = models[srcRel]; // Still double from BndExpl
+        const matrix_double& model_data_double = models[srcRel];
         const ExprVector& variables = invVars[srcRel];
 
         if (model_data_double.empty() || variables.empty()) {
@@ -1252,7 +1141,7 @@ namespace ufo
         }
 
         // Convert model data from double to rational for the regressor
-        matrix model_data_rational = doubleToRationalForRegression(model_data_double);
+        matrix model_data_rational = doubleToRational(model_data_double);
 
         LinearRegressor regressor(debug);
 
@@ -1273,7 +1162,6 @@ namespace ufo
         }
          if (debug >= 1) outs() << "=======================================================================\n";
     }
-    // --- End updated method ---
 
 
     ExprVector exprForRows(Expr srcRel)

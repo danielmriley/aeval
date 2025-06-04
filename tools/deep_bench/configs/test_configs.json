@@ -2,92 +2,50 @@
   "configs": [
     {
       "name": "data1",
-      "tool": "./tools/deep/freqhorn",
+      "tool": "ffreqhorn",
       "flags": "--v4 --data",
       "benchmarks": "../bench_horn/",
       "timeout": 300
     },
     {
-      "name": "data2-gj",
-      "tool": "./tools/deep/freqhorn",
-      "flags": "--v4 --data2 --gj",
+      "name": "data1-phasedata",
+      "tool": "ffreqhorn",
+      "flags": "--v4 --data --phase-data --all-mbp",
       "benchmarks": "../bench_horn/",
       "timeout": 300
     },
     {
-      "name": "data2-linreg",
-      "tool": "./tools/deep/freqhorn",
-      "flags": "--v4 --data2 --lin-reg",
+      "name": "data1-phasedata-phaseprop",
+      "tool": "ffreqhorn",
+      "flags": "--v4 --data --phase-data --all-mbp --phase-prop",
       "benchmarks": "../bench_horn/",
       "timeout": 300
     },
     {
-      "name": "data2-connect",
+      "name": "data2-gj-phasedata",
       "tool": "./tools/deep/freqhorn",
-      "flags": "--v4 --data2 --connect",
+      "flags": "--v4 --phase-data --all-mbp --data2 --gj",
       "benchmarks": "../bench_horn/",
       "timeout": 300
     },
     {
-      "name": "data2-gj-linreg-connect",
+      "name": "data2-linreg-phasedata-strenmbp",
       "tool": "./tools/deep/freqhorn",
-      "flags": "--v4 --data2 --gj --connect --lin-reg",
+      "flags": "--v4 --phase-data --all-mbp --stren-mbp --data2 --lin-reg",
       "benchmarks": "../bench_horn/",
       "timeout": 300
     },
     {
-      "name": "data2-gj-linreg-connect-phasedata",
+      "name": "data2-gj-linreg-phasedata-phaseprop",
       "tool": "./tools/deep/freqhorn",
-      "flags": "--v4 --phase-data --all-mbp --data2 --gj --connect --lin-reg",
+      "flags": "--v4 --phase-data --all-mbp --phase-prop --data2 --gj --lin-reg",
       "benchmarks": "../bench_horn/",
       "timeout": 300
     },
     {
-      "name": "data2-gj-linreg-connect-phasedata-strenmbp",
+      "name": "data2-linreg-phasedata-phaseprop",
       "tool": "./tools/deep/freqhorn",
-      "flags": "--v4 --phase-data --all-mbp --stren-mbp --data2 --gj --connect --lin-reg",
-      "benchmarks": "../bench_horn/",
-      "timeout": 300
-    },
-    {
-      "name": "data2-gj-linreg-connect-phasedata-phaseprop",
-      "tool": "./tools/deep/freqhorn",
-      "flags": "--v4 --phase-data --all-mbp --phase-prop --data2 --gj --connect --lin-reg",
-      "benchmarks": "../bench_horn/",
-      "timeout": 300
-    },
-    {
-      "name": "data2-linreg-connect-phasedata-strenmbp",
-      "tool": "./tools/deep/freqhorn",
-      "flags": "--v4 --phase-data --all-mbp --stren-mbp --data2 --connect --lin-reg",
-      "benchmarks": "../bench_horn/",
-      "timeout": 300
-    },
-    {
-      "name": "data2-linreg-connect-phasedata-phaseprop",
-      "tool": "./tools/deep/freqhorn",
-      "flags": "--v4 --phase-data --all-mbp --phase-prop --data2 --connect --lin-reg",
-      "benchmarks": "../bench_horn/",
-      "timeout": 300
-    },
-    {
-      "name": "data2-gj-linreg",
-      "tool": "./tools/deep/freqhorn",
-      "flags": "--v4 --data2 --gj --lin-reg",
-      "benchmarks": "../bench_horn/",
-      "timeout": 300
-    },
-    {
-      "name": "data2-gj-connect",
-      "tool": "./tools/deep/freqhorn",
-      "flags": "--v4 --data2 --gj --connect",
-      "benchmarks": "../bench_horn/",
-      "timeout": 300
-    },
-    {
-      "name": "data2-linreg-connect",
-      "tool": "./tools/deep/freqhorn",
-      "flags": "--v4 --data2 --lin-reg --connect",
+      "flags": "--v4 --phase-data --all-mbp --phase-prop --data2 --lin-reg",
       "benchmarks": "../bench_horn/",
       "timeout": 300
     }
