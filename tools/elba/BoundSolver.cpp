@@ -89,6 +89,7 @@ int main (int argc, char ** argv)
   bool mi = getBoolValue("--mi", false, argc, argv);  // mutate inferred
   bool so = getBoolValue("--so", false, argc, argv);  // separate ops.
   int  md = getIntValue("--md", 0, argc, argv);       // mutate results from data.
+  bool tk = false;
   bool data2 = getBoolValue("--data2", false, argc, argv);
   bool doPhases = getBoolValue("--phase-data", false, argc, argv);
 
