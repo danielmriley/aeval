@@ -57,8 +57,21 @@ vector<string> getCommaSepStrValues(const char * opt, vector<string> defValue, i
 
 int main (int argc, char ** argv)
 {
-  if (getBoolValue("--help", false, argc, argv) || argc == 1){
-    outs () <<   "TODO                                \n";
+  if (getBoolValue("--help", false, argc, argv) || getBoolValue("-h", false, argc, argv) || argc == 1)
+  {
+    outs() << "Usage: ./elba [options]\n\n"
+              "Options:\n"
+              "  -h, --help       Display this help message\n"
+              "  --learn <int>    Set the learning parameter (default: 2)\n"
+              "  --limit <int>    Set the unrolling limit (default: 3)\n"
+              "  --debug <int>    Set the debug level (default: 0)\n"
+              "  --md <int>       Set the mutation depth for data results (default: 0)\n"
+              "  --data-guards    Disable the use of data guards (default: enabled)\n"
+              "  --gj             Enable Gauss Jordan elimination\n"
+              "  --dc             Enable Connect algorithm (Default if neither GJ or Connect chosen.)\n"
+              "  --ac             Enable abstraction of large constants\n"
+              "  --di             Enable data inference\n"
+              "  --mi             Enable mutation of inferred results\n";
     return 0;
   }
 
@@ -75,7 +88,6 @@ int main (int argc, char ** argv)
   bool imp = getBoolValue("--ei", false, argc, argv); // enable second implication
   bool mi = getBoolValue("--mi", false, argc, argv);  // mutate inferred
   bool so = getBoolValue("--so", false, argc, argv);  // separate ops.
-  bool tk = getBoolValue("--tk", false, argc, argv);  // check projections from abduction.
   int  md = getIntValue("--md", 0, argc, argv);       // mutate results from data.
   bool data2 = getBoolValue("--data2", false, argc, argv);
   bool doPhases = getBoolValue("--phase-data", false, argc, argv);
