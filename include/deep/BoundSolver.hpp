@@ -325,7 +325,7 @@ namespace ufo
     {
       if(debug >= 5) outs() << "\n==========\n  TR body: " << tr->body << "\n\n";
       if(debug >= 5) outs() << "Previous Bound: " << prevBound << "\n";
-      // HornRuleExt* tr_new = new HornRuleExt();
+
       ExprSet conjs;
       getConj(tr->body, conjs);
       bool erased = false;
@@ -364,53 +364,6 @@ namespace ufo
       if (weak)
       {
         if (debug >= 3) outs () << "try weakening\n";
-
-        // ExprSet cannot, cannotSpec;
-        // while (true)
-        // {
-        //   auto it = candidates [specDecl].begin();
-        //   for (; it != candidates [specDecl].end();)
-        //   {
-        //     Expr cand = *it;
-        //     if (find(cannotSpec.begin(), cannotSpec.end(), cand) != cannotSpec.end() ||
-        //         lexical_cast<string>(cand).find("gh") != std::string::npos)  // hack for now
-        //     {
-        //       ++it;
-        //       continue;
-        //     }
-        //
-        //     if (u.implies(src, cand))
-        //     {
-        //       ++it;
-        //       continue;
-        //     }
-        //
-        //     if (debug >= 2) outs () << "can remove: " << cand << "?\n";
-        //                 outs () << candidates [specDecl].size() << ". " << candidates [invDecl].size() << "\n";
-        //     it = candidates [specDecl].erase(it);
-        //     auto r = replaceAll(*it, fc->srcVars, tr->srcVars);
-        //     candidates [invDecl].erase(r);
-        //
-        //     outs () << candidates [specDecl].size() << ". " << candidates [invDecl].size() << "\n";
-        //     auto res = checkAllOver(checkQuery, false, src, dst);
-        //     if (debug >= 5)   outs () << "checkAllOver (nest):  " << res << "\n";
-        //     if (!res)
-        //     {
-        //       outs () << "inseer back\n";
-        //       cannot.insert(r);
-        //       cannotSpec.insert(cand);
-        //       break;
-        //     }
-        //
-        //   }
-        //
-        //   auto res = (it == candidates [specDecl].end());
-        //   candidates [specDecl].insert(cannotSpec.begin(), cannotSpec.end());
-        //   candidates [invDecl].insert(cannot.begin(), cannot.end());
-        //   if (res) break;
-        //
-        // }
-
 
         for (auto & a : candidates)
         {
@@ -517,7 +470,7 @@ namespace ufo
       return false;
     }
 
-    void filterUnsat() // Maybe the rndv3 version can be adapted?
+    void filterUnsat()
     {
      vector<HornRuleExt*> worklist;
      for (auto & a : candidates)
@@ -534,7 +487,7 @@ namespace ufo
        if (!u.isSat(a.second))
        {
          ExprVector tmp;
-         ExprVector stub; // TODO: try greedy search, maybe some lemmas are in stub?
+         ExprVector stub; 
          u.splitUnsatSets(a.second, tmp, stub);
          a.second.clear();
          a.second.insert(tmp.begin(), tmp.end());
@@ -544,27 +497,7 @@ namespace ufo
 
     bool multiHoudiniExtr(vector<HornRuleExt*>& worklist, bool recur = true)
     {
-      //GF: to check -- if this weaken is needed
-      // ExprSet e1, e2;
-      // for (auto & c : candidates[specDecl])
-      // {
-      //   if (isOpX<LT>(c)) e1.insert(mk<LEQ>(c->left(), c->right()));
-      //   if (isOpX<GT>(c)) e1.insert(mk<GEQ>(c->left(), c->right()));
-      // }
-      //
-      // candidates[specDecl].insert(e1.begin(), e1.end());
-      //
-      // for (auto & c : candidates[invDecl])
-      // {
-      //   if (isOpX<LT>(c)) e2.insert(mk<LEQ>(c->left(), c->right()));
-      //   if (isOpX<GT>(c)) e2.insert(mk<GEQ>(c->left(), c->right()));
-      // }
-      //
-      // candidates[invDecl].insert(e2.begin(), e2.end());
-
-      // printCandsEx();
-
-      return multiHoudini(worklist, recur);
+            return multiHoudini(worklist, recur);
     }
 
     // adapted from RndLearnerV3
@@ -761,12 +694,8 @@ namespace ufo
           ++it;
           continue;
         }
-        // outs () << "see if can remove " << cand << "\nvars: ";
         ExprSet vars;
-        // for (auto it2 = prjcts.begin(); it2 != prjcts.end(); ++it2)
-        //   if (it != it2)
-        //     filter (*it2, bind::IsConst (), inserter (vars, vars.begin()));
-
+        
         filter (loopGuard, bind::IsConst (), inserter (vars, vars.begin()));
 
         ExprVector copyNames, copyNamesPr, eq1, eq2;
@@ -825,7 +754,6 @@ namespace ufo
       }
       BndExpl bnd(ruleManager, (debug > 0));
       ExprSet cands;
-      // vector<int>& cycle = ruleManager.cycles[0];
       HornRuleExt* hr = &ruleManager.chcs[0];
       Expr rel = hr->srcRelation;
       int invNum = getVarIndex(invDecl, decls);
@@ -834,13 +762,6 @@ namespace ufo
       assert(srcVars.size() == dstVars.size());
       ExprSet dstVarsSet;
       for (auto& d: dstVars) dstVarsSet.insert(d);
-      // cycle.pop_back();
-      // cycle.push_back(1);
-      // Expr ssa = bnd.toExpr(cycle);
-      //
-      // ssa = replaceAll(ssa, bnd.bindVars.back(), dstVars);
-      // ssa = rewriteSelectStore(ssa);
-      // retrieveDeltas(ssa, srcVars, dstVars, cands);
 
       ExprVector vars2keep, prjcts, prjcts1, prjcts2;
       ExprSet prjctsTmp;
@@ -1028,7 +949,6 @@ namespace ufo
             outs () << "   want to assign: " << join->right() << "\n";
           }
           continue;
-          // assert(0 && "ERROR: guards already assigned\n");
         }
         {
           if(debug >= 4) outs () << "  ASSIGNING grds2gh for " << grd << ":\n   " << join->right() << "\n";
@@ -1143,7 +1063,6 @@ namespace ufo
         outs() << "SRC: " << src << std::endl;
         outs() << "SRC2: " << src << std::endl;
       }
-      // src = mk<AND>(src, previousGuard);
 
       auto src1 = u.simplifiedAnd(block, src);
       if(debug >= 5) {
@@ -1160,7 +1079,7 @@ namespace ufo
       if (isOpX<TRUE>(block)) {
         src1 = replaceAll(src1, invVars, fc->srcVars);
       }
-      // src1 = mk<AND>(src1, previousGuard);
+
       res = dl2.connectPhase(src1, dst1, 3, invDecl, block, invs, loopGuard);
       if (res == true) {
         dl2.getDataCands(candMap[invDecl], invDecl);  // GF
@@ -1190,21 +1109,6 @@ namespace ufo
           if (u.implies(mk<AND>(*it, tr->body),
                    replaceAll(*it, tr->srcVars, tr->dstVars)))
             ++it; else it = cnjs.erase(it);
-
-        // outs () << "    INV:    " << conjoin(cnjs, m_efac) << "\n";
-        if (u.implies(mk<AND>(mk<NEG>(src),
-                conjoin(cnjs, m_efac)), mk<NEG>(mk<AND>(dst, stren[dst]))))
-          {} //outs () << "  SANE \n";
-        else
-        {
-          outs () << "  INSANE \n";
-          // if you see this, then we may have a soundness issue.
-          // need to manually check the reported solution.
-          // (and also need to fix something in the code)
-          outs() << u.getModel() << "\n";
-        }
-      // check actual reachability:
-      // if (u.implies());
       }
 
       if(debug >= 5) {
@@ -1246,7 +1150,6 @@ namespace ufo
           outs() << "ghCandMap[" << invDecl << "]: " << e << "\n";
         }
       }
-      // break odd/even
 
       return res;
     }
@@ -1290,8 +1193,6 @@ namespace ufo
           vars.push_back(tr->srcVars[i]);
           varsPr.push_back(tr->dstVars[i]);
         }
-
-        // if (vars.size() > 2) continue;  GF: to check if uncommenting this line helps anywhere
 
         auto b = replaceAll(
                   keepQuantifiers(mk<AND>(a, learnedLemmasInv, tr->body), varsPr),
@@ -1372,7 +1273,7 @@ namespace ufo
       if (isOpX<FALSE>(dst))
       {
         grds2gh[src] = ghostValue;
-        // grds2gh[src] = mkMPZ(0, m_efac;
+
         if (debug >= 4) outs () << "  assign 0 grds2gh (0) for " << src << "\n";
         return true;
       }
@@ -1386,7 +1287,7 @@ namespace ufo
         return true;
       }
       else if (res == indeterminate) {
-        outs () << "unknown\n";     // TODO: actually some backtracking !!
+        outs () << "unknown\n";     
         exit(0);
         // return indeterminate;
       }
@@ -1395,7 +1296,6 @@ namespace ufo
       getConj(dst, grdsDst);
       genCands(grdsDst, ghostVars[0]);
       getConj(src, grds);
-      // grds.insert(previousGuard);
 
       zs.clear();
       if (dg) {
@@ -1460,7 +1360,7 @@ namespace ufo
       boundsV.insert(boundsV.end(), nb.begin(), nb.end());
       sortBounds(boundsV);
 
-      if (debug >= 4) {  //GF
+      if (debug >= 4) {
         outs() << "\n  Bounds found this iteration\n";
         for (auto& e: boundsV) {
           outs() << "    " << e << "\n";
@@ -1519,7 +1419,7 @@ namespace ufo
           if (debug >= 3) outs() << "  unknown\n\n";
           if (std::next(b) == end) {
             if (phaseNum < phases.size()) {
-              boundSolveRec(src, dst, mk<TRUE>(m_efac), lvl); // refactor to remove this recursion.
+              boundSolveRec(src, dst, mk<TRUE>(m_efac), lvl);
             }
           }
           if(debug >= 5) {
@@ -1528,8 +1428,6 @@ namespace ufo
           continue;
         }
 
-        // If you're here then G&S returned UNSAT
-        // Yes, I'm here.
         if (debug >= 4) outs() << "  >> unsat (bound is good)\n";
         rerun = false;
 
@@ -1553,8 +1451,7 @@ namespace ufo
         Expr grd = disjoin(grds2,m_efac);
         if (debug >= 5) outs() << "mkNeg(grd): " << mkNeg(grd) << " AND " << src << std::endl;;
         if (u.isSat(mkNeg(grd), src)) {
-          // if(b != end) { continue; }
-          if (boundSolveRec(src, dst, mkNeg(grd), lvl + 1)) { // refactor to remove this recursion.
+          if (boundSolveRec(src, dst, mkNeg(grd), lvl + 1)) {
             exploredBounds.clear();
             return true;
           }
@@ -1581,17 +1478,6 @@ namespace ufo
       }
     }
 
-    // Expr simplifyBound(Expr bound) {
-    //   ExprSet initConjs;
-    //   Expr normalizedInit = normalize(fcBodyInvVars);
-    //   outs() << "NNNOOOO: " << normalizedInit << "\n";
-    //   // getConj(normalizedInit, initConjs);
-    //   // for(auto& e: initConjs) {
-    //   //   if()
-    //   // }
-    //   // exit(0);
-    // }
-
     ExprSet pathsSolve()
     {
       ExprSet finals;
@@ -1617,14 +1503,10 @@ namespace ufo
         for (i = p.size() - 2; i >= 0; i--)
         {
           if (debug >= 4) outs () << "STEP " << i << "\n";
-          // outs() << p[1] << std::endl;
-          // outs() << p[0] << std::endl;
-          // outs() << fcBodyInvVars << std::endl;
 
           if (p[i] == fcBodyInvVars)
           {
             assert(i == 0);
-            // outs() << "BREAK\n";
             stren[p[i]] = NULL;
             break;
           }
@@ -1638,18 +1520,14 @@ namespace ufo
             if (u.implies(g.first, p[i]))
             {
               pre.insert(g.first);
-              // res = g.second;
               if (res == NULL) res = g.second;
-              else res = mk<ITE>(g.first, g.second, res);   // GF
+              else res = mk<ITE>(g.first, g.second, res);
             }
           }
           stren[p[i]] = simplifyBool(distribDisjoin(pre, m_efac));
           if(debug >= 4) outs() << "stren[" << i << "] : " << stren[p[i]] << std::endl;
           if (i != 0) grds2gh[p[i]] = res;
         }
-        // previousGuard = simplifyBool(previousGuard);
-        // simplify the bound if possible.
-        // res = simplifyBound(res);
         ant = mk<AND>(previousGuard,stren[p[1]]);
         ant = normalize(ant);
         ant = simplifyArithm(ant);
@@ -1713,7 +1591,6 @@ namespace ufo
     if (debug >= 6)
     {
       ruleManager.print(false);
-      // queries are now added automatically in Horn.hpp.
       outs() << ruleManager.cycles.size() << "\n";
       for (auto &cc : ruleManager.cycles)
       {

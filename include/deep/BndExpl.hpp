@@ -877,17 +877,6 @@ namespace ufo
               mainInds.push_back(i);
               vars.push_back(var);
             }
-            else if (isConst<ARRAY_TY> (var) && ruleManager.hasAnyArrays)
-            {
-              /*
-              Expr v = findSelect(loop[0], i);
-              if (v != NULL)
-              {
-                vars.push_back(v);
-                mainInds.push_back(-i - 1);  // to be on the negative side
-                //              varsMask.push_back(srcVars[i]);
-              }*/
-            }
           }
           if (vars.size() < 2 && cyc == ruleManager.cycles[invRel].size() - 1) {
             if(debug) {
@@ -903,7 +892,6 @@ namespace ufo
           int l = 0;                        // starting index (before the loop)
           if (ruleManager.hasAnyArrays) l++; // first iter is usually useless
 
-          // if(isOpX<TRUE>(gh_cond)) trace.push_back(0);
           for (int j = 0; j < k; j++)
             for (int m = 0; m < loop.size(); m++)
               trace.push_back(loop[m]);
@@ -912,10 +900,7 @@ namespace ufo
           ssa.push_back(src);
           ssa.push_back(gh_cond);
           getSSA(trace, ssa);
-          // for(int i = 0; i < bindVars.size() ; i++)
-          // {
-          //   ssa.push_back(replaceAll(gh_cond, srcVars, bindVars[i]));
-          // }
+
           ssa.push_back(replaceAll(dst, srcVars, bindVars[bindVars.size() - 1]));
           if(debug) {
             outs() << "SSA BND: ";
@@ -935,20 +920,17 @@ namespace ufo
           {
             if (debug) {
               outs () << "  BMC formula unsat\n";
-              // pprint(ssa,2);
             }
             return false;
           }
 
           ExprMap allModels;
           u.getModel(allVars, allModels);
-          // pprint(u.getModel());
           vector<double> _model;
           for(int d = 0; d < srcVars.size(); d++)
           {
             
             _model.push_back(lexical_cast<double>(u.getModel(srcVars[d])));
-            // outs() << "Model value: " << srcVars[d] << " = " << _model.back() << "\n";
           }
           models.push_back(_model);
 
@@ -983,8 +965,6 @@ namespace ufo
               else
               {
                 value = 132; // hack just to produce "some" matrix (could have any constant here)
-                // toSkip = true;
-                // break;
               }
               model.push_back(value);
               if (debug) outs () << *bvar << " = " << (int)value << ", ";
@@ -1027,7 +1007,6 @@ namespace ufo
           vector<int> mainInds;
           auto & loop = ruleManager.cycles[invRel][cyc];
           Expr srcRel = invRel;
-          // Expr srcRel = ruleManager.chcs[loop[0]].srcRelation;
           ExprVector& srcVars = ruleManager.chcs[loop[0]].srcVars;
           if (models[srcRel].size() > 0) continue;
 
@@ -1051,9 +1030,6 @@ namespace ufo
             }
           }
 
-          // Find another check to make to skip some unrollings DR
-          // if (vars.size() < 2 && cyc == ruleManager.cycles[invRel].size() - 1)
-          // continue; // does not make much sense to run with only one var when it is the last cycle
           invVars[srcRel] = vars;
 
           auto & prefix = ruleManager.prefixes[invRel][cyc];

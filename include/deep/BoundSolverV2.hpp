@@ -42,7 +42,6 @@ namespace ufo {
     string abdstrName = "_AB_";
 
   public:
-    // Constructor
     BoundSolverV2(CHCs &r, int _b, bool _dg, bool d2, bool _dp, int _limit, bool gj,
                   bool dc, bool abConsts, bool iwd, bool _imp, bool mi, bool _sepOps,
                   bool _tk, int md, int dbg)
@@ -51,11 +50,7 @@ namespace ufo {
           mutateInferred(mi), sepOps(_sepOps), checkProj(_tk), mutData(md)
     {
       if(absConsts) abstractConsts(); 
-      // TODO:
-      // Does this help freqhorn in general?
-      // Instead of changing the original system and forgetting about it,
-      // copy the RM and check it when an "abstracted" bound is found.
-      // Check the bound again with freqhorn.
+      
       for(auto& chc: r.chcs) 
       {
         if(chc.isFact)
@@ -102,8 +97,6 @@ namespace ufo {
         if(av.second == e)
         {
           var = fapp(constDecl(av.first, type));
-          // varPr = mkTerm<string>(lexical_cast<string>(av.first) + "'", m_efac);
-          // varPr = fapp(constDecl(varPr, type));
           if(debug >= 4) outs() << "Constant already abstracted: " << var << "\n";
           hr.body = replaceAll(hr.body, e, var);
           return;
@@ -115,8 +108,6 @@ namespace ufo {
         {
           cpp_int div = avVal / eVal;
           var = mk<MULT>(mkMPZ(div, m_efac), av.first);
-          // varPr = mkTerm<string>(lexical_cast<string>(av.first) + "'", m_efac);
-          // varPr = fapp(constDecl(varPr, type));
           if (debug >= 4)
             outs() << "Constant already abstracted: " << var << "\n";
           hr.body = replaceAll(hr.body, av.first, var);
@@ -128,8 +119,6 @@ namespace ufo {
         {
           cpp_int div = eVal / avVal;
           var = mk<MULT>(mkMPZ(div, m_efac), av.first);
-          // varPr = mkTerm<string>(lexical_cast<string>(av.first) + "'", m_efac);
-          // varPr = fapp(constDecl(varPr, type));
           if (debug >= 4)
             outs() << "Constant already abstracted: " << var << "\n";
           hr.body = replaceAll(hr.body, av.first, var);
@@ -151,7 +140,6 @@ namespace ufo {
       if (debug >= 4)
         outs() << "var: " << var << "\n";
       hr.body = replaceAll(hr.body, e, var);
-      // hr.body = mk<AND>(hr.body, mk<EQ>(var, e));
       if (debug >= 4)
         outs() << "hr.body: " << hr.body << "\n";
     }
@@ -235,11 +223,9 @@ namespace ufo {
       for(auto& hr: ruleManager.chcs)
       {
         ExprVector conjs;
-        // ExprSet consts;
         getConj(hr.body, conjs);
         for(auto& c: conjs)
         {
-          // Expr c = normalize(cc);
           if(debug >= 4) outs() << "conj: " << c << "\n";
           ExprVector vars;
           filter(c, IsConst(), inserter(vars, vars.begin()));
@@ -259,7 +245,6 @@ namespace ufo {
             if(debug >= 4) outs() << "rhsITE: " << rhs << "\n";
             findIte(rhs, hr);
           }
-          // TODO: Test other cases.          
         }
       }
       
@@ -379,7 +364,6 @@ namespace ufo {
 
     void mutateHeuristicEq(ExprSet &src, ExprSet &dst)
     {
-      // int invNum = getVarIndex(dcl, decls);
       ExprSet src2;
       map<Expr, ExprVector> substs;
       Expr (*ops[])(Expr, Expr) = {mk<PLUS>, mk<MINUS>}; // operators used in the mutations
@@ -418,10 +402,7 @@ namespace ufo {
             printedAny = true;
           }
 
-          // if (containsOp<ARRAY_TY>(a))
-          //   arrCands[invNum].insert(a);
-          // else
-            dst.insert(a);
+          dst.insert(a);
 
           if (isNumericConst(a->right()))
           {
@@ -436,9 +417,7 @@ namespace ufo {
                   Expr e = simplifyArithm(normalize(mk<EQ>(a->left(), mk<MULT>(mkMPZ(i1 / i2, m_efac), c))));
                   if (!u.isSat(mk<NEG>(e)))
                     continue;
-                  // if (containsOp<ARRAY_TY>(e))
-                  //   arrCands[invNum].insert(e);
-                  // else
+
                     dst.insert(e);
 
                   if (debug >= 2)
@@ -892,13 +871,11 @@ namespace ufo {
         if (debug >= 4)
           outs() << "  c: " << c << "\n";
         ExprVector inferSeeds;
-        // Count how often this message shows up and in how many benchmarks.
-        // Add a column in the spreadsheet for this.
         if(debug >= 3 && isOpX<AND>(c))
         {
           outs() << "conjunctive infer " << c << "\n";
         }
-        // Should this run after i == 0? I don't think so...
+
         ExprSet tmp;
         getConj(c, tmp);
         for(auto& d: tmp)
@@ -952,7 +929,7 @@ namespace ufo {
       // Sometimes expressions with the same lhs
       // but different ops are grouped together.
       // This method identifies them and separates them.
-      // separate the expressions based on the operators.
+
       vector<ExprVector> ret;
       map<Expr, ExprVector> opMap;
       while(!ev.empty())
@@ -997,12 +974,12 @@ namespace ufo {
       // Break equalities into inequalities.
       // Find weakest.
       // Check that the previous expr is an overapproximation.
-      // Process them in order, run simplifyArithm on each one.
+      // Process them in order.
       ExprSet inferredRet;
       map<Expr, ExprVector> infMap;
       ExprVector BigPhi;
 
-      Expr common; // Sometimes common will be needed. For ABC_ex01 it is not.
+      Expr common;
       if(BigPhi1.empty()) return inferredRet;
       removeCommonExpr(BigPhi1, BigPhi, common);
 
@@ -1115,8 +1092,6 @@ namespace ufo {
 
       dataGrds.clear();
 
-      // Make this a flag with a number for the number of applications.
-      // int mut = 2;
       for(int i = 0; i < mutData; i++)
       {
         mutateHeuristicEq(candMap[invDecl], candMap[invDecl]);
@@ -1332,7 +1307,6 @@ namespace ufo {
         outs() << "\n\n";
       }
 
-      // adaptInterval(vars2);
       ExprSet tmp; // Make combinations of LEQ GEQ here. Check for redundancy.
       for(auto& v: vars2)
       {
@@ -1358,7 +1332,7 @@ namespace ufo {
       {
         for(auto& vv: vars2)
         {
-          if(v == vv) continue; // below is a little bit insane....
+          if(v == vv) continue;
           tmp.insert(normalize(normalize(simplifyArithm(mk<LEQ>(v, vv))), mpzZero));
           tmp.insert(normalize(normalize(simplifyArithm(mk<GEQ>(v, vv))), mpzZero));
         }
@@ -1432,14 +1406,9 @@ namespace ufo {
       inferred = reAdd;
 
       if(debug >= 2) outs() << "\n==============\n";
-      // If this is never violated write a "reasonably formal" proof that we can trust the construction of the result from this function.
       return simplifyArithm(mk<AND>(conjoin(inferred, m_efac), mutant));
     }
 
-    // Break equalities into inequalities.
-    // Find weakest.
-    // Check that the previous expr is an overapproximation.
-    // Process them in order, run simplifyArithm on each one.
     Expr inferFromProjs(ExprVector &BigPhi, Expr bound)
     {
       if(debug >= 2)
@@ -1457,14 +1426,9 @@ namespace ufo {
 
       Expr c;
       boost::tribool safe = false; 
-      // do while loop, remove from infer until all "combinations" are tried.
-      // Unsafe means the "removed" conjunct needs to be readded.
-      // Write a "weakener".
 
       do
       {
-        // TODO: Make this more beautiful.
-        // Make a better seperation of this flag so that it only does anything when turned on.
         Expr mutant = getNextMutant(mutatedInferred);
 
         c = conjoin(inferred, m_efac);
@@ -1500,9 +1464,7 @@ namespace ufo {
 
       if(debug >= 2) outs() << "\nAbduction\n=========\n";
 
-      // ExprVector ssa;
       phi = bnd.toExpr(trace);
-      // phi = conjoin(ssa, m_efac);
       vars = bnd.getBindVars();
       for (auto v = vars.begin(); v != vars.end(); )
       {
@@ -1584,28 +1546,6 @@ namespace ufo {
         } 
       }
       return false;
-      // ExprVector vars;
-      // filter(p, IsConst(), inserter(vars, vars.begin()));
-      // ExprVector conjs;
-      // getConj(p, conjs);
-      // u.isSat(p);
-      // Expr model = u.getModel();
-      // outs() << "Model: " << model << "\n";
-      // ExprSet models;
-      // getConj(model, models);
-      // ExprSet negModels;
-      // for(auto m = models.begin(); m != models.end(); m++)
-      // {
-      //   negModels.insert(mkNeg(*m));
-      //   outs() << "Model: " << *m << "\n";
-      // }
-      // Expr m = mk<AND>(conjoin(negModels, m_efac), p);
-      // outs() << "Model: " << m << "\n"; 
-      // boost::tribool res = u.isSat(m);
-      // if(res) outs() << "SAT\n";
-      // else outs() << "UNSAT\n";
-      
-      // return  res;
     }
 
     vector<ExprVector> abds;
@@ -1626,7 +1566,6 @@ namespace ufo {
         pprint(p, 2);
         outs() << "  f: ";
         pprint(f, 2);
-        // outs() << "  b: " << b << "   n: " << n << "\n";
       }
 
       ExprSet Phi;
@@ -1639,7 +1578,6 @@ namespace ufo {
       prepareRuleManager(rm, rules);
 
       BndExpl bnd(rm, (debug > 0));
-      // ExprVector BigPhi;
       Expr bound;
 
       abds.clear();
@@ -1656,7 +1594,6 @@ namespace ufo {
           Expr res = mk<TRUE>(m_efac);
           if(debug >= 4) outs() << "  phi is UNSAT in getPre\n";
           return res;
-          // continue;
         }
 
         vector<ExprVector> vars;
@@ -1716,7 +1653,7 @@ namespace ufo {
           }
         }
       }
-      getAllCombs(allCombs, abds, 0); // make an example of why we need to check all combos.
+      getAllCombs(allCombs, abds, 0);
       if(debug >= 4)
       {
         outs() << "  All Combs size: " << allCombs.size() << "\n";
@@ -1735,7 +1672,6 @@ namespace ufo {
       for(int i = 0; i < allCombs.size(); i++)
       {
         ExprVector current;
-        // if(allCombs[i].size() < 3) continue;
         for(int j = 0; j < allCombs[i].size(); j++)
         {
           current.push_back(allCombs[i][j]);
@@ -1749,7 +1685,6 @@ namespace ufo {
         }
         Expr b = inferFromProjs(current, bound);
         if(debug >= 3) outs() << "  Result from W&S: " << b << "\n";
-        // if(!isOpX<FALSE>(c)) return c;
         if(u.implies(a, b)) a = b;
         else if(u.implies(b, a)) continue;
         else a = mk<OR>(a, b);
@@ -1800,7 +1735,6 @@ namespace ufo {
         int k = 0;
         for(int l = 0; l < temp.size(); l++)
         {
-          // outs() << "j: " << j << "  jPrev: " << jPrev << "  l: " << l << "  k: " << k << "\n";
           if(l != 0 && l % jPrev == 0) k++;
           if(k >= abds[i].size()) break;
           temp[l].push_back(abds[i][k]);
@@ -1828,15 +1762,6 @@ namespace ufo {
       p = simplifyArithm(p);
 
       Expr phi = mk<AND>(p, replaceAll(fc_nogh.body, invVarsPr, invVars), loopGuard);
-
-      // if (absConsts)
-      // {
-      //   // add the constant values to phi to check with phi.
-      //   for (auto ac : abstrVars)
-      //   {
-      //     phi = mk<AND>(phi, mk<EQ>(ac.first, ac.second));
-      //   }
-      // }
 
       return phi;
     }
@@ -1884,7 +1809,7 @@ namespace ufo {
           p = simplifyArithm(p);
           if(debug >= 4) outs() << "  Final p: " << p << "\n";
         
-          if(debug >= 2) outs() << "  Adding zero bound.\n"; // This needs to check if it is possible to skip the loop before adding
+          if(debug >= 2) outs() << "  Adding zero bound.\n";
           if(!u.isFalse(p)) bounds[p] = mk<EQ>(ghostVars[0], mkMPZ(0, m_efac));
           return;
         }
@@ -1933,10 +1858,6 @@ namespace ufo {
         bool nonterm = false;
         if(m.empty()) // this is a check to see if we have a nonterminating case.
         {
-          // ExprSet f;
-          // f.insert(mk<EQ>(ghostVars[0], mkMPZ(-1, m_efac)));
-          // forms[invDecl] = f;
-          // bounds[p] = *f.begin();
           ghostGuard = setGhostGuard(mkMPZ(-1,m_efac));
           qr->body = mk<AND>(loopGuard, ghostGuard);
           m.push_back(1);
@@ -2023,33 +1944,10 @@ namespace ufo {
       {
         outs() << b->first << " --> " << b->second;
         outs() << "\n";
-        // if(!u.isSat(mkNeg(b->first), replaceAll(fc_nogh.body, invVarsPr, invVars)))
-        // {
-        //   outs() << b->second;
-        //   break;
-        // }
-        // else
-        // {
-        //   if(b != bounds.begin())
-        //   {
-        //     outs() << ", ";
-        //   }
-        //   if(b == --bounds.end())
-        //   {
-        //     outs() << b->second;
-        //   }
-        //   else
-        //   {
-        //     outs() << "  ite " << b->first << ", " << b->second;
-        //   }
-        // }
-        // i++;
       }
       outs() << "\n";
     }
   }; // End class BoundSolverV2
-
-  // TODO: Test implementation over more benchmarks.
 
   inline void learnBoundsV2(string smt, int inv, int stren, bool dg,
                                   bool data2, bool doPhases, int limit, 

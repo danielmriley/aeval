@@ -1,13 +1,6 @@
 #ifndef DATALEARNERTOO__HPP__
 #define DATALEARNERTOO__HPP__
 
-/*
-**  Things to fix:
-**    - Decimals in the matrix. Currently this can happen, but we want to stick to whole Ints.
-**    - On occasion the wrong move is taken in simplifying the matrix
-**      - ex split_45
-*/
-
 #include <cmath>
 #include <vector>
 #include <algorithm>
@@ -433,20 +426,7 @@ namespace ufo
       ExprVector ev;
 
       int n = invVars[srcRel].size();
-      // outs() << "n: " << n << "\n";
-      // make Exprs.
-      /*
-      for(int i = 0; i < n-1; i++) {
-        for(int j = i + 1; j < n-1; j++) {
-          if(e1[i]==e1[j]) {
-            Expr r2 = mk<MINUS>(invVars[srcRel][i], invVars[srcRel][j]);
-            dataCands[srcRel].insert(mk<EQ>(invVars[srcRel][n-1], r2));
-            r2 = mk<MINUS>(invVars[srcRel][j], invVars[srcRel][i]);
-            dataCands[srcRel].insert(mk<EQ>(invVars[srcRel][n-1], r2));
-          }
-        }
-      }
-      */
+      
       for (int i = 0; i < n; i++)
       {
         for (int j = i + 1; j < n; j++)
@@ -474,8 +454,6 @@ namespace ufo
             l1 = mk<MULT>(l1, l2);
           }
           l = mk<EQ>(r1, l1);
-          // l = simplifyArithm(l);
-          // l = normalize(l);
           ev.push_back(l);
           if (debug >= 1)
             outs() << "  CONNECT: " << *ev.back() << "\n";
@@ -558,7 +536,6 @@ namespace ufo
         Expr cnst = mkMPZ(-numerator(v[0]), srcRel->getFactory());
         Expr datcand = mk<EQ>(mkplus(terms, srcRel->getFactory()), cnst);
         cands.insert(normalize(datcand));
-        // dataCands[srcRel].insert(mk<EQ>(mkplus(terms, srcRel->getFactory()), mkMPZ(0, srcRel->getFactory())));
       }
       if (debug >= 1)
         outs() << "CANDS FROM BASIS: " << cnt << "\n";
@@ -600,7 +577,6 @@ namespace ufo
       if (row.empty())
         return;
 
-      // dotProduct(srcRel, row);
       // Now make cands from the reduced matrix.
       basis[srcRel] = bf.findKernelBasis();
       candsFromBasis(srcRel);
@@ -613,10 +589,6 @@ namespace ufo
                     Expr srcRel = NULL, Expr block = NULL, Expr invs = NULL,
                     Expr preCond = NULL, bool doGJ = false, bool doConnect = false)
       {
-        // Get data matrix.
-        // Refactor so that the matrix isn't built over and over.
-        // seperate the BndExpl from DL2 so that DL2 is provided with the matrix rather
-        // than creating it each time itself.
         boost::tribool res = bnd.unrollAndExecuteTermPhase
           (src, dst, srcRel, invVars[srcRel], models[srcRel], block, k);
 
@@ -629,7 +601,6 @@ namespace ufo
 
       if (models[srcRel].empty()) return false;
 
-      // firstRow = models[srcRel][0];
       if(doConnect) connectCands(srcRel);
       if(doGJ) computeData(srcRel); // Gauss Jordan Elimination method.
 
@@ -656,7 +627,6 @@ namespace ufo
       if (debug >= 1)
         outs() << "\n======== COMPUTE DATA ========\n";
       models.clear();
-      // invVars.clear();
       boost::tribool res = bnd.unrollAndExecuteMultiple(invVars, models, arrRanges, constr);
 
       if (!res)
@@ -676,7 +646,6 @@ namespace ufo
       if (debug >= 1)
         outs() << "\n======== COMPUTE DATA PHASE ========\n";
       models.clear();
-      // invVars.clear();
       //  Get data matrix.
       boost::tribool res = bnd.unrollAndExecuteSplitter(srcRel, invVars[srcRel], models[srcRel], splitter, invs, fwd, constr);
 
