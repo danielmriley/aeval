@@ -345,6 +345,11 @@ namespace ufo
       vector<TermInfo> term_mapping;
       int debug;
       const int STRASSEN_THRESHOLD = 64; // Threshold for switching to naive multiplication
+      
+      // Callback function type for requesting more data
+      typedef std::function<bool(matrix&, size_t)> DataExpansionCallback;
+      DataExpansionCallback dataExpansionCallback;
+      int maxRetryAttempts;
 
       // --- Matrix Operations for RATIONAL matrices ---
 
@@ -642,7 +647,12 @@ namespace ufo
       }
 
   public:
-      LinearRegressor(int dbg = 0) : debug(dbg) {}
+      LinearRegressor(int dbg = 0, int maxRetries = 3) : debug(dbg), maxRetryAttempts(maxRetries) {}
+      
+      // Set callback for data expansion
+      void setDataExpansionCallback(DataExpansionCallback callback) {
+          dataExpansionCallback = callback;
+      }
 
       // Constructs an expression like y = c0*x0 + c1*x1 + ... + c_k*x0^2 + c_{k+1}*x0*x1 + ... + intercept using RATIONAL
       Expr getRegressionExpr(const ExprVector& invVars, int y_col_idx, ExprFactory& efac) {
@@ -794,178 +804,246 @@ namespace ufo
       // y_col_idx: index of the dependent variable column
       // add_quadratic_terms: flag to enable adding x_i^2 and x_i*x_j terms
       // Returns true on success, false on failure
-      bool performRegression(const matrix& models_rational, int y_col_idx, bool add_quadratic_terms = true) { // Added add_quadratic_terms flag
+      bool performRegression(matrix& models_rational, int y_col_idx, bool add_quadratic_terms = true) { // Changed to non-const reference
           coefficients.clear();
           term_mapping.clear();
-          if (models_rational.empty()) return false;
+          
+          int retryAttempt = 0;
+          
+          while (retryAttempt <= maxRetryAttempts) {
+              if (models_rational.empty()) return false;
 
-          size_t num_points = models_rational.size();
-          size_t num_vars_total = models_rational[0].size();
+              size_t num_points = models_rational.size();
+              size_t num_vars_total = models_rational[0].size();
 
-          if (y_col_idx < 0 || y_col_idx >= num_vars_total) {
-              outs() << "Error: Invalid dependent variable index.\n";
-              return false;
-          }
-
-          size_t num_independent_vars = num_vars_total - 1;
-          if (num_independent_vars == 0) {
-               if (debug >= 1) outs() << "Warning: No independent variables for regression.\n";
-               return false; // Need at least one independent variable
-          }
-
-          if (debug >= 2) {
-              outs() << "Regression setup: " << num_points << " data points, " 
-                     << num_independent_vars << " independent vars, y_col_idx=" << y_col_idx 
-                     << ", quadratic=" << (add_quadratic_terms ? "enabled" : "disabled") << "\n";
-          }
-
-          // --- Prepare initial X matrix (independent vars only) and y vector ---
-          matrix X_orig(num_points, vector<RATIONAL>(num_independent_vars));
-          matrix y(num_points, vector<RATIONAL>(1));
-          vector<int> independent_var_indices; // Store original indices of independent vars
-
-          printMatrixR(models_rational, "models rational");
-
-          for (size_t i = 0; i < num_points; ++i) {
-              y[i][0] = models_rational[i][y_col_idx];
-              int current_x_col = 0;
-              for (size_t j = 1; j < num_vars_total; ++j) {
-                  if (j != y_col_idx) {
-                      X_orig[i][current_x_col++] = models_rational[i][j];
-                      if (i == 0) independent_var_indices.push_back(j); // Store indices on first pass
-                  }
+              if (y_col_idx < 0 || y_col_idx >= num_vars_total) {
+                  outs() << "Error: Invalid dependent variable index.\n";
+                  return false;
               }
-          }
 
-          // --- Augment X matrix with non-linear terms and intercept ---
-          size_t num_augmented_features = 0;
-          vector<vector<RATIONAL>> X_augmented_data(num_points); // Build row by row
-
-          if (debug >= 3) outs() << "Building term mapping:\n";
-
-          // 1. Add Linear Terms
-          for(size_t j=0; j < num_independent_vars; ++j) {
-              term_mapping.push_back(TermInfo(0, (int)j)); // Use constructor
-              num_augmented_features++;
-              if (debug >= 3) outs() << "  Linear term [" << (num_augmented_features-1) << "]: x" << j << "\n";
-          }
-
-          // 2. Add Quadratic Terms (if enabled)
-          if (add_quadratic_terms) {
-              // 2a. Squared terms (x_i^2)
-              for(size_t j=0; j < num_independent_vars; ++j) {
-                  term_mapping.push_back(TermInfo(1, (int)j)); // Use constructor
-                  num_augmented_features++;
-                  if (debug >= 3) outs() << "  Squared term [" << (num_augmented_features-1) << "]: x" << j << "^2\n";
+              size_t num_independent_vars = num_vars_total - 1;
+              if (num_independent_vars == 0) {
+                   if (debug >= 1) outs() << "Warning: No independent variables for regression.\n";
+                   return false; // Need at least one independent variable
               }
-              // 2b. Interaction terms (x_i * x_j, i < j)
-              for(size_t j=0; j < num_independent_vars; ++j) {
-                  for (size_t k = j + 1; k < num_independent_vars; ++k) {
-                      term_mapping.push_back(TermInfo(2, (int)j, (int)k)); // Use constructor
-                      num_augmented_features++;
-                      if (debug >= 3) outs() << "  Interaction term [" << (num_augmented_features-1) << "]: x" << j << "*x" << k << "\n";
-                  }
-              }
-          }
 
-          // 3. Add Intercept Term placeholder
-          term_mapping.push_back(TermInfo(3)); // Use constructor
-          num_augmented_features++;
-          if (debug >= 3) outs() << "  Intercept term [" << (num_augmented_features-1) << "]: 1\n";
-
-          // Check if enough data points for the number of features
-          if (num_points <= num_augmented_features -1) { // Need points > features
-               if (debug >= 1) outs() << "Warning: Not enough data points (" << num_points
-                                      << ") for regression with " << num_augmented_features
-                                      << " features (including intercept). Need > " << num_augmented_features -1 << ".\n";
-              return false;
-          }
-
-
-          // Populate the augmented matrix data
-          for (size_t i = 0; i < num_points; ++i) {
-              X_augmented_data[i].resize(num_augmented_features);
-              int current_aug_col = 0;
-
+              // Calculate required features
+              size_t num_augmented_features = 0;
+              
               // 1. Linear terms
-              for(size_t j=0; j < num_independent_vars; ++j) {
-                  X_augmented_data[i][current_aug_col++] = X_orig[i][j];
-              }
-
+              num_augmented_features += num_independent_vars;
+              
               // 2. Quadratic terms (if enabled)
               if (add_quadratic_terms) {
                   // 2a. Squared terms
-                  for(size_t j=0; j < num_independent_vars; ++j) {
-                      X_augmented_data[i][current_aug_col++] = X_orig[i][j] * X_orig[i][j];
-                  }
+                  num_augmented_features += num_independent_vars;
                   // 2b. Interaction terms
-                  for(size_t j=0; j < num_independent_vars; ++j) {
-                      for (size_t k = j + 1; k < num_independent_vars; ++k) {
-                          X_augmented_data[i][current_aug_col++] = X_orig[i][j] * X_orig[i][k];
+                  num_augmented_features += (num_independent_vars * (num_independent_vars - 1)) / 2;
+              }
+              
+              // 3. Intercept
+              num_augmented_features += 1;
+
+              // Check if enough data points for the number of features
+              if (num_points <= num_augmented_features - 1) { // Need points > features
+                   if (debug >= 1) outs() << "Warning: Not enough data points (" << num_points
+                                          << ") for regression with " << num_augmented_features
+                                          << " features (including intercept). Need > " << (num_augmented_features - 1) << ".\n";
+                   
+                   // Try to expand data if callback is available and we haven't exceeded retry attempts
+                   if (dataExpansionCallback && retryAttempt < maxRetryAttempts) {
+                       if (debug >= 1) outs() << "Attempting to collect more data (attempt " << (retryAttempt + 1) << "/" << maxRetryAttempts << ")...\n";
+                       
+                       size_t requiredPoints = num_augmented_features + 5; // Ask for a few extra points as buffer
+                       bool success = dataExpansionCallback(models_rational, requiredPoints);
+                       
+                       if (success && models_rational.size() > num_points) {
+                           if (debug >= 1) outs() << "Successfully expanded data from " << num_points << " to " << models_rational.size() << " points.\n";
+                           retryAttempt++;
+                           continue; // Retry with expanded data
+                       } else {
+                           if (debug >= 1) outs() << "Failed to expand data sufficiently.\n";
+                       }
+                   }
+                   
+                   return false;
+              }
+
+              // Proceed with normal regression logic
+              if (debug >= 2) {
+                  outs() << "Regression setup: " << num_points << " data points, " 
+                         << num_independent_vars << " independent vars, y_col_idx=" << y_col_idx 
+                         << ", quadratic=" << (add_quadratic_terms ? "enabled" : "disabled") << "\n";
+              }
+
+              // --- Prepare initial X matrix (independent vars only) and y vector ---
+              matrix X_orig(num_points, vector<RATIONAL>(num_independent_vars));
+              matrix y(num_points, vector<RATIONAL>(1));
+              vector<int> independent_var_indices; // Store original indices of independent vars
+
+              printMatrixR(models_rational, "models rational");
+
+              for (size_t i = 0; i < num_points; ++i) {
+                  y[i][0] = models_rational[i][y_col_idx];
+                  int current_x_col = 0;
+                  for (size_t j = 1; j < num_vars_total; ++j) {
+                      if (j != y_col_idx) {
+                          X_orig[i][current_x_col++] = models_rational[i][j];
+                          if (i == 0) independent_var_indices.push_back(j); // Store indices on first pass
                       }
                   }
               }
 
-              // 3. Intercept term
-              X_augmented_data[i][current_aug_col++] = 1; // RATIONAL 1
-          }
+              // --- Augment X matrix with non-linear terms and intercept ---
+              size_t num_augmented_features_actual = 0;
+              vector<vector<RATIONAL>> X_augmented_data(num_points); // Build row by row
 
-          // Create the final augmented matrix object
-          matrix X_augmented = X_augmented_data;
+              if (debug >= 3) outs() << "Building term mapping:\n";
 
-
-          if (debug >= 2) {
-              printMatrixR(X_augmented, "X Augmented Matrix (Rational)");
-              printMatrixR(y, "y Vector (Rational)");
-          }
-
-          matrix Xt = transpose(X_augmented); // Use augmented matrix
-          printMatrixR(Xt, "X_Augmented Transpose (Rational)");
-
-          matrix XtX = multiply(Xt, X_augmented); // Use augmented matrix
-          printMatrixR(XtX, "X_Augmented_Transpose * X_Augmented (Rational)");
-
-          matrix XtX_inv = invert(XtX); // Use RATIONAL inversion
-            if (XtX_inv.empty()) {
-                if (debug >= 1) outs() << "Warning: (X_Augmented^T * X_Augmented) matrix is singular, cannot perform regression.\n";
-                return false;
-            }
-          printMatrixR(XtX_inv, "(X_Augmented_Transpose * X_Augmented)^-1 (Rational)");
-
-          matrix XtY = multiply(Xt, y); // Uses Strassen potentially
-          printMatrixR(XtY, "X_Augmented_Transpose * y (Rational)");
-
-          matrix beta_matrix = multiply(XtX_inv, XtY); // Uses Strassen potentially
-          printMatrixR(beta_matrix, "Beta Coefficients Matrix (Rational)");
-
-          // Extract coefficients
-          coefficients.resize(beta_matrix.size());
-          for(size_t i = 0; i < beta_matrix.size(); ++i) {
-              coefficients[i] = beta_matrix[i][0]; // Store RATIONAL coefficients
-          }
-
-          if (debug >= 1) {
-              outs() << "Regression Coefficients (Beta - Rational): [";
-              for(size_t i=0; i < coefficients.size(); ++i) {
-                  outs() << coefficients[i] << (i == coefficients.size() - 1 ? "" : ", ");
+              // 1. Add Linear Terms
+              for(size_t j=0; j < num_independent_vars; ++j) {
+                  term_mapping.push_back(TermInfo(0, (int)j)); // Use constructor
+                  num_augmented_features_actual++;
+                  if (debug >= 3) outs() << "  Linear term [" << (num_augmented_features_actual-1) << "]: x" << j << "\n";
               }
-              outs() << "]\n";
-              if (debug >= 2) {
-                  outs() << "Coefficient Term Mapping:\n";
-                  for(size_t i=0; i < coefficients.size(); ++i) {
-                      outs() << "  coeff[" << i << "] (" << coefficients[i] << "): ";
-                      const auto& term = term_mapping[i];
-                      if (term.type == 0) outs() << "linear(x" << term.idx1 << ")\n";
-                      else if (term.type == 1) outs() << "square(x" << term.idx1 << "^2)\n";
-                      else if (term.type == 2) outs() << "interaction(x" << term.idx1 << "*x" << term.idx2 << ")\n";
-                      else if (term.type == 3) outs() << "intercept\n";
+
+              // 2. Add Quadratic Terms (if enabled)
+              if (add_quadratic_terms) {
+                  // 2a. Squared terms (x_i^2)
+                  for(size_t j=0; j < num_independent_vars; ++j) {
+                      term_mapping.push_back(TermInfo(1, (int)j)); // Use constructor
+                      num_augmented_features_actual++;
+                      if (debug >= 3) outs() << "  Squared term [" << (num_augmented_features_actual-1) << "]: x" << j << "^2\n";
+                  }
+                  // 2b. Interaction terms (x_i * x_j, i < j)
+                  for(size_t j=0; j < num_independent_vars; ++j) {
+                      for (size_t k = j + 1; k < num_independent_vars; ++k) {
+                          term_mapping.push_back(TermInfo(2, (int)j, (int)k)); // Use constructor
+                          num_augmented_features_actual++;
+                          if (debug >= 3) outs() << "  Interaction term [" << (num_augmented_features_actual-1) << "]: x" << j << "*x" << k << "\n";
+                      }
                   }
               }
-          }
-          return true;
 
+              // 3. Add Intercept Term placeholder
+              term_mapping.push_back(TermInfo(3)); // Use constructor
+              num_augmented_features_actual++;
+              if (debug >= 3) outs() << "  Intercept term [" << (num_augmented_features_actual-1) << "]: 1\n";
+
+              // Check if enough data points for the number of features
+              if (num_points <= num_augmented_features_actual - 1) { // Need points > features
+                   if (debug >= 1) outs() << "Warning: Not enough data points (" << num_points
+                                          << ") for regression with " << num_augmented_features_actual
+                                          << " features (including intercept). Need > " << (num_augmented_features_actual - 1) << ".\n";
+                   
+                   // Try to expand data if callback is available and we haven't exceeded retry attempts
+                   if (dataExpansionCallback && retryAttempt < maxRetryAttempts) {
+                       if (debug >= 1) outs() << "Attempting to collect more data (attempt " << (retryAttempt + 1) << "/" << maxRetryAttempts << ")...\n";
+                       
+                       size_t requiredPoints = num_augmented_features_actual + 5; // Ask for a few extra points as buffer
+                       bool success = dataExpansionCallback(models_rational, requiredPoints);
+                       
+                       if (success && models_rational.size() > num_points) {
+                           if (debug >= 1) outs() << "Successfully expanded data from " << num_points << " to " << models_rational.size() << " points.\n";
+                           retryAttempt++;
+                           continue; // Retry with expanded data
+                       } else {
+                           if (debug >= 1) outs() << "Failed to expand data sufficiently.\n";
+                       }
+                   }
+                   
+                   return false;
+              }
+
+              // Populate the augmented matrix data
+              for (size_t i = 0; i < num_points; ++i) {
+                  X_augmented_data[i].resize(num_augmented_features_actual);
+                  int current_aug_col = 0;
+
+                  // 1. Linear terms
+                  for(size_t j=0; j < num_independent_vars; ++j) {
+                      X_augmented_data[i][current_aug_col++] = X_orig[i][j];
+                  }
+
+                  // 2. Quadratic terms (if enabled)
+                  if (add_quadratic_terms) {
+                      // 2a. Squared terms
+                      for(size_t j=0; j < num_independent_vars; ++j) {
+                          X_augmented_data[i][current_aug_col++] = X_orig[i][j] * X_orig[i][j];
+                      }
+                      // 2b. Interaction terms
+                      for(size_t j=0; j < num_independent_vars; ++j) {
+                          for (size_t k = j + 1; k < num_independent_vars; ++k) {
+                              X_augmented_data[i][current_aug_col++] = X_orig[i][j] * X_orig[i][k];
+                          }
+                      }
+                  }
+
+                  // 3. Intercept term
+                  X_augmented_data[i][current_aug_col++] = 1; // RATIONAL 1
+              }
+
+              // Create the final augmented matrix object
+              matrix X_augmented = X_augmented_data;
+
+
+              if (debug >= 2) {
+                  printMatrixR(X_augmented, "X Augmented Matrix (Rational)");
+                  printMatrixR(y, "y Vector (Rational)");
+              }
+
+              matrix Xt = transpose(X_augmented); // Use augmented matrix
+              printMatrixR(Xt, "X_Augmented Transpose (Rational)");
+
+              matrix XtX = multiply(Xt, X_augmented); // Use augmented matrix
+              printMatrixR(XtX, "X_Augmented_Transpose * X_Augmented (Rational)");
+
+              matrix XtX_inv = invert(XtX); // Use RATIONAL inversion
+                if (XtX_inv.empty()) {
+                    if (debug >= 1) outs() << "Warning: (X_Augmented^T * X_Augmented) matrix is singular, cannot perform regression.\n";
+                    return false;
+                }
+              printMatrixR(XtX_inv, "(X_Augmented_Transpose * X_Augmented)^-1 (Rational)");
+
+              matrix XtY = multiply(Xt, y); // Uses Strassen potentially
+              printMatrixR(XtY, "X_Augmented_Transpose * y (Rational)");
+
+              matrix beta_matrix = multiply(XtX_inv, XtY); // Uses Strassen potentially
+              printMatrixR(beta_matrix, "Beta Coefficients Matrix (Rational)");
+
+              // Extract coefficients
+              coefficients.resize(beta_matrix.size());
+              for(size_t i = 0; i < beta_matrix.size(); ++i) {
+                  coefficients[i] = beta_matrix[i][0]; // Store RATIONAL coefficients
+              }
+
+              if (debug >= 1) {
+                  outs() << "Regression Coefficients (Beta - Rational): [";
+                  for(size_t i=0; i < coefficients.size(); ++i) {
+                      outs() << coefficients[i] << (i == coefficients.size() - 1 ? "" : ", ");
+                  }
+                  outs() << "]\n";
+                  if (debug >= 2) {
+                      outs() << "Coefficient Term Mapping:\n";
+                      for(size_t i=0; i < coefficients.size(); ++i) {
+                          outs() << "  coeff[" << i << "] (" << coefficients[i] << "): ";
+                          const auto& term = term_mapping[i];
+                          if (term.type == 0) outs() << "linear(x" << term.idx1 << ")\n";
+                          else if (term.type == 1) outs() << "square(x" << term.idx1 << "^2)\n";
+                          else if (term.type == 2) outs() << "interaction(x" << term.idx1 << "*x" << term.idx2 << ")\n";
+                          else if (term.type == 3) outs() << "intercept\n";
+                      }
+                  }
+              }
+              return true;
+          }
+          
+          // If we get here, all retry attempts were exhausted
+          if (debug >= 1) outs() << "Exhausted all retry attempts for data expansion.\n";
+          return false;
       }
 
+      // ...existing code...
   }; // End class LinearRegressor
 
   class DataLearner2
@@ -1239,6 +1317,38 @@ namespace ufo
         matrix model_data_rational = doubleToRational(model_data_double);
 
         LinearRegressor regressor(debug);
+        
+        // Set up callback for data expansion
+        regressor.setDataExpansionCallback([this, srcRel](matrix& data, size_t requiredPoints) -> bool {
+            if (debug >= 1) outs() << "Data expansion callback: need " << requiredPoints << " points, have " << data.size() << "\n";
+            
+            // Calculate new k value - double the current unroll bound
+            int currentPoints = data.size();
+            int newK = std::max(10, currentPoints * 2); // Start with at least 10, then double
+            
+            if (debug >= 1) outs() << "Expanding data collection with k=" << newK << "\n";
+            
+            // Clear current models to force recomputation
+            models[srcRel].clear();
+            
+            // Create empty constraint sets for the expansion call
+            map<Expr, ExprVector> arrRanges;
+            map<Expr, ExprSet> constr;
+            constr[srcRel] = ExprSet(); // Empty constraint set
+            
+            // Call BndExpl to get more data with increased k
+            boost::tribool res = bnd.unrollAndExecuteMultiple(invVars, models, arrRanges, constr, newK);
+            
+            if (res && models[srcRel].size() > currentPoints) {
+                // Convert new data and update the input matrix
+                data = doubleToRational(models[srcRel]);
+                if (debug >= 1) outs() << "Data expansion successful: collected " << data.size() << " points\n";
+                return true;
+            }
+            
+            if (debug >= 1) outs() << "Data expansion failed or insufficient\n";
+            return false;
+        });
 
         // Try regressing each variable against the others using rational data
         for (size_t y_idx = 0; y_idx < num_vars; ++y_idx) {

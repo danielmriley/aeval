@@ -547,7 +547,7 @@ namespace ufo
           if (indeterminate(res) || !res)
           {
             if (debug) outs () << "Unable to solve the BMC formula for " <<  srcRel << " and phase guard " << phaseGuard <<"\n";
-            continue;
+            return false;
           }
           ExprMap allModels;
           u.getOptModel<GT>(allVars, allModels, cntvar);
