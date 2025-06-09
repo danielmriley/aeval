@@ -644,6 +644,151 @@ namespace ufo
   public:
       LinearRegressor(int dbg = 0) : debug(dbg) {}
 
+      // Constructs an expression like y = c0*x0 + c1*x1 + ... + c_k*x0^2 + c_{k+1}*x0*x1 + ... + intercept using RATIONAL
+      Expr getRegressionExpr(const ExprVector& invVars, int y_col_idx, ExprFactory& efac) {
+          if (coefficients.empty() || term_mapping.empty() || coefficients.size() != term_mapping.size()) {
+              if (debug >= 1) outs() << "Error: Invalid regression state - coefficients or term_mapping empty or mismatched\n";
+              return mk<TRUE>(efac);
+          }
+
+          size_t num_vars_total = invVars.size();
+          if (y_col_idx < 0 || y_col_idx >= num_vars_total) {
+              if (debug >= 1) outs() << "Error: Invalid y_col_idx " << y_col_idx << " for " << num_vars_total << " variables\n";
+              return mk<TRUE>(efac);
+          }
+
+          Expr y_var = invVars[y_col_idx];
+          ExprVector rhs_terms;
+
+          // Map independent variable indices from original list (invVars) to the 0-based indices used in regression (X_orig)
+          vector<Expr> independent_vars_exprs;
+          vector<int> independent_var_orig_indices;
+          for(size_t i = 0; i < num_vars_total; ++i) {
+              if (i != y_col_idx) {
+                  independent_vars_exprs.push_back(invVars[i]);
+                  independent_var_orig_indices.push_back(i);
+              }
+          }
+
+          if (debug >= 2) {
+              outs() << "Building regression expression for " << *y_var << "\n";
+              outs() << "Independent variables (" << independent_vars_exprs.size() << "): ";
+              for (size_t i = 0; i < independent_vars_exprs.size(); ++i) {
+                  outs() << *independent_vars_exprs[i] << (i == independent_vars_exprs.size()-1 ? "\n" : ", ");
+              }
+              outs() << "Coefficients and term mapping:\n";
+              for (size_t i = 0; i < coefficients.size(); ++i) {
+                  const auto& term = term_mapping[i];
+                  outs() << "  [" << i << "] coeff=" << coefficients[i] << ", type=" << term.type 
+                         << ", idx1=" << term.idx1 << ", idx2=" << term.idx2 << "\n";
+              }
+          }
+
+          // Build RHS terms based on coefficients and term_mapping
+          for (size_t coeff_idx = 0; coeff_idx < coefficients.size(); ++coeff_idx) {
+              RATIONAL coeff_rat = coefficients[coeff_idx];
+              if (numerator(coeff_rat) == 0) {
+                  if (debug >= 3) outs() << "  Skipping zero coefficient at index " << coeff_idx << "\n";
+                  continue; // Skip zero coefficients
+              }
+
+              // Create coefficient expression (handle both positive and negative rationals)
+              Expr coeff_expr;
+              cpp_int num = numerator(coeff_rat);
+              cpp_int den = denominator(coeff_rat);
+              
+              if (den == 1) {
+                  // Integer coefficient
+                  coeff_expr = mkMPZ(num, efac);
+              } else {
+                  // Rational coefficient - create as division
+                  coeff_expr = mk<DIV>(mkMPZ(num, efac), mkMPZ(den, efac));
+              }
+
+              const auto& term = term_mapping[coeff_idx];
+              Expr term_expr;
+
+              if (term.type == 0) { // Linear term: coeff * x_i
+                  if (term.idx1 < 0 || term.idx1 >= independent_vars_exprs.size()) {
+                      if (debug >= 1) outs() << "Error: Invalid idx1 " << term.idx1 << " for linear term\n";
+                      continue;
+                  }
+                  Expr var = independent_vars_exprs[term.idx1];
+                  term_expr = mk<MULT>(coeff_expr, var);
+                  if (debug >= 3) outs() << "  Linear term: " << *term_expr << "\n";
+                  
+              } else if (term.type == 1) { // Squared term: coeff * x_i^2
+                  if (term.idx1 < 0 || term.idx1 >= independent_vars_exprs.size()) {
+                      if (debug >= 1) outs() << "Error: Invalid idx1 " << term.idx1 << " for squared term\n";
+                      continue;
+                  }
+                  Expr var = independent_vars_exprs[term.idx1];
+                  Expr var_squared = mk<MULT>(var, var);
+                  term_expr = mk<MULT>(coeff_expr, var_squared);
+                  if (debug >= 3) outs() << "  Squared term: " << *term_expr << "\n";
+                  
+              } else if (term.type == 2) { // Interaction term: coeff * x_i * x_j
+                  if (term.idx1 < 0 || term.idx1 >= independent_vars_exprs.size() ||
+                      term.idx2 < 0 || term.idx2 >= independent_vars_exprs.size()) {
+                      if (debug >= 1) outs() << "Error: Invalid indices idx1=" << term.idx1 
+                                             << ", idx2=" << term.idx2 << " for interaction term\n";
+                      continue;
+                  }
+                  if (term.idx1 == term.idx2) {
+                      if (debug >= 1) outs() << "Warning: Interaction term with same indices " << term.idx1 << "\n";
+                      // Treat as squared term
+                      Expr var = independent_vars_exprs[term.idx1];
+                      Expr var_squared = mk<MULT>(var, var);
+                      term_expr = mk<MULT>(coeff_expr, var_squared);
+                  } else {
+                      Expr var1 = independent_vars_exprs[term.idx1];
+                      Expr var2 = independent_vars_exprs[term.idx2];
+                      Expr interaction = mk<MULT>(var1, var2);
+                      term_expr = mk<MULT>(coeff_expr, interaction);
+                  }
+                  if (debug >= 3) outs() << "  Interaction term: " << *term_expr << "\n";
+                  
+              } else if (term.type == 3) { // Intercept term: coeff
+                  term_expr = coeff_expr;
+                  if (debug >= 3) outs() << "  Intercept term: " << *term_expr << "\n";
+                  
+              } else {
+                  if (debug >= 1) outs() << "Error: Unknown term type " << term.type << " at index " << coeff_idx << "\n";
+                  continue;
+              }
+
+              if (term_expr) {
+                  rhs_terms.push_back(term_expr);
+                  if (debug >= 3) outs() << "  Added term to RHS: " << *term_expr << "\n";
+              }
+          }
+
+          // Build RHS expression
+          Expr rhs_expr;
+          if (rhs_terms.empty()) {
+              rhs_expr = mkMPZ(0, efac);
+              if (debug >= 2) outs() << "No terms generated, using zero\n";
+          } else if (rhs_terms.size() == 1) {
+              rhs_expr = rhs_terms[0];
+              if (debug >= 2) outs() << "Single term RHS: " << *rhs_expr << "\n";
+          } else {
+              rhs_expr = mkplus(rhs_terms, efac);
+              if (debug >= 2) outs() << "Multi-term RHS: " << *rhs_expr << "\n";
+          }
+
+          // Create equation: y_var = rhs_expr
+          Expr regression_eq = mk<EQ>(y_var, rhs_expr);
+          if (debug >= 2) outs() << "Raw regression equation: " << *regression_eq << "\n";
+
+          // Apply normalization
+          Expr norm_expr = normalize(regression_eq);
+          if (debug >= 1) {
+              outs() << "Generated Regression Equation (Rational, potentially non-linear): " << *norm_expr << "\n";
+          }
+
+          return norm_expr;
+      }
+
       // Performs linear regression: y = X * beta, potentially adding quadratic features
       // models_rational: rows are data points, columns are variables (using RATIONAL)
       // y_col_idx: index of the dependent variable column
@@ -668,15 +813,23 @@ namespace ufo
                return false; // Need at least one independent variable
           }
 
+          if (debug >= 2) {
+              outs() << "Regression setup: " << num_points << " data points, " 
+                     << num_independent_vars << " independent vars, y_col_idx=" << y_col_idx 
+                     << ", quadratic=" << (add_quadratic_terms ? "enabled" : "disabled") << "\n";
+          }
+
           // --- Prepare initial X matrix (independent vars only) and y vector ---
           matrix X_orig(num_points, vector<RATIONAL>(num_independent_vars));
           matrix y(num_points, vector<RATIONAL>(1));
           vector<int> independent_var_indices; // Store original indices of independent vars
 
+          printMatrixR(models_rational, "models rational");
+
           for (size_t i = 0; i < num_points; ++i) {
               y[i][0] = models_rational[i][y_col_idx];
               int current_x_col = 0;
-              for (size_t j = 0; j < num_vars_total; ++j) {
+              for (size_t j = 1; j < num_vars_total; ++j) {
                   if (j != y_col_idx) {
                       X_orig[i][current_x_col++] = models_rational[i][j];
                       if (i == 0) independent_var_indices.push_back(j); // Store indices on first pass
@@ -688,10 +841,13 @@ namespace ufo
           size_t num_augmented_features = 0;
           vector<vector<RATIONAL>> X_augmented_data(num_points); // Build row by row
 
+          if (debug >= 3) outs() << "Building term mapping:\n";
+
           // 1. Add Linear Terms
           for(size_t j=0; j < num_independent_vars; ++j) {
               term_mapping.push_back(TermInfo(0, (int)j)); // Use constructor
               num_augmented_features++;
+              if (debug >= 3) outs() << "  Linear term [" << (num_augmented_features-1) << "]: x" << j << "\n";
           }
 
           // 2. Add Quadratic Terms (if enabled)
@@ -700,12 +856,14 @@ namespace ufo
               for(size_t j=0; j < num_independent_vars; ++j) {
                   term_mapping.push_back(TermInfo(1, (int)j)); // Use constructor
                   num_augmented_features++;
+                  if (debug >= 3) outs() << "  Squared term [" << (num_augmented_features-1) << "]: x" << j << "^2\n";
               }
               // 2b. Interaction terms (x_i * x_j, i < j)
               for(size_t j=0; j < num_independent_vars; ++j) {
                   for (size_t k = j + 1; k < num_independent_vars; ++k) {
                       term_mapping.push_back(TermInfo(2, (int)j, (int)k)); // Use constructor
                       num_augmented_features++;
+                      if (debug >= 3) outs() << "  Interaction term [" << (num_augmented_features-1) << "]: x" << j << "*x" << k << "\n";
                   }
               }
           }
@@ -713,6 +871,7 @@ namespace ufo
           // 3. Add Intercept Term placeholder
           term_mapping.push_back(TermInfo(3)); // Use constructor
           num_augmented_features++;
+          if (debug >= 3) outs() << "  Intercept term [" << (num_augmented_features-1) << "]: 1\n";
 
           // Check if enough data points for the number of features
           if (num_points <= num_augmented_features -1) { // Need points > features
@@ -807,70 +966,6 @@ namespace ufo
 
       }
 
-      // Constructs an expression like y = c0*x0 + c1*x1 + ... + c_k*x0^2 + c_{k+1}*x0*x1 + ... + intercept using RATIONAL
-      Expr getRegressionExpr(const ExprVector& invVars, int y_col_idx, ExprFactory& efac) {
-          if (coefficients.empty() || term_mapping.empty() || coefficients.size() != term_mapping.size()) {
-              return mk<TRUE>(efac);
-          }
-
-          size_t num_vars_total = invVars.size();
-          if (y_col_idx < 0 || y_col_idx >= num_vars_total) return mk<TRUE>(efac);
-
-          Expr y_var = invVars[y_col_idx];
-          ExprVector rhs_terms;
-
-          // Map independent variable indices from original list (invVars) to the 0-based indices used in regression (X_orig)
-          vector<Expr> independent_vars_exprs;
-          vector<int> independent_var_orig_indices;
-          for(size_t i = 0; i < num_vars_total; ++i) {
-              if (i != y_col_idx) {
-                  independent_vars_exprs.push_back(invVars[i]);
-                  independent_var_orig_indices.push_back(i);
-              }
-          }
-
-          // Build RHS terms based on coefficients and term_mapping
-          for (size_t coeff_idx = 0; coeff_idx < coefficients.size(); ++coeff_idx) {
-              RATIONAL coeff_rat = coefficients[coeff_idx];
-              if (numerator(coeff_rat) == 0) continue; // Skip zero coefficients
-
-              Expr coeff_expr = mkMPZ(numerator(coeff_rat), denominator(coeff_rat), efac);
-              const auto& term = term_mapping[coeff_idx];
-              Expr term_expr;
-
-              if (term.type == 0) { // Linear term: coeff * x_i
-                  term_expr = mk<MULT>(coeff_expr, independent_vars_exprs[term.idx1]);
-              } else if (term.type == 1) { // Squared term: coeff * x_i^2
-                  Expr var = independent_vars_exprs[term.idx1];
-                  term_expr = mk<MULT>(coeff_expr, mk<MULT>(var, var));
-              } else if (term.type == 2) { // Interaction term: coeff * x_i * x_j
-                  Expr var1 = independent_vars_exprs[term.idx1];
-                  Expr var2 = independent_vars_exprs[term.idx2];
-                  term_expr = mk<MULT>(coeff_expr, mk<MULT>(var1, var2));
-              } else if (term.type == 3) { // Intercept term: coeff
-                  term_expr = coeff_expr;
-              }
-
-              if (term_expr) {
-                  rhs_terms.push_back(term_expr);
-              }
-          }
-
-
-          Expr rhs_expr = mkplus(rhs_terms, efac);
-          // Handle case where all coefficients were zero (or only intercept was zero)
-          if (!rhs_expr) rhs_expr = mkMPZ(0, efac);
-
-          Expr regression_eq = mk<EQ>(y_var, rhs_expr);
-
-          Expr norm_expr = normalize(regression_eq);
-
-          if (debug >= 1) {
-              outs() << "Generated Regression Equation (Rational, potentially non-linear): " << *norm_expr << "\n";
-          }
-
-          return norm_expr;
-      }
   }; // End class LinearRegressor
 
   class DataLearner2
@@ -1149,7 +1244,7 @@ namespace ufo
         for (size_t y_idx = 0; y_idx < num_vars; ++y_idx) {
             if (debug >= 1) outs() << "--- Regressing on variable: " << *variables[y_idx] << " (Rational, Quadratic) ---\n";
             // Pass the rational matrix to performRegression, enable quadratic terms (default)
-            bool success = regressor.performRegression(model_data_rational, y_idx, true); // Pass true for quadratic
+            bool success = regressor.performRegression(model_data_rational, y_idx+1, true); // Pass true for quadratic
             if (success) {
                 Expr cand_expr = regressor.getRegressionExpr(variables, y_idx, m_efac);
                 if (!isOpX<TRUE>(cand_expr)) { // Avoid adding trivial TRUE
