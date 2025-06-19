@@ -226,6 +226,14 @@ namespace expr
       inline Expr bvnot(Expr v) { return mk<BNOT>(v); }
       inline Expr bvneg(Expr v) { return mk<BNEG>(v); }
       inline Expr bvadd(Expr a, Expr b) { return mk<BADD>(a, b); }
+      inline Expr bvsub(Expr a, Expr b) { return mk<BSUB>(a, b); }
+      inline Expr bvmul(Expr a, Expr b) { return mk<BMUL>(a, b); }
+      inline Expr bvudiv(Expr a, Expr b) { return mk<BUDIV>(a, b); }
+      inline Expr bvsdiv(Expr a, Expr b) { return mk<BSDIV>(a, b); }
+      inline Expr bvurem(Expr a, Expr b) { return mk<BUREM>(a, b); }
+      inline Expr bvsrem(Expr a, Expr b) { return mk<BSREM>(a, b); }
+      inline Expr bvsmod(Expr a, Expr b) { return mk<BSMOD>(a, b); }
+      inline Expr bvconcat(Expr a, Expr b) { return mk<BCONCAT>(a, b); }
       inline Expr bvule(Expr f, Expr s) { return mk<BULE>(f, s); }
       inline Expr bvuge(Expr f, Expr s) { return mk<BUGE>(f, s); }
       inline Expr bvult(Expr f, Expr s) { return mk<BULT>(f, s); }
@@ -236,8 +244,96 @@ namespace expr
       inline Expr bvslt(Expr f, Expr s) { return mk<BSLT>(f, s); }
       inline Expr bvand(Expr f, Expr s) { return mk<BAND>(f, s); }
       inline Expr bvor(Expr f, Expr s) { return mk<BOR>(f, s); }
+      inline Expr bshl(Expr a, Expr b) { return mk<BSHL>(a, b); }
+      inline Expr bvlshr(Expr a, Expr b) { return mk<BLSHR>(a, b); }
+      inline Expr bvashr(Expr a, Expr b) { return mk<BASHR>(a, b); }
+      inline Expr bvxor(Expr a, Expr b) { return mk<BXOR>(a, b); }
+      inline Expr bvnand(Expr a, Expr b) { return mk<BNAND>(a, b); }
+      inline Expr bvnor(Expr a, Expr b) { return mk<BNOR>(a, b); }
+      inline Expr bvxnor(Expr a, Expr b) { return mk<BXNOR>(a, b); }
+      inline Expr bvredand(Expr a) { return mk<BREDAND>(a); }
+      inline Expr bvredor(Expr a) { return mk<BREDOR>(a); }
       inline Expr frombool(Expr f);
-      inline Expr tobool(Expr f);
+      inline Expr tobool(Expr f); 
+      inline Expr bvrepeat(Expr a, unsigned n)
+      {
+        return mk<BREPEAT>(mkTerm<unsigned>(n, a->efac()), a);
+      }
+      inline Expr bvextract(unsigned high, unsigned low, Expr v)
+      {
+        return mk<BEXTRACT>(mkTerm<unsigned>(high, v->efac()),
+                            mkTerm<unsigned>(low, v->efac()), v);
+      }
+      inline Expr bvextract(Expr v, unsigned high, unsigned low)
+      {
+        return mk<BEXTRACT>(mkTerm<unsigned>(high, v->efac()),
+                            mkTerm<unsigned>(low, v->efac()), v);
+      }
+      inline Expr bvextract(Expr v, unsigned high)
+      {
+        return mk<BEXTRACT>(mkTerm<unsigned>(high, v->efac()),
+                            mkTerm<unsigned>(0, v->efac()), v);
+      }
+      inline Expr bvextract(Expr v)
+      {
+        return mk<BEXTRACT>(mkTerm<unsigned>(width(v) - 1, v->efac()),
+                            mkTerm<unsigned>(0, v->efac()), v);
+      }
+      inline Expr bvconcat(Expr v, unsigned high, unsigned low)
+      {
+        return mk<BEXTRACT>(mkTerm<unsigned>(high, v->efac()),
+                            mkTerm<unsigned>(low, v->efac()), v);
+      }
+      inline Expr bvconcat(Expr v, unsigned high)
+      {
+        return mk<BEXTRACT>(mkTerm<unsigned>(high, v->efac()),
+                            mkTerm<unsigned>(0, v->efac()), v);
+      }
+      inline Expr bvconcat(Expr v)
+      {
+        return mk<BEXTRACT>(mkTerm<unsigned>(width(v) - 1, v->efac()),
+                            mkTerm<unsigned>(0, v->efac()), v);
+      }
+      inline Expr bvrotate_left(unsigned t, Expr v)
+      {
+        return mk<BROTATE_LEFT>(mkTerm<unsigned>(t, v->efac()), v);
+      }
+      inline Expr bvrotate_right(unsigned t, Expr v)
+      {
+        return mk<BROTATE_RIGHT>(mkTerm<unsigned>(t, v->efac()), v);
+      }
+      inline Expr bvext_rotate_left(unsigned t, Expr v)
+      {
+        return mk<BEXT_ROTATE_LEFT>(mkTerm<unsigned>(t, v->efac()), v);
+      }
+      inline Expr bvext_rotate_right(unsigned t, Expr v)
+      {
+        return mk<BEXT_ROTATE_RIGHT>(mkTerm<unsigned>(t, v->efac()), v);
+      }
+      inline Expr bvsext(Expr v, unsigned width)
+      {
+        return mk<BSEXT>(v, bvsort(width, v->efac()));
+      }
+      inline Expr bvzext(Expr v, unsigned width)
+      {
+        return mk<BZEXT>(v, bvsort(width, v->efac()));
+      }
+      inline Expr int2bv(Expr v, unsigned width)
+      {
+        return mk<INT2BV>(v, bvsort(width, v->efac()));
+      }
+      inline Expr bv2int(Expr v)
+      {
+        return mk<BV2INT>(v);
+      }
+      inline Expr bv2bool(Expr v)
+      {
+        return mk<BV2BOOL>(v);
+      }
+      inline Expr bool2bv(Expr v)
+      {
+        return mk<BOOL2BV>(v);
+      }
 
       inline bool isBVComparison(Expr e)
       {

@@ -102,9 +102,9 @@ namespace ufo
 
   inline static bool isEmpty(density& d)
   {
-    for (int i = 0; i < d.size(); i++)
+    for (auto& pair : d)
     {
-      if (d[i] > 0) return false;
+      if (pair.second > 0) return false;
     }
     return true;
   }
