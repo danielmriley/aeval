@@ -297,6 +297,288 @@ namespace ufo
     return reBuildCmp(e, mkb<BADD>(ptrms, z), mkb<BADD>(ntrms, z));
   }
 
+  inline static Expr additiveInverseBV(Expr e);
+  inline static Expr rewriteMultAddBV(Expr exp);
+  inline static void getMultOpsBV(Expr a, ExprVector &ops);
+
+  void getAddTermBV(Expr a, ExprVector &terms) // implementation (mutually recursive)
+  {
+    if(is_bvnum(a))
+    {
+      terms.push_back(a);
+    }
+    else if(is_bvconst(a))
+    {
+      terms.push_back(a);
+    }
+    else if (isOpX<BADD>(a))
+    {
+      for (auto it = a->args_begin(), end = a->args_end(); it != end; ++it)
+      {
+        getAddTermBV(*it, terms);
+      }
+    }
+    else if (isOpX<BSUB>(a))
+    {
+      auto it = a->args_begin();
+      auto end = a->args_end();
+      getAddTermBV(*it, terms);
+      ++it;
+      for (; it != end; ++it)
+      {
+        getAddTermBV(additiveInverseBV(*it), terms);
+      }
+    }
+    // else if (isOpX<UN_MINUS>(a))
+    // {
+    //   ExprVector tmp;
+    //   getAddTermBV(a->left(), tmp);
+    //   for (auto &t : tmp)
+    //   {
+    //     bool toadd = true;
+    //     for (auto it = terms.begin(); it != terms.end();)
+    //     {
+    //       if (*it == t)
+    //       {
+    //         terms.erase(it);
+    //         toadd = false;
+    //         break;
+    //       }
+    //       else
+    //         ++it;
+    //     }
+    //     if (toadd)
+    //       terms.push_back(additiveInverse(t));
+    //   }
+    // }
+    else if (isOpX<BMUL>(a))
+    {
+      Expr tmp = rewriteMultAddBV(a);
+      if (tmp == a)
+        terms.push_back(a);
+      else
+        getAddTermBV(tmp, terms);
+    }
+    else if (lexical_cast<string>(a) != "0")
+    {
+      outs() << "In the lexical cast branch: " << a << "\n";
+      bool found = false;
+      for (auto it = terms.begin(); it != terms.end();)
+      {
+        if (additiveInverseBV(*it) == a)
+        {
+          terms.erase(it);
+          found = true;
+          break;
+        }
+        else
+          ++it;
+      }
+      if (!found)
+        terms.push_back(a);
+    }
+  }
+
+  inline static bool getBVCombCoefs(Expr ex, set<cpp_int> &intCoefs)
+  {
+    bool res = true;
+    if (isOpX<TRUE>(ex))
+      return false;
+    if (isOpX<OR>(ex))
+    {
+      for (auto it = ex->args_begin(), end = ex->args_end(); it != end; ++it)
+        res = res && getBVCombCoefs(*it, intCoefs);
+    }
+    else if (isBVComparison(ex)) // assuming the bv.combination is on the left side
+    {
+      if (!is_bvconst(ex->right()))
+        return false;
+      ExprVector addt;
+      getAddTermBV(ex->left(), addt);
+      for(auto &t: addt) outs() << "Term: " << t << "\n";
+      for (auto &t : addt)
+      {
+        if(is_bvnum(t))
+        {
+          outs() << "Adding coefficient: " << t << "\n";
+          intCoefs.insert(lexical_cast<cpp_int>(toMpz(t)));
+        }
+        else if (isOpX<BMUL>(t) && t->arity() == 2 &&
+            is_bvnum(t->left()))
+        {
+          outs() << "Adding coefficient: " << t->left() << "\n";
+          intCoefs.insert(lexical_cast<cpp_int>(toMpz(t->left())));
+        }
+        else if (isOpX<BMUL>(t) && t->arity() == 2 &&
+                 is_bvnum(t->right()))
+        {
+          outs() << "Adding coefficient: " << t->right() << "\n";
+          intCoefs.insert(lexical_cast<cpp_int>(toMpz(t->right())));
+        }
+        else
+          return false;
+      }
+    }
+    return res;
+  }
+
+  inline static Expr additiveInverseBV(Expr e)
+  {
+    if (isOpX<BMUL>(e))
+    {
+      cpp_int coef = 1;
+      ExprVector ops;
+      getMultOpsBV(e, ops);
+
+      ExprVector rem;
+      for (auto &a : ops)
+      {
+        if (isOpX<MPZ>(a))
+        {
+          coef *= lexical_cast<cpp_int>(a);
+        }
+        else
+        {
+          rem.push_back(a);
+        }
+      }
+
+      Expr num = mkMPZ(-coef, e->getFactory());
+      if (rem.empty() || coef == 0)
+        return num;
+
+      Expr remTerm = bvmul(rem);
+      if (coef == -1)
+        return remTerm;
+
+      return mk<BMUL>(num, remTerm);
+    }
+    else if (isOpX<BADD>(e))
+    {
+      ExprVector terms;
+      for (auto it = e->args_begin(), end = e->args_end(); it != end; ++it)
+      {
+        getAddTermBV(additiveInverseBV(*it), terms);
+      }
+      return bvadd(terms);
+    }
+    else if (isOpX<MINUS>(e))
+    {
+      ExprVector terms;
+      getAddTerm(additiveInverseBV(*e->args_begin()), terms);
+      auto it = e->args_begin() + 1;
+      for (auto end = e->args_end(); it != end; ++it)
+      {
+        getAddTermBV(*it, terms);
+      }
+      return bvadd(terms);
+    }
+    else if (isOpX<UN_MINUS>(e))
+    {
+      return e->left();
+    }
+    else if (isOpX<MPZ>(e))
+    {
+      return mkMPZ(-lexical_cast<cpp_int>(e), e->getFactory());
+    }
+    else if (isOpX<MPQ>(e))
+    {
+      string val = lexical_cast<string>(e);
+      int delim = val.find("/");
+      int val1 = stoi(val.substr(0, delim));
+      int val2 = stoi(val.substr(delim + 1));
+      if (delim < 0)
+      {
+        return mkTerm(mpq_class(-val1), e->getFactory());
+      }
+      else
+      {
+        string inv_val = to_string(-val1) + "/" + to_string(val2);
+        return mkTerm(mpq_class(inv_val), e->getFactory());
+      }
+    }
+    else if (isOpX<ITE>(e))
+    {
+      return mk<ITE>(e->left(), additiveInverseBV(e->right()), additiveInverseBV(e->last()));
+    }
+    //    return mk<MULT>(mkMPZ ((-1), e->getFactory()), e);
+    return mk<UN_MINUS>(e);
+  }
+
+  void getMultOpsBV(Expr a, ExprVector &ops)
+  {
+    if (isOpX<BMUL>(a))
+    {
+      for (unsigned i = 0; i < a->arity(); i++)
+      {
+        getMultOps(a->arg(i), ops);
+      }
+    }
+    // else if (isOpX<UN_MINUS>(a) && is_bvnum(a->left()))
+    // {
+    //   ops.push_back(mkMPZ((-1), a->getFactory()));
+    //   ops.push_back(a->left());
+    // }
+    else
+    {
+      ops.push_back(a);
+    }
+  }
+
+  struct AddMultDistrBV
+  {
+    AddMultDistrBV() {};
+
+    Expr operator()(Expr exp)
+    {
+      if (isOpX<BMUL>(exp) && exp->arity() == 2)
+      {
+        Expr lhs = exp->left();
+        Expr rhs = exp->right();
+
+        ExprVector alllhs;
+        getAddTermBV(lhs, alllhs);
+
+        ExprVector allrhs;
+        getAddTermBV(rhs, allrhs);
+
+        ExprVector unf;
+        for (auto &a : alllhs)
+        {
+          for (auto &b : allrhs)
+          {
+            unf.push_back(mk<BMUL>(a, b));
+          }
+        }
+        return bvadd(unf);
+      }
+
+      return exp;
+    }
+  };
+
+  Expr rewriteMultAddBV(Expr exp)
+  {
+    RW<AddMultDistrBV> mu(new AddMultDistrBV());
+    return dagVisit(mu, exp);
+  }
+
+  // template <typename Range>
+  // static Expr bvmul(Range &terms, ExprFactory &efac)
+  // {
+  //   return 
+  //     (terms.size() == 0) ? mkMPZ(1, efac) : 
+  //     (terms.size() == 1) ? *terms.begin() : 
+  //     mknary<BMUL>(terms);
+  // }
+
+  // template<typename Range> static Expr bvadd(Range& terms, ExprFactory &efac){
+  //   return
+  //     (terms.size() == 0) ? mkMPZ (0, efac) :
+  //     (terms.size() == 1) ? *terms.begin() :
+  //     mknary<BADD>(terms);
+  // }
+
   Expr simpextract(Expr ty, int lo, Expr exp)
   {
     int w = width(ty);
@@ -521,7 +803,7 @@ namespace ufo
   // Add new helper method for normalizing BV expressions
   Expr normalizeBVExpr(Expr e)
   {
-    if (isOp<NumericOp>(e))
+    if (isOp<BvOp>(e))
     {
       ExprVector args;
       for (auto it = e->args_begin(); it != e->args_end(); ++it)
@@ -622,6 +904,195 @@ namespace ufo
     }
     return e;
   }
+
+  // revisit
+  inline static Expr convertToBUGEandBUGT(Expr fla)
+  {
+    using namespace expr::op::bv;
+
+    if (isOpX<NEG>(fla))
+      return mkNeg(convertToBUGEandBUGT(fla->left()));
+
+    // Convert signed comparisons to unsigned equivalents by swapping operands
+    if (isOpX<BSLT>(fla))
+      return mk<BUGT>(fla->right(), fla->left());
+    if (isOpX<BSLE>(fla))
+      return mk<BUGE>(fla->right(), fla->left());
+
+    // Convert unsigned LT/LE to GT/GE by swapping operands
+    if (isOpX<BULT>(fla))
+      return mk<BUGT>(fla->right(), fla->left());
+    if (isOpX<BULE>(fla))
+      return mk<BUGE>(fla->right(), fla->left());
+
+    if (isOpX<EQ>(fla))
+    {
+      Expr lhs = fla->left();
+      Expr rhs = fla->right();
+
+      // Check if both operands are bit vectors
+      if (bv::is_bvnum(lhs) || bv::is_bvnum(rhs) ||
+          (typeOf(lhs) && isOpX<BVSORT>(typeOf(lhs))))
+      {
+        // For bit vectors: x = y becomes (x >= y) && (y >= x)
+        return mk<AND>(mk<BUGE>(lhs, rhs), mk<BUGE>(rhs, lhs));
+      }
+      else if (isBool(lhs))
+      {
+        // Boolean equality handling (same as original)
+        return mk<OR>(mk<AND>(lhs, rhs),
+                      mk<AND>(mkNeg(lhs), mkNeg(rhs)));
+      }
+      else
+      {
+        return fla;
+      }
+    }
+
+    if (isOpX<NEQ>(fla))
+    {
+      Expr lhs = fla->left();
+      Expr rhs = fla->right();
+
+      if (bv::is_bvnum(lhs) || bv::is_bvnum(rhs) ||
+          (typeOf(lhs) && isOpX<BVSORT>(typeOf(lhs))))
+      {
+        // For bit vectors: x != y becomes (x > y) || (y > x)
+        return mk<OR>(mk<BUGT>(lhs, rhs), mk<BUGT>(rhs, lhs));
+      }
+      else if (isBool(lhs))
+      {
+        // Boolean inequality handling (same as original)
+        return mk<OR>(mk<AND>(lhs, mkNeg(rhs)),
+                      mk<AND>(mkNeg(lhs), rhs));
+      }
+      else
+      {
+        return fla;
+      }
+    }
+
+    if (isOpX<AND>(fla) || isOpX<OR>(fla))
+    {
+      ExprSet args;
+      for (int i = 0; i < fla->arity(); i++)
+      {
+        args.insert(convertToBUGEandBUGT(fla->arg(i)));
+      }
+
+      return isOpX<AND>(fla) ? conjoin(args, fla->getFactory()) : disjoin(args, fla->getFactory());
+    }
+
+    return fla;
+  }
+
+  // Helper function to check if expression contains bit vector operations
+  inline static bool containsBVOps(Expr exp)
+  {
+    if (isOpX<BULT>(exp) || isOpX<BULE>(exp) || isOpX<BUGT>(exp) ||
+        isOpX<BUGE>(exp) || isOpX<BSLT>(exp) || isOpX<BSLE>(exp) ||
+        isOpX<BSGT>(exp) || isOpX<BSGE>(exp))
+    {
+      return true;
+    }
+
+    if (isOpX<EQ>(exp) || isOpX<NEQ>(exp))
+    {
+      Expr lhs = exp->left();
+      return bv::is_bvnum(lhs) || (typeOf(lhs) && isOpX<BVSORT>(typeOf(lhs)));
+    }
+
+    for (int i = 0; i < exp->arity(); i++)
+    {
+      if (containsBVOps(exp->arg(i)))
+        return true;
+    }
+
+    return false;
+  }
+
+  // BV unsigned version (analogous to LIA unsigned comparisons, but LIA doesn't distinguish, BV does)
+  inline static Expr reBuildCmpBV(Expr fla, Expr lhs, Expr rhs)
+  {
+    if (isOpX<EQ>(fla))
+    {
+      return mk<EQ>(lhs, rhs);
+    }
+    if (isOpX<NEQ>(fla))
+    {
+      return mk<NEQ>(lhs, rhs);
+    }
+    if (isOpX<BULE>(fla))
+    {
+      return mk<BULE>(lhs, rhs);
+    }
+    if (isOpX<BUGE>(fla))
+    {
+      return mk<BUGE>(lhs, rhs);
+    }
+    if (isOpX<BULT>(fla))
+    {
+      return mk<BULT>(lhs, rhs);
+    }
+    assert(isOpX<BUGT>(fla));
+    return mk<BUGT>(lhs, rhs);
+  }
+
+  // BV unsigned version (analogous to LIA signed comparisons)
+  inline static Expr reBuildCmpSymBV(Expr fla, Expr lhs, Expr rhs)
+  {
+    if (isOpX<EQ>(fla))
+    {
+      return mk<EQ>(rhs, lhs);
+    }
+    if (isOpX<NEQ>(fla))
+    {
+      return mk<NEQ>(rhs, lhs);
+    }
+    if (isOpX<BULE>(fla))
+    {
+      return mk<BUGE>(rhs, lhs);
+    }
+    if (isOpX<BUGE>(fla))
+    {
+      return mk<BULE>(rhs, lhs);
+    }
+    if (isOpX<BULT>(fla))
+    {
+      return mk<BUGT>(rhs, lhs);
+    }
+    assert(isOpX<BUGT>(fla));
+    return mk<BULT>(rhs, lhs);
+  }
+
+  // BV unsigned version (analogous to LIA signed comparisons)
+  inline static Expr reBuildNegCmpBV(Expr fla, Expr lhs, Expr rhs)
+  {
+    if (isOpX<EQ>(fla))
+    {
+      return mk<NEQ>(lhs, rhs);
+    }
+    if (isOpX<NEQ>(fla))
+    {
+      return mk<EQ>(lhs, rhs);
+    }
+    if (isOpX<BULE>(fla))
+    {
+      return mk<BUGT>(lhs, rhs);
+    }
+    if (isOpX<BUGE>(fla))
+    {
+      return mk<BULT>(lhs, rhs);
+    }
+    if (isOpX<BULT>(fla))
+    {
+      return mk<BUGE>(lhs, rhs);
+    }
+    assert(isOpX<BUGT>(fla));
+    return mk<BULE>(lhs, rhs);
+  }
+
+  
 
   // Add new helper class for BV printing
   class BVExprPrinter

@@ -532,7 +532,7 @@ namespace ufo
       {
         sfs[i].back().calculateStatistics(densecode, addepsilon);
 
-        if (printLog >= 4)
+        // if (printLog >= 4)
         {
           outs() << "\nSTATISTICS for " << *decls[i] << "\n==========\n";
           sfs[i].back().printStatistics();
@@ -605,6 +605,7 @@ namespace ufo
         }
 
         if (success) break;
+        if(printLog) outs () << "  => candidates are not inductive\n";
 
         assignPriorities();
         updateRels();
@@ -698,7 +699,7 @@ namespace ufo
             }
         } else {
              outs() << ";   <no SamplFactory found for index " << invNum << ">\n";
-        }
+      }
     }
   };
 
@@ -736,6 +737,7 @@ namespace ufo
     }
 
     ds.calculateStatistics();
+
     ds.synthesize(maxAttempts, itpCands);
   };
 }

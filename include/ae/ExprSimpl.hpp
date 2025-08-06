@@ -2666,8 +2666,13 @@ namespace ufo
     return fla;
   }
 
+  inline static Expr convertToBUGEandBUGT(Expr fla);
+  inline static bool containsBVOps(Expr exp);
+
   inline static Expr convertToGEandGT(Expr fla)
   {
+    if(containsBVOps(fla)) return convertToBUGEandBUGT(fla);
+    
     Expr lhs = fla->left();
     Expr rhs = fla->right();
 

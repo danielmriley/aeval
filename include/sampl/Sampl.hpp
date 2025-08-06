@@ -6,6 +6,7 @@
 #include "LinCom.hpp"
 #include "BoolCom.hpp"
 #include "ArrCom.hpp"
+#include "BvCom.hpp"
 
 using namespace std;
 using namespace boost;
@@ -19,10 +20,11 @@ namespace ufo
 
     Bdisj b_part;
     LAdisj l_part;
+    BVdisj bv_part;
 
     int arity()
     {
-      return l_part.arity + ((b_part.arity > 0) ? 1 : 0);
+      return l_part.arity + ((b_part.arity > 0) ? 1 : 0) + bv_part.arity;
     }
 
     bool empty() { return arity() == 0; }
@@ -41,23 +43,30 @@ namespace ufo
     density hasBooleanComb;
     density orAritiesDensity;
     bool hasArrays = false;
+    bool hasBV = false;
 
     public:
 
     LAfactory lf;
     Bfactory bf;
     ARRfactory af;
+    BVfactory bvf;
 
     ExprSet learnedExprs;
 
-    int initialized = 0;
+    int initialized = 0;  
 
     SamplFactory(ExprFactory &_efac, bool aggp) :
-      m_efac(_efac), lf(_efac, aggp), bf(_efac), af(_efac, aggp) {}
+      m_efac(_efac), lf(_efac, aggp), bf(_efac), af(_efac, aggp), bvf(_efac, aggp) {}
 
     Expr getAllLemmas()
     {
       return conjoin(learnedExprs, m_efac);
+    }
+    
+    void setHasBV(bool hbv)
+    {
+      hasBV = hbv;
     }
 
     bool addVar(Expr var)
@@ -73,6 +82,12 @@ namespace ufo
         lf.addVar(var);
         added = true;
       }
+      else if (is_bvconst(var))
+      {
+        bvf.addVar(var);
+        added = true;
+        setHasBV(true);
+      }
       else if (bind::isConst<ARRAY_TY> (var))
       {
         af.addVar(var);
@@ -82,10 +97,19 @@ namespace ufo
       return added;
     }
 
-    void initialize(ExprSet& arrCands, ExprVector& arrAccessVars, ExprSet& arrRange)
+    void initialize(ExprSet& arrCands, ExprVector& arrAccessVars, ExprSet& arrRange, int bw = 0)
     {
+      if(bw > 0)
+      {
+        setHasBV(true);
+        bvf.initialize(bw);
+      }
+      else
+      {
+        setHasBV(false);
+        lf.initialize();
+      }
       bf.initialize();
-      lf.initialize();
       if (hasArrays)
       {
         if (!arrAccessVars.empty() && !arrRange.empty())
@@ -102,20 +126,27 @@ namespace ufo
       samples.push_back(Sampl());
       Bdisj& bcs = samples.back().b_part;
       LAdisj& lcs = samples.back().l_part;
+      BVdisj& bvcs = samples.back().bv_part;
 
       bf.exprToBdisj(ex, bcs);
       lf.exprToLAdisj(ex, lcs);
+      bvf.exprToBVdisj(ex, bvcs);
 
       if (!lcs.empty()) lcs.normalizePlus();
       if (!bcs.empty()) bcs.normalizeOr();
+      if (!bvcs.empty()) bvcs.normalizePlus();
 
       return samples.back();
     }
 
     Expr sampleToExpr(Sampl& s)
     {
-      if (s.l_part.arity == 0 && s.b_part.arity == 0)
+      if (s.l_part.arity == 0 && s.b_part.arity == 0 && s.bv_part.arity == 0)
         return NULL;
+      if(s.bv_part.arity > 0)
+      {
+        return bvf.toExpr(s.bv_part);
+      }
       if (s.l_part.arity == 0)
         return bf.toExpr(s.b_part);
       if (s.b_part.arity == 0)
@@ -129,11 +160,17 @@ namespace ufo
       int maxArity = 0;
       set<int> orArities;
 
-      if (lf.getVars().size() > 0 && samples.size() == 0)
+      if (lf.getVars().size() > 0 && samples.size() == 0 && !hasBV)
       {
         // artificially add one default sample in case there is nothing here
         // TODO: find a better solution
         exprToSampl (mk<GEQ>(lf.getVars()[0], mkTerm (mpz_class (0), m_efac)));
+      }
+      else if (bvf.getVars().size() > 0 && samples.size() == 0)
+      {
+        // artificially add one default sample in case there is nothing here
+        // TODO: find a better solution
+        exprToSampl(mk<BUGE>(bvf.getVars()[0], bvnum(mpz_class(0), bvf.width, m_efac)));
       }
 
       for (auto &s : samples)
@@ -149,16 +186,29 @@ namespace ufo
           orArities.insert(i);
       }
 
-      lf.initDensities(orArities);
+      if(hasBV)
+      {
+        bvf.initDensities(orArities);
+      }
+      else 
+      {
+        lf.initDensities(orArities);
+      }
       bf.initDensities();
 
       for (auto &s : samples)
       {
         LAdisj& l = s.l_part;
         Bdisj& b = s.b_part;
+        BVdisj& bv = s.bv_part;
+
         if (!l.empty())
         {
           lf.calculateStatistics(l, s.arity(), freqs, addepsilon);
+        }
+        if(!bv.empty())
+        {
+          bvf.calculateStatistics(bv, s.arity(), freqs, addepsilon);
         }
         if (!b.empty())
         {
@@ -186,7 +236,14 @@ namespace ufo
 
       for (auto & ar : orAritiesDensity)
       {
-        lf.stabilizeDensities(ar.first, addepsilon, freqs);
+        if(!hasBV)
+        {
+          lf.stabilizeDensities(ar.first, addepsilon, freqs);
+        }
+        else
+        {
+          bvf.stabilizeDensities(ar.first, addepsilon, freqs);
+        }
       }
 
       if (initialized == 2) af.initializeLAfactories();
@@ -206,7 +263,10 @@ namespace ufo
         }
       }
 
-      if (orAritiesDensity.empty()) return NULL;
+      if (orAritiesDensity.empty())
+      {
+        return NULL;
+      } 
 
       int arity = chooseByWeight(orAritiesDensity);
       int hasBool = chooseByWeight(hasBooleanComb);
@@ -214,8 +274,12 @@ namespace ufo
       samples.push_back(Sampl());
       Sampl& curCand = samples.back();
 
+      // outs() << "Trying to get a candidate with arity = " << arity
+      //        << ", hasBool = " << hasBool << ", hasLin = " << (!hasBV ? "1" : "0")
+      //        << ", hasBV = " << (hasBV ? "1" : "0") << "\n";
+
       Expr lExpr;
-      if (hasLin > 0)
+      if (!hasBV && hasLin > 0)
       {
         if (!lf.guessTerm(curCand.l_part, arity, hasLin)) return NULL;
         curCand.l_part.normalizePlus();
@@ -229,6 +293,14 @@ namespace ufo
         bExpr = bf.toExpr(curCand.b_part);
       }
 
+      Expr bvExpr;
+      if (hasBV && hasLin > 0)
+      {
+        if (!bvf.guessTerm(curCand.bv_part, arity, hasLin)) return NULL;
+        curCand.bv_part.normalizePlus();
+        bvExpr = bvf.toExpr(curCand.bv_part);
+      }
+
       if (hasBool > 0 && hasLin > 0)
       {
         return mk<OR>(bExpr, lExpr);
@@ -236,6 +308,10 @@ namespace ufo
       else if (hasBool > 0)
       {
         return bExpr;
+      }
+      else if(hasBV && hasLin > 0)
+      {
+        return bvExpr;
       }
       else
       {
@@ -250,6 +326,9 @@ namespace ufo
 
       if (s.l_part.empty())
         bf.assignPrioritiesForBlocked(s.b_part);
+
+      if (s.bv_part.empty())
+        bvf.assignPrioritiesForLearned(s.bv_part);
     }
 
     void assignPrioritiesForFailed(Sampl& s)
@@ -259,6 +338,9 @@ namespace ufo
 
       if (s.l_part.empty())
         bf.assignPrioritiesForBlocked(s.b_part);
+
+      if (s.bv_part.empty())
+        bvf.assignPrioritiesForFailed(s.bv_part);
     }
 
     void assignPrioritiesForBlocked(Sampl& s)
@@ -268,6 +350,9 @@ namespace ufo
 
       if (s.l_part.empty())
         bf.assignPrioritiesForBlocked(s.b_part);
+
+      if (s.bv_part.empty())
+        bvf.assignPrioritiesForBlocked(s.bv_part);
     }
 
     void assignPrioritiesForLearned()
@@ -302,7 +387,16 @@ namespace ufo
 
         for (auto &ar : orAritiesDensity) lf.printCodeStatistics(ar.first);
       }
+   
+      if(hasBV)
+      {
+        outs() << "\nInt consts:\n";
+        for (auto &form: bvf.getConsts()) outs() << lexical_cast<string>(form) << ", ";
+        outs() << "\b\b \n";
+        for (auto &ar : orAritiesDensity) bvf.printCodeStatistics(ar.first);
+      }
     }
+
   };
 }
 

@@ -191,9 +191,27 @@ namespace ufo
       {
         // get int constants from the normalized candidate
         ExprSet intConstsE;
-        filter (tmpl, bind::IsHardIntConst(), std::inserter (intConstsE, intConstsE.begin ()));
-        for (auto &a : intConstsE) intConsts.insert(lexical_cast<cpp_int>(a));
-        if (getLinCombCoefs(tmpl, intCoefs)) candidates.insert(tmpl);
+        if(has_bvsort(tmpl))
+        {
+          filter (tmpl, bind::IsBVConst(), std::inserter (intConstsE, intConstsE.begin ()));
+          for (auto &a : intConstsE)
+          {
+            intConsts.insert(lexical_cast<cpp_int>(toMpz(a)));
+            if (getBVCombCoefs(tmpl, intCoefs))
+            {
+              candidates.insert(tmpl);
+            } 
+          }
+        }
+        else
+        {
+          filter (tmpl, bind::IsHardIntConst(), std::inserter (intConstsE, intConstsE.begin ()));
+          for (auto &a : intConstsE) intConsts.insert(lexical_cast<cpp_int>(a));
+          if (getLinCombCoefs(tmpl, intCoefs))
+          {
+            candidates.insert(tmpl);
+          } 
+        }
       }
     }
 
@@ -279,14 +297,20 @@ namespace ufo
       {
         addSeed(fla);      // get rid of ITEs first
       }
-      else if (isOp<ComparissonOp>(fla))
+      else if (isOpX<BUGT>(fla) || isOpX<BUGE>(fla))
+      {
+        addSeed(fla);      // get rid of ITEs first
+      }
+      else if (isOp<ComparissonOp>(fla) || isOpX<BvOp>(fla))
       {
         if (containsOp<ARRAY_TY>(fla)) addSeed(fla);
         else
         {
-          Expr tmp = convertToGEandGT(fla);
+          Expr tmp = convertToGEandGT(fla); // TODO: Needs to support BV.
           if (tmp != fla)
+          {
             obtainSeeds(tmp);
+          }
           else
           {
             errs () << "COULD NOT SEEDMINE: " << *tmp << "\n";
@@ -318,6 +342,28 @@ namespace ufo
       for (auto &cnj : extra) analyzeExtra(cnj);
     }
 
+    Expr removeRedundant(Expr e)
+    {
+      // remove Exprs like x > x
+      ExprSet conjs, res;
+      getConj(e, conjs);
+      for (auto &a : conjs)
+      {
+        Expr left = a->left();
+        Expr right = a->right();
+        if (left == right)
+        {
+          continue;
+        }
+        else
+        {
+          res.insert(rewriteMultAddBV(a));
+        }
+      }
+
+      return conjoin(res, m_efac);
+    }
+
     void analyzeCode()
     {
       if (containsOp<FORALL>(hr.body) || containsOp<EXISTS>(hr.body)) return;
@@ -345,6 +391,7 @@ namespace ufo
       body = rewriteSelectStore(body);
       body = eliminateQuantifiers(body, quantified);
       body = weakenForVars(body, quantified);
+
 
       // get seeds and normalize
       ExprSet conds;
@@ -379,11 +426,22 @@ namespace ufo
             vars2elim.push_back(hr.srcVars[i]);
           else
             vars2elim.push_back(hr.dstVars[i]);
-        e = eliminateQuantifiersRepl(e, vars2elim);
-        e = simplifyBool(e);
-        e = rewriteBoolEq(e);
-        e = convertToGEandGT(e);
-        e = rewriteNegAnd(e);
+        
+        if(has_bvsort(e))
+        {
+          e = eliminateQuantifiersRepl(e, vars2elim);
+          e = convertToGEandGT(e);
+          e = replaceAll(e, hr.dstVars, hr.srcVars);
+          e = removeRedundant(e);
+        }
+        else
+        {
+          e = eliminateQuantifiersRepl(e, vars2elim);
+          e = simplifyBool(e);
+          e = rewriteBoolEq(e);
+          e = convertToGEandGT(e);
+          e = rewriteNegAnd(e);
+        }
         obtainSeeds(e);
       }
     }

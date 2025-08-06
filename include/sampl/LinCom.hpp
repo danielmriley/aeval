@@ -15,7 +15,7 @@ using namespace boost;
 namespace ufo
 {
 
-  typedef vector<vector <int>> lincoms;
+  typedef std::vector<std::vector <int>> lincoms;
 
   class LAterm
   {
@@ -52,6 +52,15 @@ namespace ufo
         vcs[j++] = it->first;
         vcs[j++] = it->second;
       }
+    }
+
+    void printLAterm()
+    {
+      outs() << "=== LAterm ===\n";
+      outs() << "arity: " << arity << "\n";
+      outs() << "cmpop: " << cmpop << "\n";
+      outs() << "intconst: " << intconst << "\n";
+      outs() << "===============\n";
     }
   };
 
@@ -213,7 +222,7 @@ namespace ufo
     map<int, density> cmpOpDensity;
     map<int, vector<density>> varDensity;
     map<int, map<int, density>> coefDensity;
-    vector<vector<set<int>>> varCombinations;
+    std::vector<std::vector<std::set<int>>> varCombinations;
 
     map<lincoms, vector<weights>> ineqPriors;
     map<lincoms, set<int>> visited;
@@ -239,9 +248,9 @@ namespace ufo
 
     void initialize()  // should be called after addVar, addConst, and addIntCoef
     {
-//      assert (intCoefs.size() > 0);
-//      assert (intConsts.size() > 0);
-//      assert (vars.size() > 0);
+     assert (intCoefs.size() > 0);
+     assert (intConsts.size() > 0);
+     assert (vars.size() > 0);
 
       prVarsDistrRange = 2 * intConsts.size();
 
@@ -323,6 +332,10 @@ namespace ufo
 
     Expr assembleLinComb(LAterm& s)
     {
+      for (auto &v : s.vcs)
+      {
+        outs() << "  ** v: " << v << "\n";
+      }
       ExprVector apps;
 
       for (int i = 0; i < s.vcs.size(); i = i + 2)
@@ -375,20 +388,30 @@ namespace ufo
       else if (isOpX<GEQ>(ex) || isOpX<GT>(ex))
       {
         LAterm s;
-        if (!isNumericConst(ex->right())) return;
+        if (!isNumericConst(ex->right()))
+        {
+          outs() << "Right side of comparison is not a numeric constant: " << ex->right() << "\n";
+          return;
+        } 
 
         ExprVector all;
         getAddTerm (ex->left(), all);
         Expr aux = reBuildCmp(ex, auxVar1, auxVar2);
+        outs() << "  ** Rebuilt comparison: " << aux << "\n";
+        outs() << "  expr: " << ex << "\n";
 
         s.arity = all.size();
         s.cmpop = getVarIndex(aux, cmpOps);
         s.intconst = getVarIndex(lexical_cast<cpp_int>(ex->right()), intConsts);
+        outs() << "  ** arity: " << s.arity << "\n";
+        outs() << "  ** intconst: " << s.intconst << "\n";
+        outs() << "  ** cmpop: " << s.cmpop << "\n";
 
         if (s.intconst == -1 || s.cmpop == -1) return;
 
         for (auto &e : all)
         {
+          outs() << "  ** in loop exprToLAdisj for e: " << e << "\n";
           Expr curVar = NULL;
           cpp_int curCoef;
 
@@ -396,6 +419,7 @@ namespace ufo
           getMultOps (e, ops);
           for (auto & o : ops)
           {
+            outs() << "  ** in loop exprToLAdisj for o: " << o << "\n";
             if (isNumericConst(o)) curCoef = lexical_cast<cpp_int>(o);
             else if (curVar != NULL) return;
             else curVar = o;
@@ -416,6 +440,7 @@ namespace ufo
         if (s.vcs.size() != 2*(s.arity)) return;
         addDisjFilter(s, sample);
       }
+      outs() << "  ** Finished exprToLAdisj for " << ex << "\n";
     }
 
     cpp_int equalCoefs(LAterm& s)
@@ -1174,7 +1199,7 @@ namespace ufo
       if (freqs)
       {
         // collect number of occurrences....
-
+        
         for (auto & lc : lcs.dstate)
         {
           // of arities of application of PLUS
@@ -1189,6 +1214,7 @@ namespace ufo
           set<int> vars;
           int vars_id = -1;
           for (int j = 0; j < lc.vcs.size(); j = j+2) vars.insert(lc.vcs[j]);
+          lc.printLAterm();
           for (int j = 0; j < varCombinations[lc.arity].size(); j++)
           {
             if (varCombinations[lc.arity][j] == vars)
@@ -1212,7 +1238,6 @@ namespace ufo
       else
       {
         // same thing as in above; but instead of precise frequencies, we gather a rough presence
-
         for (auto & lc : lcs.dstate)
         {
           // of arities of application of PLUS
@@ -1226,7 +1251,11 @@ namespace ufo
 
           set<int> vars;
           int vars_id = -1;
-          for (int j = 0; j < lc.vcs.size(); j = j+2) vars.insert(lc.vcs[j]);
+          for (int j = 0; j < lc.vcs.size(); j = j+2)
+          {
+            vars.insert(lc.vcs[j]);
+          }
+          lc.printLAterm();
           for (int j = 0; j < varCombinations[lc.arity].size(); j++)
           {
             if (varCombinations[lc.arity][j] == vars)

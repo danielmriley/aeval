@@ -781,15 +781,15 @@ namespace ufo
         else if (isOpX<BLSHR>(e))
           return mk<BLSHR>(translateExprHelper(e->left()), translateExprHelper(e->right()));
           
-        // Handle LIA comparisons -> Signed BV comparisons
+        // Handle LIA comparisons -> Unsigned BV comparisons
         else if (isOpX<LEQ>(e))
-          return bv::bvsle(translateExprHelper(e->left()), translateExprHelper(e->right())); 
+          return bv::bvule(translateExprHelper(e->left()), translateExprHelper(e->right())); 
         else if (isOpX<LT>(e))
-          return bv::bvslt(translateExprHelper(e->left()), translateExprHelper(e->right())); 
+          return bv::bvult(translateExprHelper(e->left()), translateExprHelper(e->right())); 
         else if (isOpX<GEQ>(e))
-          return bv::bvsge(translateExprHelper(e->left()), translateExprHelper(e->right())); 
+          return bv::bvuge(translateExprHelper(e->left()), translateExprHelper(e->right())); 
         else if (isOpX<GT>(e))
-          return bv::bvsgt(translateExprHelper(e->left()), translateExprHelper(e->right())); 
+          return bv::bvugt(translateExprHelper(e->left()), translateExprHelper(e->right())); 
         else if (isOpX<EQ>(e)) // Equality
           return mk<EQ>(translateExprHelper(e->left()), translateExprHelper(e->right()));
         else if (isOpX<NEQ>(e)) // Inequality

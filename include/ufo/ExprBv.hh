@@ -1,16 +1,31 @@
 #ifndef __EXPR_BV__HH_
 #define __EXPR_BV__HH_
 
+#include "ae/ExprSimpl.hpp"
+
 /** Bit-Vector expressions
 
  * This file is included from middle of Expr.hpp
  */
+
 namespace expr
 {
   namespace op
   {
     namespace bv
     {
+      void getConj(Expr e, ExprSet &s)
+      {
+        if (isOpX<AND>(e))
+        {
+          for (size_t i = 0; i < e->arity(); i++)
+            getConj(e->arg(i), s);
+        }
+        else
+        {
+          s.insert(e);
+        }
+      }
       mpz_class power(unsigned long base, unsigned long exp)
       {
         mpz_class res;
@@ -86,7 +101,17 @@ namespace expr
 
     namespace bv
     {
-      inline bool isBvSort(Expr e) { return isOpX<BVSORT>(e); }
+      inline bool has_bvsort(Expr e)
+      {
+        ExprSet s;
+        getConj(e, s);
+        for (auto &a : s)
+        {
+          if (!containsOp<BVSORT>(a)) return false;
+        }
+        return true;
+      }
+      inline bool is_bvsort(Expr e) { return isOpX<BVSORT>(e); }
       
       inline Expr bvsort(unsigned width, ExprFactory &efac)
       {
@@ -226,8 +251,63 @@ namespace expr
       inline Expr bvnot(Expr v) { return mk<BNOT>(v); }
       inline Expr bvneg(Expr v) { return mk<BNEG>(v); }
       inline Expr bvadd(Expr a, Expr b) { return mk<BADD>(a, b); }
+      inline Expr bvadd(ExprVector &args)
+      {
+        assert(!args.empty());
+        if (args.size() == 1)
+        {
+          return args[0];
+        }
+        
+        ExprVector::const_iterator it = args.begin();
+        Expr res = *it;
+        for (++it; it != args.end(); ++it)
+        {
+          res = mk<BADD>(res, *it);
+        }
+        return res;
+      }
       inline Expr bvsub(Expr a, Expr b) { return mk<BSUB>(a, b); }
+      inline Expr bvsub(ExprVector &args)
+      {
+        assert(!args.empty());
+        if (args.size() == 1)
+        {
+          return args[0];
+        }
+
+        ExprVector::const_iterator it = args.begin();
+        Expr res = *it;
+        for (++it; it != args.end(); ++it)
+        {
+          if(it == --(args.end()))
+          {
+            res = mk<BSUB>(res, *it);
+          }
+          else
+          {
+            res = mk<BADD>(res, *it);
+          }
+        }
+        return res;
+      }
       inline Expr bvmul(Expr a, Expr b) { return mk<BMUL>(a, b); }
+      inline Expr bvmul(ExprVector &args)
+      {
+        assert(!args.empty());
+        if (args.size() == 1)
+        {
+          return args[0];
+        }
+
+        ExprVector::const_iterator it = args.begin();
+        Expr res = *it;
+        for (++it; it != args.end(); ++it)
+        {
+          res = mk<BMUL>(res, *it);
+        }
+        return res;
+      }
       inline Expr bvudiv(Expr a, Expr b) { return mk<BUDIV>(a, b); }
       inline Expr bvsdiv(Expr a, Expr b) { return mk<BSDIV>(a, b); }
       inline Expr bvurem(Expr a, Expr b) { return mk<BUREM>(a, b); }
@@ -597,6 +677,15 @@ namespace expr
         bool operator()(Expr e)
         {
           return isIntVar(e) || isRealVar(e) || isBoolVar(e) || bv::is_bvvar(e) || isVar<ARRAY_TY>(e);
+        }
+      };
+
+      class IsBVConst : public std::unary_function<Expr, bool>
+      {
+      public:
+        bool operator()(Expr e)
+        {
+          return op::bv::is_bvnum(e);
         }
       };
     }

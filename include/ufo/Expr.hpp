@@ -3297,11 +3297,17 @@ namespace expr
           return typeOf(v->left());
         }
 
+        if (isOpX<BVSORT>(v))
+        {
+          return bvsort(width(v), v->efac());
+        }
+
       std::cerr << "WARNING: could not infer type of: " << *v << "\n";
       //      assert (0 && "Unreachable");
 
         return Expr();
       }
+
       inline Expr sortOf (Expr v) {return typeOf (v);}
     }
   }

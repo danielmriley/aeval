@@ -1,11 +1,14 @@
 #ifndef BITHORN__HPP__
 #define BITHORN__HPP__
 
+#include <utility>          // Needed for std::pair
+
 #include "Horn.hpp"
 #include "simpl/Bv2Lia.hpp"
 #include "simpl/Lia2Bv.hpp"
 #include "ae/ExprSimpl.hpp" // Include ExprSimpl for simplification functions
-#include <utility>          // Needed for std::pair
+#include "sampl/Sampl.hpp"
+#include "sampl/SeedMiner.hpp"
 
 using namespace std;
 
@@ -14,10 +17,11 @@ namespace ufo
   class BitHorn
   {
   private:
+
     ExprFactory &m_efac;
     EZ3 &m_z3;
     CHCs *m_liaChcs; // Changed to pointer
-    CHCs m_bvChcs;
+    CHCs& m_bvChcs;
     SMTUtils u;
     Lia2BvTranslator m_Lia2BvTranslator;
     Bv2LiaTranslator m_Bv2LiaTranslator;
@@ -26,6 +30,7 @@ namespace ufo
     bool doConnect;
     bool doGJ;
     int debug;
+
     std::vector<ExprSet> m_learnedLemmas; // Stores learned lemmas per iteration
     unsigned m_original_bv_width = 0;
     map<Expr, ExprSet> m_liaSolutionMap; // Maps LIA relation -> LIA solution ExprSet
@@ -235,13 +240,13 @@ namespace ufo
 
     bool checkLemmasAgainstRules(const vector<HornRuleExt *> &worklist, const map<Expr, Expr> &solutionMap)
     {
-      if (debug >= 3)
+      if (debug >= 5)
       {
         outs() << "\n--- Checking Lemmas Against Rules (" << worklist.size() << " rules) ---\n";
       }
       for (const auto *hr : worklist)
       {
-        if (debug >= 4)
+        if (debug >= 5)
         {
           outs() << "  Checking Rule: (";
           if (hr->srcRelation)
@@ -278,7 +283,7 @@ namespace ufo
             }
             else
             {
-              if (debug >= 1)
+              if (debug >= 5)
               {
                 outs() << "  Warning: Var mismatch for src " << *hr->srcRelation << ". Skipping rule.\n";
               }
@@ -313,7 +318,7 @@ namespace ufo
             }
             else
             {
-              if (debug >= 1)
+              if (debug >= 5)
               {
                 outs() << "  Warning: Var mismatch for dst " << *hr->dstRelation << ". Skipping rule.\n";
               }
@@ -340,7 +345,7 @@ namespace ufo
 
         if (checkResult)
         {
-          if (debug >= 3)
+          if (debug >= 5)
           {
             outs() << "  Rule FAILED (SAT/Indeterminate): (";
             if (hr->srcRelation)
@@ -358,14 +363,14 @@ namespace ufo
         }
         else
         {
-          if (debug >= 4)
+          if (debug >= 5)
           {
             outs() << "    Rule PASSED (UNSAT)\n";
           }
         }
       }
 
-      if (debug >= 3)
+      if (debug >= 5)
       {
         outs() << "Finished checkLemmasAgainstRules: All rules PASSED.\n";
       }
@@ -656,6 +661,218 @@ namespace ufo
       return m_bvChcs;
     }
 
+    std::vector<std::map<int, Expr>> invarVars;
+
+    void initializeSampl(SamplFactory& sf, Expr invRel, ExprSet& cands, set<cpp_int>& progConsts, set<cpp_int>& intCoefs)
+    {
+      ExprSet arr1, arr2;
+      ExprVector arrVars;
+      // InitializeSampl
+
+      if (sf.bvf.nonlinVars.size() > 0)
+      {
+        if (debug >= 4)
+          outs() << "Multed vars: ";
+        for (auto &a : sf.bvf.nonlinVars)
+        {
+          if (debug >= 4)
+            outs() << *a.first << " = " << *a.second << "\n";
+          sf.bvf.addVar(a.second);
+          Expr b = a.first->right();
+          if (is_bvconst(b))
+            intCoefs.insert(lexical_cast<cpp_int>(b));
+        }
+      }
+
+      for (auto &c : progConsts) progConsts.insert(-c);
+      for (auto &a : intCoefs) intCoefs.insert(-a);
+      for (auto &a : intCoefs) if (a != 0) sf.bvf.addIntCoef(a);
+
+      auto progConstsTmp = progConsts;
+      for (auto &a : progConstsTmp)
+        for (auto &b : intCoefs)
+          progConsts.insert(a*b);
+
+      // sort progConsts and push to vector:
+      while (progConsts.size() > 0)
+      {
+        cpp_int min = *progConsts.begin();
+        for (auto c : progConsts)
+        {
+          if (c < min)
+          {
+            min = c;
+          }
+        }
+        progConsts.erase(min);
+        sf.bvf.addConst(min);
+      }
+
+      sf.initialize(arr1, arrVars, arr2, m_original_bv_width);
+
+      // normalize samples obtained from CHCs
+      for (auto & cand : cands) Sampl& s = sf.exprToSampl(cand);
+    }
+
+    void doSeedMining(SamplFactory& sf, Expr invRel, ExprSet& cands, set<cpp_int>& progConsts, set<cpp_int>& intCoefs)
+    {
+      if (debug >= 2)
+      {
+        outs() << "\n--- Performing Seed Mining for " << *invRel << " ---\n";
+      }
+
+      for(auto &hr : m_bvChcs.chcs)
+      {
+        SeedMiner sm(hr, invRel, invarVars.back(), sf.bvf.nonlinVars);
+        sm.analyzeCode();
+
+        // convert intConsts to progConsts and add additive inverses (if applicable):
+        for (auto &a : sm.intConsts) progConsts.insert(a);
+        for (auto &a : sm.intCoefs) intCoefs.insert(a); // same for intCoefs
+        for (auto &a : sm.candidates) cands.insert(a);
+      }
+
+      if (debug >= 3)
+      {
+        outs() << "  Seed mining complete. Candidates found: " << cands.size() << "\n";
+        for(const auto &c : cands) outs() << c << " ";
+        outs() << "\n";
+        outs() << "  Program constants: ";
+        for (const auto &c : progConsts) outs() << c << " ";
+        outs() << "\n";
+        outs() << "  Integer coefficients: ";
+        for (const auto &c : intCoefs) outs() << c << " ";
+        outs() << "\n";
+      }
+    }
+
+    void prepareSeeds(SamplFactory& sf, Expr invDecl)
+    {
+      invarVars.push_back(map<int, Expr>());
+
+      for (int i = 0; i < m_bvChcs.invVars[invDecl].size(); i++)
+      {
+
+        Expr var = m_bvChcs.invVars[invDecl][i];
+        if(sf.addVar(var))
+        {
+          invarVars.back()[i] = var;
+        }
+      }
+
+      set<cpp_int> progConsts, intCoefs;
+      ExprSet cands;
+      doSeedMining(sf, invDecl, cands, progConsts, intCoefs);
+      initializeSampl(sf, invDecl, cands, progConsts, intCoefs);
+    }
+
+    bool isTautology(Expr a) // adjusted for big disjunctions
+    {
+      if (isOpX<TRUE>(a))
+        return true;
+
+      ExprSet disjs;
+      getDisj(a, disjs);
+      if (disjs.size() == 1)
+        return false;
+
+      map<ExprSet, ExprSet> varComb;
+      for (auto &a : disjs)
+      {
+        ExprSet avars;
+        expr::filter(a, bind::IsConst(), std::inserter(avars, avars.begin()));
+        if (avars.size() == 0)
+          continue;
+        varComb[avars].insert(mkNeg(a));
+      }
+
+      if (varComb.size() == 0)
+        return false;
+
+      bool res = false;
+      for (auto &v : varComb)
+      {
+        if (!u.isSat(conjoin(v.second, m_efac)))
+        {
+          res = true;
+          break;
+        }
+      }
+      return res;
+    }
+
+    void testBVcom()
+    {
+      if (debug >= 1)
+      {
+        outs() << "\n--- Testing BVCom ---\n";
+        m_bvChcs.print(true);
+        outs() << "\n";
+      }
+
+      SamplFactory sf(m_efac, false);
+
+      Expr invDecl = (*m_bvChcs.decls.begin())->left();
+      prepareSeeds(sf, invDecl);
+      sf.calculateStatistics(false, false);
+
+      if(debug >= 3)
+      {
+        outs() << "Seed mining complete. Statistics:\n=================================\n";
+        sf.printStatistics();
+      }
+
+      outs() << "\nSAMPLING\n========\n";
+      
+      bool skip = false;
+      for(int i = 0; i < 10; i++)
+      {
+        Expr cand = sf.getFreshCandidate();
+        if(cand == NULL) continue;
+        if(debug >= 2) outs() << "Sample " << i+1 << ": " << cand << "\n";
+
+        // Do some checks on the candidate produced and update the densities.
+        if(isTautology(cand))
+        {
+          sf.assignPrioritiesForLearned();
+          skip = true;
+        }
+
+        if(sf.bvf.nonlinVars.size() > 0 && u.isFalse(cand))
+        {
+          sf.assignPrioritiesForFailed();
+          skip = true;
+        }
+
+        if(skip) continue;
+
+        bool isSafe = assembleAndCheck(cand);
+
+        if(isSafe)
+        {
+          sf.assignPrioritiesForLearned();
+          if(checkSafetyInBV())
+          {
+            outs() << "Success after sampling " << i+1 << " sample" << (i+1>1 ? "s" : "") << ".\n";
+            printSolution();
+            return;
+          }
+        }
+        else
+        {
+          sf.assignPrioritiesForFailed();
+          if (debug >= 2)
+          {
+            outs() << "Sample " << i+1 << " is UNSAFE.\n";
+          }
+        }
+      }
+
+      outs() << "No safe solution found after sampling.\n";
+      printBvSolutionMap(m_bvSolutionMap);
+
+    }
+
     bool solve(unsigned int to = 100)
     {
       if (debug >= 1)
@@ -664,6 +881,9 @@ namespace ufo
       }
 
       bool isSafe = false;
+
+      testBVcom();
+      exit(0);
 
       for (int i = 0; i < to; i++)
       {
@@ -1099,7 +1319,7 @@ namespace ufo
 
     boost::tribool checkRule(HornRuleExt *hr, map<Expr, ExprSet> &candidates)
     {
-      if (debug >= 3)
+      if (debug >= 4)
       {
         outs() << "  Checking rule: " << *hr->srcRelation << " -> " << *hr->dstRelation << "\n";
       }
@@ -1135,7 +1355,7 @@ namespace ufo
         checkExprs.push_back(disjoin(negged, m_efac));
       }
 
-      if (debug >= 4)
+      if (debug >= 5)
       {
         outs() << "    Checking expressions:\n";
         for (int i = 0; i < checkExprs.size(); i++)
@@ -1172,7 +1392,7 @@ namespace ufo
     bool checkAllOver(vector<HornRuleExt *> &worklist,
                       map<Expr, ExprSet> &candidates)
     {
-      if (debug >= 2)
+      if (debug >= 4)
       {
         outs() << "  Checking for progress...\n";
       }
@@ -1190,7 +1410,7 @@ namespace ufo
     bool multiHoudini(vector<HornRuleExt *> &worklist,
                       map<Expr, ExprSet> &candidates)
     {
-      if (debug >= 2)
+      if (debug >= 4)
       {
         outs() << "  Checking " << worklist.size() << " rules (multiHoudini)\n";
       }
@@ -1213,7 +1433,7 @@ namespace ufo
 
       if (checkAgain)
       {
-        if (debug >= 2)
+        if (debug >= 4)
         {
           outs() << "  Candidates weakened, rechecking (multiHoudini)...\n";
         }
@@ -1225,7 +1445,7 @@ namespace ufo
 
     void weakenCandidates(HornRuleExt *hr, map<Expr, ExprSet> &candidates)
     {
-      if (debug >= 2)
+      if (debug >= 4)
       {
         outs() << "  Starting candidate weakening\n";
       }
@@ -1248,7 +1468,7 @@ namespace ufo
 
           if (res || indeterminate(res))
           {
-            if (debug >= 2)
+            if (debug >= 4)
             {
               outs() << "    Candidate failed: " << *cand << " 🔥\n";
             }
@@ -1261,15 +1481,15 @@ namespace ufo
       }
 
       candidates = resCands;
-      if (debug >= 2)
+      if (debug >= 4)
       {
         outs() << "  Candidate weakening complete\n";
       }
     }
 
-    bool checkSafetyInBV()
+    bool assembleAndCheck(Expr cand, bool checkSafety = false)
     {
-      if (debug >= 2)
+      if (debug >= 5)
       {
         outs() << "\n--- Starting Safety Check in BV ---\n";
       }
@@ -1277,7 +1497,8 @@ namespace ufo
       vector<HornRuleExt *> allRules;
       for (auto &hr : m_bvChcs.chcs)
       {
-        allRules.push_back(&hr);
+        if(!hr.isQuery) { allRules.push_back(&hr); }
+        if(checkSafety && hr.isQuery) { allRules.push_back(&hr); }
       }
 
       map<Expr, ExprSet> candidates;
@@ -1285,6 +1506,12 @@ namespace ufo
       {
         ExprSet candSet;
         getConj(kv.second, candSet);
+        if(cand != mk<TRUE>(m_efac)) 
+        { 
+          ExprSet tmpSet;
+          getConj(cand, tmpSet);
+          candSet.insert(tmpSet.begin(), tmpSet.end());
+        }
         candidates[kv.first] = candSet;
       }
 
@@ -1297,15 +1524,15 @@ namespace ufo
 
       if (res)
       {
-        if (debug >= 1)
+        if (debug >= 5)
         {
-          outs() << "  System is safe with initial candidates\n";
+          outs() << "  PASSED with initial candidates\n";
         }
         return true;
       }
 
       bool finalResult = multiHoudini(allRules, candidates);
-      if (debug >= 1)
+      if (debug >= 5)
       {
         if (finalResult)
         {
@@ -1318,6 +1545,60 @@ namespace ufo
       }
 
       return finalResult;
+    }
+
+    bool checkSafetyInBV()
+    {
+      return assembleAndCheck(mk<TRUE>(m_efac), true);
+      // if (debug >= 2)
+      // {
+      //   outs() << "\n--- Starting Safety Check in BV ---\n";
+      // }
+
+      // vector<HornRuleExt *> allRules;
+      // for (auto &hr : m_bvChcs.chcs)
+      // {
+      //   allRules.push_back(&hr);
+      // }
+
+      // map<Expr, ExprSet> candidates;
+      // for (const auto &kv : m_bvSolutionMap)
+      // {
+      //   ExprSet candSet;
+      //   getConj(kv.second, candSet);
+      //   candidates[kv.first] = candSet;
+      // }
+
+      // bool res = multiHoudini(allRules, candidates);
+
+      // for (const auto &kv : candidates)
+      // {
+      //   m_bvSolutionMap[kv.first] = conjoin(kv.second, m_efac);
+      // }
+
+      // if (res)
+      // {
+      //   if (debug >= 1)
+      //   {
+      //     outs() << "  System is safe with initial candidates\n";
+      //   }
+      //   return true;
+      // }
+
+      // bool finalResult = multiHoudini(allRules, candidates);
+      // if (debug >= 1)
+      // {
+      //   if (finalResult)
+      //   {
+      //     outs() << "  System is safe after weakening\n";
+      //   }
+      //   else
+      //   {
+      //     outs() << "  System remains unsafe after weakening\n";
+      //   }
+      // }
+
+      // return finalResult;
     }
 
     bool strengthenTransitionRelation()
@@ -1623,6 +1904,7 @@ namespace ufo
       return 0; // Indicate success
     }
 
+    std::srand(std::time(0));
     return bh.solve(to);
   }
 }
