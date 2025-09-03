@@ -274,9 +274,9 @@ namespace ufo
       samples.push_back(Sampl());
       Sampl& curCand = samples.back();
 
-      // outs() << "Trying to get a candidate with arity = " << arity
-      //        << ", hasBool = " << hasBool << ", hasLin = " << (!hasBV ? "1" : "0")
-      //        << ", hasBV = " << (hasBV ? "1" : "0") << "\n";
+      outs() << "Trying to get a candidate with arity = " << arity
+             << ", hasBool = " << hasBool << ", hasLin = " << (!hasBV ? "1" : "0")
+             << ", hasBV = " << (hasBV ? "1" : "0") << "\n";
 
       Expr lExpr;
       if (!hasBV && hasLin > 0)
@@ -327,7 +327,7 @@ namespace ufo
       if (s.l_part.empty())
         bf.assignPrioritiesForBlocked(s.b_part);
 
-      if (s.bv_part.empty())
+      if (!s.bv_part.empty())
         bvf.assignPrioritiesForLearned(s.bv_part);
     }
 
@@ -339,7 +339,7 @@ namespace ufo
       if (s.l_part.empty())
         bf.assignPrioritiesForBlocked(s.b_part);
 
-      if (s.bv_part.empty())
+      if (!s.bv_part.empty())
         bvf.assignPrioritiesForFailed(s.bv_part);
     }
 
@@ -351,7 +351,7 @@ namespace ufo
       if (s.l_part.empty())
         bf.assignPrioritiesForBlocked(s.b_part);
 
-      if (s.bv_part.empty())
+      if (!s.bv_part.empty())
         bvf.assignPrioritiesForBlocked(s.bv_part);
     }
 

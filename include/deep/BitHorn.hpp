@@ -29,6 +29,7 @@ namespace ufo
     bool doReg;
     bool doConnect;
     bool doGJ;
+    int maxAttempts;
     int debug;
 
     std::vector<ExprSet> m_learnedLemmas; // Stores learned lemmas per iteration
@@ -378,7 +379,7 @@ namespace ufo
     }
 
   public:
-    BitHorn(ExprFactory &efac, EZ3 &z3, CHCs &input, bool _d2, bool _doGJ, bool _doReg, bool _doCon, int _debug = 0) : 
+    BitHorn(ExprFactory &efac, EZ3 &z3, CHCs &input, int max, bool _d2, bool _doGJ, bool _doReg, bool _doCon, int _debug = 0) : 
       m_efac(efac),
       m_z3(z3),
       m_liaChcs(new CHCs(efac, z3, _debug)),
@@ -391,6 +392,7 @@ namespace ufo
       doGJ(_doGJ),
       doReg(_doReg),
       doConnect(_doCon),
+      maxAttempts(max),
       debug(_debug)
     {
       if (debug >= 1)
@@ -801,15 +803,8 @@ namespace ufo
       return res;
     }
 
-    void testBVcom()
+    void synthesize()
     {
-      if (debug >= 1)
-      {
-        outs() << "\n--- Testing BVCom ---\n";
-        m_bvChcs.print(true);
-        outs() << "\n";
-      }
-
       SamplFactory sf(m_efac, false);
 
       Expr invDecl = (*m_bvChcs.decls.begin())->left();
@@ -818,17 +813,21 @@ namespace ufo
 
       if(debug >= 3)
       {
-        outs() << "Seed mining complete. Statistics:\n=================================\n";
+        outs() << "Seed mining complete.\nStatistics:\n=================================\n";
         sf.printStatistics();
       }
 
-      outs() << "\nSAMPLING\n========\n";
+      if(debug >= 2) outs() << "\nSAMPLING\n========\n";
       
       bool skip = false;
-      for(int i = 0; i < 10; i++)
+      for(int i = 0; i < maxAttempts; i++)
       {
         Expr cand = sf.getFreshCandidate();
-        if(cand == NULL) continue;
+        if(cand == NULL)
+        {
+          i--;
+          continue;
+        } 
         if(debug >= 2) outs() << "Sample " << i+1 << ": " << cand << "\n";
 
         // Do some checks on the candidate produced and update the densities.
@@ -855,7 +854,7 @@ namespace ufo
           {
             outs() << "Success after sampling " << i+1 << " sample" << (i+1>1 ? "s" : "") << ".\n";
             printSolution();
-            return;
+            exit(0);
           }
         }
         else
@@ -882,10 +881,7 @@ namespace ufo
 
       bool isSafe = false;
 
-      testBVcom();
-      exit(0);
-
-      for (int i = 0; i < to; i++)
+      for (int i = 0; i < 3; i++)
       {
         if (debug >= 2)
         {
@@ -937,30 +933,35 @@ namespace ufo
           }
         }
 
-        if(!strengthenTransitionRelation())
-        {
-          if (debug >= 1)
-          {
-            outs() << "  Failed to strengthen transition relation.\n";
-            outs() << "  Synthesizing alternative invariants...\n";
-          }
-          // Attempt to synthesize alternative invariants
-          // This is a placeholder for the actual synthesis process
-          // In a real implementation, this would involve more complex logic
-          // to generate new invariants based on the current state of the system
-          // For now, we just print a message and exit
-          applyAbduction();
-        }
-        else
-        {
-          if (debug >= 1)
-          {
-            outs() << "  Successfully strengthened transition relation.\n";
-          }
-        }
+        // if(!strengthenTransitionRelation())
+        // {
+        //   if (debug >= 1)
+        //   {
+        //     outs() << "  Failed to strengthen transition relation.\n";
+        //     outs() << "  Synthesizing alternative invariants...\n";
+        //   }
+        //   // Attempt to synthesize alternative invariants
+        //   // This is a placeholder for the actual synthesis process
+        //   // In a real implementation, this would involve more complex logic
+        //   // to generate new invariants based on the current state of the system
+        //   // For now, we just print a message and exit
+        //   // applyAbduction();
+        //   synthesize();
+        // }
+        // else
+        // {
+        //   if (debug >= 1)
+        //   {
+        //     outs() << "  Successfully strengthened transition relation.\n";
+        //   }
+        // }
       }
 
-      outs() << "Failed to find a safe solution after " << to << " iterations.\n";
+      std::srand(std::time(0));
+
+      synthesize(); // sampling candidates from grammar.
+
+      outs() << "Failed to find a safe solution after sampling.\n";
       return false;
     }
 
@@ -1603,7 +1604,7 @@ namespace ufo
 
     bool strengthenTransitionRelation()
     {
-      if (debug >= 2)
+      if (debug >= 3)
       {
         outs() << "\n--- Strengthening Transition Relation ---\n";
       }
@@ -1882,7 +1883,7 @@ namespace ufo
       return 1;
     }
 
-    BitHorn bh(efac, z3, ruleManager, d2, doGJ, doReg, doCon, debug);
+    BitHorn bh(efac, z3, ruleManager, maxAttempts, d2, doGJ, doReg, doCon, debug);
 
     if (ser)
     {
@@ -1904,7 +1905,6 @@ namespace ufo
       return 0; // Indicate success
     }
 
-    std::srand(std::time(0));
     return bh.solve(to);
   }
 }

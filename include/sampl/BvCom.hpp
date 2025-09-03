@@ -873,12 +873,11 @@ namespace ufo
     // revisit
     bool isSampleVisitedWeak(BVdisj& disj)
     {
-      bvcoms& id = disj.getId();
-      set<int>& s = visited[id];
+      bvcoms &id = disj.getId();
 
-      for (int i = 0; i < disj.arity; i++)
+      if (visited[id].size() > 0)
       {
-        if (s.find(i) != s.end()) return true;
+        return true;
       }
       return false;
     }
@@ -886,28 +885,45 @@ namespace ufo
     // revisit
     bool isSampleVisitedStrong(BVdisj &disj)
     {
-      bvcoms& id = disj.getId();
-      set<int>& s = visited[id];
+      bvcoms &id = disj.getId();
 
-      if (s.size() == 0) return false;
-
-      for (int i = 0; i < disj.arity; i++)
+      if (visited[id].size() == disj.arity)
       {
-        if (s.find(i) == s.end()) return false;
+        return true;
       }
-      return true;
+      return false;
     }
 
     // revisit
     bool isVisited(bvcoms& id, int disj)
     {
-      set<int>& s = visited[id];
+      set<int> &s = visited[id];
 
-      if (s.find(disj) != s.end())
+      if (std::find(std::begin(s), std::end(s), disj) != std::end(s))
       {
+        outs() << "visiteed\n";
         return true;
       }
-      return false;
+
+      weights &d = ineqPriors[id][disj];
+
+      if (ineqPriors[id].size() == 0)
+      {
+        outs() << "WARNING: Priorities are not set up here\n";
+        return false;
+      }
+
+      for (int i = 0; i < d.size(); i++)
+      {
+        if (d[i] != PRIORNOVISIT)
+        {
+          outs() << "WARNING: Priorities are not set up heree\n";
+          return false;
+        }
+      }
+      s.insert(disj);
+      outs() << "visited\n";
+      return true;
     }
 
     // revisit
@@ -943,19 +959,34 @@ namespace ufo
     void prioritiesFailed(BVdisj &failed)
     {
       bvcoms& id = failed.getId();
-      std::vector<weights>& distrs = ineqPriors[id];
+      std::vector<weights> &distrs = ineqPriors[id];
 
       initDistrs(distrs, failed.arity, prVarsDistrRange);
 
       for (int i = 0; i < failed.arity; i++)
       {
-        BVterm& s = failed.dstate[i];
-        distrs[i][s.intconst * 2 + (getIndexGT() == s.cmpop ? 1 : 0)] = PRIORNOVISIT;
+        BVterm &s = failed.dstate[i];
+
+        int lim = s.intconst * 2 + (getIndexGT() == s.cmpop ? 1 : 0);
+        for (int j = 0; j < prVarsDistrRange; j++)
+        {
+          if (j >= lim)
+          {
+            // block all constants which are greater or equal than intconst
+            distrs[i][j] = PRIORNOVISIT;
+          }
+          else
+          {
+            // the farther constant from s.intconst the higher priority to visit it later
+            distrs[i][j] = min(distrs[i][j], (lim - j) * PRIORSTEP);
+          }
+        }
+
         isVisited(id, i);
       }
     }
 
-    // revisit
+    // 
     void prioritiesLearned(BVdisj &learned)
     {
       bvcoms& id = learned.getId();
@@ -986,7 +1017,7 @@ namespace ufo
       }
     }
 
-    // revisit
+    // 
     void assignPrioritiesForLearned(BVdisj &learned)
     {
       if (!aggressivepruning) return;

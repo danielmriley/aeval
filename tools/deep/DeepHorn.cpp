@@ -151,7 +151,8 @@ int main (int argc, char ** argv)
     return 0;
   }
 
-  if (!vers1 && !vers2 && !vers3 && !vers4 && !bv_solver) vers4 = true; // default
+  if (!vers1 && !vers2 && !vers3 && !vers4 && !bv_solver)
+    bv_solver = true; // default
 
   int max_attempts = getIntValue(OPT_MAX_ATTEMPTS, 2000000, argc, argv);
   int to = getIntValue(OPT_TO, 1000, argc, argv);
