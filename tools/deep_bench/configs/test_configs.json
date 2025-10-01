@@ -4,28 +4,14 @@
       "name": "bv",
       "tool": "./tools/deep/freqhorn",
       "flags": "--bv",
-      "benchmarks": "../bench_horn_bv_translated/",
+      "benchmarks": "../bench_horn_bv/",
       "timeout": 10
     },
     {
-      "name": "bv-data2-gj",
+      "name": "bv-sampl",
       "tool": "./tools/deep/freqhorn",
-      "flags": "--bv --data2 --gj",
-      "benchmarks": "../bench_horn_bv_translated/",
-      "timeout": 10
-    },
-    {
-      "name": "bv-data2-connect",
-      "tool": "./tools/deep/freqhorn",
-      "flags": "--bv --data2 --connect",
-      "benchmarks": "../bench_horn_bv_translated/",
-      "timeout": 10
-    },
-    {
-      "name": "bv-data2-linreg",
-      "tool": "./tools/deep/freqhorn",
-      "flags": "--bv --data2 --lin-reg",
-      "benchmarks": "../bench_horn_bv_translated/",
+      "flags": "--bv --skip-translation",
+      "benchmarks": "../bench_horn_bv/",
       "timeout": 10
     }
   ]

@@ -11,6 +11,6 @@
 
 (rule (=> (and (inv _FH_0) (= |_FH_0'| _FH_0)) (inv |_FH_0'|)))
 
-(rule (=> (and (inv _FH_0) (and (bvsge _FH_0 #x07d0) false)) fail))
+(rule (=> (and (inv _FH_0) (bvsge _FH_0 #x07d0)) fail))
 
 (query fail)

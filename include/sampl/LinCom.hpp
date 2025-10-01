@@ -396,11 +396,13 @@ namespace ufo
 
         ExprVector all;
         getAddTerm (ex->left(), all);
+        outs() << "--> all.size(): " << all.size() << "\n";
         Expr aux = reBuildCmp(ex, auxVar1, auxVar2);
         outs() << "  ** Rebuilt comparison: " << aux << "\n";
         outs() << "  expr: " << ex << "\n";
 
         s.arity = all.size();
+        outs() << "--> s.arity: " << s.arity << "\n";
         s.cmpop = getVarIndex(aux, cmpOps);
         s.intconst = getVarIndex(lexical_cast<cpp_int>(ex->right()), intConsts);
         outs() << "  ** arity: " << s.arity << "\n";
@@ -413,16 +415,27 @@ namespace ufo
         {
           outs() << "  ** in loop exprToLAdisj for e: " << e << "\n";
           Expr curVar = NULL;
-          cpp_int curCoef;
+          cpp_int curCoef = 1;
+          bool hasCoef = false;
 
           ExprVector ops;
           getMultOps (e, ops);
           for (auto & o : ops)
           {
             outs() << "  ** in loop exprToLAdisj for o: " << o << "\n";
-            if (isNumericConst(o)) curCoef = lexical_cast<cpp_int>(o);
+            if (isNumericConst(o))
+            {
+              curCoef = lexical_cast<cpp_int>(o);
+              hasCoef = true;
+            } 
             else if (curVar != NULL) return;
             else curVar = o;
+          }
+
+          // If no coefficient was found, ensure it's 1
+          if (!hasCoef)
+          {
+            curCoef = 1;
           }
 
           int varind = getVarIndex(curVar, vars);
@@ -664,6 +677,7 @@ namespace ufo
         {
           // disjunction of s and t is equal t, so s can be ignored
           skip = true;
+          outs() << "stronger: break\n";
           break;
         }
         else if (weaker(s, t))
@@ -673,6 +687,7 @@ namespace ufo
           t.intconst = s.intconst;
 
           skip = true;
+          outs() << "weaker: break\n";
           break;
         }
         else
@@ -682,12 +697,15 @@ namespace ufo
           if (stronger(u, s))
           {
             // disjunction of s and t is equal to true, to the entire LAdisj& d is a tautology
+            outs() << "stronger: return\n";
             return false;
           }
         }
       }
       if (!skip)
       {
+        outs() << "Adding disjunction:\n";
+        s.printLAterm();
         d.addDisj(s);
       }
       return true;

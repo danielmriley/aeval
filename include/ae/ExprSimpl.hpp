@@ -4546,15 +4546,28 @@ namespace ufo
   inline static bool getLinCombCoefs(Expr ex, set<cpp_int>& intCoefs)
   {
     bool res = true;
-    if (isOpX<TRUE>(ex)) return false;
+    if (isOpX<TRUE>(ex))
+    {
+      outs() << "returning false because of isOpX<TRUE>(ex)\n";
+      return false;
+    } 
     if (isOpX<OR>(ex))
     {
       for (auto it = ex->args_begin (), end = ex->args_end (); it != end; ++it)
+      {
+        outs() << "Found OR arg: " << *it << "\n";
+        outs() << "res = " << (res ? "TRUE1" : "FALSE1") << "\n\n";
         res = res && getLinCombCoefs(*it, intCoefs);
+        outs() << "res = " << (res ? "TRUE2" : "FALSE2") << "\n\n";
+      }
     }
     else if (isOp<ComparissonOp>(ex)) // assuming the lin.combination is on the left side
     {
-      if (!isOpX<MPZ>(ex->right())) return false;
+      if (!isOpX<MPZ>(ex->right()))
+      {
+        outs() << "returning FALSE because of isOpX<MPZ>(ex->right())\n";
+        return false;
+      } 
       ExprVector addt;
       getAddTerm (ex->left(), addt);
       for (auto & t : addt)
@@ -4562,7 +4575,15 @@ namespace ufo
         if (isOpX<MULT>(t) && t->arity() == 2 &&
             isOpX<MPZ>(t->left()) && !isOpX<MPZ>(t->right()))
           intCoefs.insert(lexical_cast<cpp_int> (t->left()));
-        else return false;
+        else if(isIntConst(t))
+        {
+          intCoefs.insert(1);
+        }
+        else
+        {
+          outs() << "returning FALSE because of non-MPZ term in linear combination: " << *t << "\n";
+          return false;
+        } 
       }
     }
     return res;

@@ -238,7 +238,7 @@ namespace ufo
 
     void addConst(cpp_int c)
     {
-      intConsts.push_back(c);
+      if(c >= 0) intConsts.push_back(c);
     }
 
     void addIntCoef(cpp_int coef)
@@ -399,7 +399,18 @@ namespace ufo
       {
         rhs.push_back(ic);
       }
+
       assembleBvComb(s, lhs, rhs);
+
+      if (lhs.empty())
+      {
+        lhs.push_back(bvnum(0, width, m_efac));
+      }
+      if (rhs.empty())
+      {
+        rhs.push_back(bvnum(0, width, m_efac));
+      }
+
       if(lhs.empty()) outs() << "  ** lhs is empty\n";
       if(rhs.empty()) outs() << "  ** rhs is empty\n";
 
@@ -437,34 +448,59 @@ namespace ufo
     {
       if (isOpX<OR>(ex))
       {
+        outs() << "Processing expression for BV disjunction: " << ex << "\n";
         for (auto it = ex->args_begin (), end = ex->args_end (); it != end; ++it)
           exprToBVdisj(*it, sample);
       }
       else if (isOpX<BUGE>(ex) || isOpX<BUGT>(ex))
       {
         BVterm s;
-        if (!has_bvsort(ex->right()))
+        ExprVector all;
+        Expr aux;
+
+        outs() << "ex: " << ex << "\n";
+
+        if (is_bvnum(ex->right()))
         {
-          outs() << "Right side of comparison is not a bit-vector number: " << ex->right() << "\n";
-          return;
+          outs() << "Right side of comparison is a bit-vector number: " << ex->right() << "\n";
+          getAddTermBV(ex->left(), all);
+          aux = reBuildCmpBV(ex, auxVar1, auxVar2);
+  
+  
+          // REVISIT. Needs to handle without the LHS assumption.
+          // for(auto e = all.begin(); e != all.end(); )
+          // {
+          //   if(is_bvnum(*e))
+          //   {
+          //     outs() << "Removing numeric constant: " << *e << "\n";
+          //     e = all.erase(e); // remove numeric constants from the left side
+          //   }
+          //   else
+          //   {
+          //     ++e;
+          //   }
+          // }
         }
 
-        ExprVector all;
-        getAddTermBV(ex->left(), all);
-        getAddTermBV(ex->right(), all);
-        Expr aux = reBuildCmpBV(ex, auxVar1, auxVar2);
-
-        for(auto e = all.begin(); e != all.end(); )
+        if (is_bvnum(ex->left()))
         {
-          if(is_bvnum(*e))
-          {
-            outs() << "Removing numeric constant: " << *e << "\n";
-            e = all.erase(e); // remove numeric constants from the left side
-          }
-          else
-          {
-            ++e;
-          }
+          outs() << "Left side of comparison is a bit-vector number: " << ex->left() << "\n";
+          getAddTermBV(ex->right(), all);
+          aux = reBuildCmpBV(ex, auxVar1, auxVar2);
+
+          // REVISIT. Needs to handle without the LHS assumption.
+          // for (auto e = all.begin(); e != all.end();)
+          // {
+          //   if (is_bvnum(*e))
+          //   {
+          //     outs() << "Removing numeric constant: " << *e << "\n";
+          //     e = all.erase(e); // remove numeric constants from the left side
+          //   }
+          //   else
+          //   {
+          //     ++e;
+          //   }
+          // }
         }
 
         s.arity = all.size();
@@ -475,32 +511,68 @@ namespace ufo
         {
           s.intconst = getVarIndex(lexical_cast<cpp_int>(toMpz(ex->right())), intConsts);
         }
+        if (is_bvnum(ex->left()))
+        {
+          s.intconst = getVarIndex(lexical_cast<cpp_int>(toMpz(ex->left())), intConsts);
+        }
         else
         {
           s.intconst = getVarIndex(lexical_cast<cpp_int>(0), intConsts);
         }
 
-        if (s.intconst == -1 || s.cmpop == -1) return;
+        if (s.intconst == -1 || s.cmpop == -1) { outs() << "RETURNING3\n"; return; }
 
         for (auto &e : all)
         {
           Expr curVar = NULL;
-          cpp_int curCoef;
+          cpp_int curCoef = 1;
+          bool hasCoef = false;
 
           ExprVector ops;
           getMultOpsBV (e, ops);
           for (auto & o : ops)
           {
-            if (is_bvnum(o)) curCoef = lexical_cast<cpp_int>(toMpz(o));
+            if (is_bvnum(o))
+            {
+              curCoef = lexical_cast<cpp_int>(toMpz(o));
+              hasCoef = true;
+            } 
             else if (curVar != NULL)
             {
+              outs() << "Multiple variables in a term, skipping: " << e << "\n";
               return;
             } 
             else curVar = o;
           }
 
+          // If no coefficient was found, ensure it's 1
+          if (!hasCoef)
+          {
+            curCoef = 1;
+          }
+
           int varind = getVarIndex(curVar, vars);
           int coefind = getVarIndex(curCoef, intCoefs);
+
+          // Fallback: If coefind fails (e.g., curCoef == 0), try defaulting to 1 or skip
+          if (coefind == -1)
+          {
+            if (curCoef == 0)
+            {
+              outs() << "Continuing due to zero coefficient\n";
+              // Skip zero-coefficient terms to avoid invalid combinations
+              continue;
+            }
+            // Otherwise, default to 1 if possible
+            coefind = getVarIndex(1, intCoefs);
+            if (coefind == -1)
+            {
+              // Add 1 to intCoefs if missing
+              intCoefs.push_back(1);
+              intCoefsE.push_back(bvnum(lexical_cast<mpz_class>(1), width, m_efac));
+              coefind = intCoefs.size() - 1;
+            }
+          }
 
           if (varind == -1 || coefind == -1)
           {
@@ -516,6 +588,7 @@ namespace ufo
             }
             else
             {
+              outs() << "RETURNING4\n";
               return;
             }
           } 
@@ -525,15 +598,10 @@ namespace ufo
 
         }
 
-        for(int v : s.vcs) if (v < 0)
-        {
-          return;
-        } 
+        for(int v : s.vcs) if (v < 0) { outs() << "RETURNING1\n"; return; } 
+        if (s.vcs.size() != 2*(s.arity)) { outs() << "RETURNING2\n"; return; }
 
-        if (s.vcs.size() != 2*(s.arity))
-        {
-          return;
-        } 
+        outs() << "Going to addDisjFilter\n";
         addDisjFilter(s, sample);
       }
     }
@@ -614,10 +682,12 @@ namespace ufo
       if (s1.vcs.size() == 2) return (s1.vcs[1] == s2.vcs[1]);
 
       // finally, coefficients
+      if(s2.vcs[1] == 0) return false; // division by zero
       cpp_int c1 = (cpp_int)s1.vcs[1] / (cpp_int)s2.vcs[1];
       if (c1 < 0) return false;
       for (int i = 3; i < s1.vcs.size(); i += 2)
       {
+        if(s2.vcs[i] == 0) return false; // division by zero
         cpp_int c2 = (cpp_int)s1.vcs[i] / (cpp_int)s2.vcs[i];
         if (c2 < 0) return false;
 
@@ -646,36 +716,36 @@ namespace ufo
       return (c1 == c2);
     }
 
-    bool stronger(BVterm& s1, BVterm& s2)
+    bool stronger(BVterm& s, BVterm& t)
     {
-      // Check if s1 is stronger than s2
-      if (s1.arity != s2.arity) return false;
+      if (s.vcs.size() != t.vcs.size()) return false;
 
-      for (int i = 0; i < s1.vcs.size(); i++)
+      for (int i = 0; i < s.vcs.size(); i++)
       {
-        if (s1.vcs[i] != s2.vcs[i]) return false;
+        if (s.vcs[i] != t.vcs[i]) return false;
       }
 
-      // Check coefficients
-      if(s1.intconst == s2.intconst) return (s1.cmpop <= s2.cmpop);
+      // Ax > b stronger than Ax >= b
+      if (s.intconst == t.intconst)
+        return (s.cmpop <= t.cmpop); // the smaller index the stronger formula
 
-      return (s1.intconst > s2.intconst);
+      // Ax > / >= b stronger than Ax > / >= c iff b > c
+      return (s.intconst > t.intconst);
     }
 
-    bool weaker(BVterm& s1, BVterm& s2)
+    bool weaker(BVterm& s, BVterm& t)
     {
-      // Check if s1 is weaker than s2
-      if (s1.arity != s2.arity) return false;
+      if (s.vcs.size() != t.vcs.size()) return false;
 
-      for (int i = 0; i < s1.vcs.size(); i++)
+      for (int i = 0; i < s.vcs.size(); i++)
       {
-        if (s1.vcs[i] != s2.vcs[i]) return false;
+        if (s.vcs[i] != t.vcs[i]) return false;
       }
 
-      // Check coefficients
-      if(s1.intconst == s2.intconst) return (s1.cmpop >= s2.cmpop);
+      if (s.intconst == t.intconst)
+        return (s.cmpop >= t.cmpop);
 
-      return (s1.intconst < s2.intconst);
+      return (s.intconst < t.intconst);
     }
 
     void getEquivalentFormulas(BVdisj& sample, std::vector<BVdisj>& equivs)
@@ -732,6 +802,9 @@ namespace ufo
 
     bool addDisjFilter(BVterm& s, BVdisj& d)
     {
+      d.addDisj(s); // add first, then check for redundancy
+      return true;
+
       int skip = false;
       for (int j = 0; j < d.arity; j++)
       {
@@ -739,6 +812,7 @@ namespace ufo
         if (stronger(s, t))
         {          // disjunction of s and t is equal to t, so s can be ignored
           skip = true;
+          outs() << "s is stronger than t\n";
           break;
         }
         else if(weaker(s, t))
@@ -748,6 +822,7 @@ namespace ufo
           t.intconst = s.intconst;
 
           skip = true;
+          outs() << "s is weaker than t\n";
           break;
         }
         else 
@@ -756,16 +831,19 @@ namespace ufo
           invertTerm(u, s);
           if (stronger(u, s))
           {
+            outs() << "s is redundant due to its inverse\n";
             return false;
           }
         }
       }
       if(!skip)
       {
+        outs() << "\n** Adding a disjunct\n";
         d.addDisj(s);
       }
       else
       {
+        outs() << "Skipping addition of a disjunct\n";
       }
       return true;
     }

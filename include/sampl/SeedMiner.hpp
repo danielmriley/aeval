@@ -149,22 +149,28 @@ namespace ufo
 
     void addSeedHlp(Expr tmpl, ExprVector& vars, ExprSet& actualVars)
     {
+      outs() << "getting seeds from: " << tmpl << "\n";
       ExprSet dsjs;
       ExprSet newDsjs;
       getDisj(tmpl, dsjs);
       for (auto & dsj : dsjs)
       {
+        outs() << "dsj: " << dsj << "\n";
         ExprSet vrs;
+        // check isconst.
         filter (dsj, bind::IsConst(), std::inserter (vrs, vrs.begin ()));
         bool found = true;
 
         for (auto & a : vrs)
         {
+          outs() << "var: " << a << "\n";
           if (std::find(std::begin(vars), std::end (vars), a)
               == std::end(vars)) { found = false; break; }
         }
         if (found) newDsjs.insert(dsj);
       }
+
+      outs() << "newDsjs.size(): " << newDsjs.size() << "\n";
 
       if (newDsjs.size() == 0) return;
 
@@ -183,9 +189,11 @@ namespace ufo
       }
 
       tmpl = findNonlinAndRewrite(tmpl, invVarsCstm, extraVars, true);
+      outs() << "tmpl: " << tmpl << "\n";
 
       for (auto &a : extraVars) invVarsCstm.push_back(a.second);
       tmpl = normalizeDisj(tmpl, invVarsCstm);
+      outs() << "after normalized: " << tmpl << "\n";
 
       if (!isOpX<FALSE> (tmpl) && !isOpX<TRUE> (tmpl))
       {
@@ -197,11 +205,12 @@ namespace ufo
           for (auto &a : intConstsE)
           {
             intConsts.insert(lexical_cast<cpp_int>(toMpz(a)));
-            if (getBVCombCoefs(tmpl, intCoefs))
-            {
-              candidates.insert(tmpl);
-            } 
           }
+          if (getBVCombCoefs(tmpl, intCoefs))
+          {
+            outs() << "\n*** adding cand: " << tmpl << "\n";
+            candidates.insert(tmpl);
+          } 
         }
         else
         {
@@ -209,6 +218,7 @@ namespace ufo
           for (auto &a : intConstsE) intConsts.insert(lexical_cast<cpp_int>(a));
           if (getLinCombCoefs(tmpl, intCoefs))
           {
+            outs() << "Adding LIA cand: " << tmpl << "\n";
             candidates.insert(tmpl);
           } 
         }
@@ -263,7 +273,7 @@ namespace ufo
         Expr negged = fla->last();
         if (bind::isBoolConst(negged))
           addSeed(fla);
-        else if (isOp<ComparissonOp>(negged))
+        else if (isOp<ComparissonOp>(negged) || isOpX<BvOp>(negged))
           obtainSeeds(mkNeg(negged));
         else
           obtainSeeds(negged);
@@ -277,8 +287,14 @@ namespace ufo
         }
         else
         {
+          outs() << "fla: " << fla << "\n";
           Expr simplified = simplifyArithmDisjunctions(fla);
-          addSeed(convertToGEandGT(simplified));
+          outs() << "simplified: " << simplified << "\n";
+          simplified = convertToGEandGT(simplified);
+          outs() << "simplified: " << simplified << "\n";
+          simplified = normalize(simplified);
+          outs() << "Normalized: " << simplified << "\n";
+          addSeed(simplified);
         }
       }
       else if (isOpX<AND>(fla))
@@ -306,7 +322,7 @@ namespace ufo
         if (containsOp<ARRAY_TY>(fla)) addSeed(fla);
         else
         {
-          Expr tmp = convertToGEandGT(fla); // TODO: Needs to support BV.
+          Expr tmp = convertToGEandGT(fla);
           if (tmp != fla)
           {
             obtainSeeds(tmp);
@@ -371,6 +387,8 @@ namespace ufo
 
       Expr body = hr.body;
 
+      outs() << "Analyzing: " << body << "\n";
+
       // get a set of all access functions before any transformation
       // since some sensitive information can be lost:
       retrieveAccFuns(body, arrFs);
@@ -392,29 +410,59 @@ namespace ufo
       body = eliminateQuantifiers(body, quantified);
       body = weakenForVars(body, quantified);
 
+      outs() << "body after some processing: " << body << "\n";
+
 
       // get seeds and normalize
       ExprSet conds;
       retrieveConds(body, conds);
+      outs() << "conds: \n";
+      for(auto& c: conds)
+        outs() << "cond: " << c << "\n";
+
       for (auto & a : conds) obtainSeeds(a);
 
       // for the query: add a negation of the entire non-recursive part:
       if (hr.isQuery)
       {
-        Expr massaged = mkNeg(propagateEqualities(hr.body));
-        coreProcess(massaged);
-        getArrRange(massaged);
+        outs() << "analyzing query\n";
+        if(has_bvsort(body))
+        {
+          Expr e = mkNeg(propagateEqualities(hr.body)); 
+          e = unfoldITE(e);
+          e = convertToGEandGT(e);
+          outs() << "obtaining seed from query: " << e << "\n";
+          obtainSeeds(e);
+        }
+        else
+        {
+          Expr massaged = mkNeg(propagateEqualities(hr.body));
+          outs() << "massaged: " << massaged << "\n";
+          coreProcess(massaged);
+          getArrRange(massaged);
+        }
       }
       else if (hr.isFact)
       {
-        Expr e = unfoldITE(body);
+        Expr e = unfoldITE(body); 
         e = propagateEqualities(e);
-        coreProcess(e);
+
+        if (has_bvsort(body))
+        {
+          e = convertToGEandGT(e);
+          outs() << "obtaining seed from fact: " << e << "\n";
+          obtainSeeds(e);
+        }
+        else
+        {
+          coreProcess(e);
+        }
       }
       else
       {
         // hr.isInductive
         Expr e = unfoldITE(body);
+        outs() << "After unfoldITE: " << e << "\n";
         ExprSet deltas; // some magic here for enhancing the grammar
         retrieveDeltas(e, hr.srcVars, hr.dstVars, deltas);
         for (auto & a : deltas) obtainSeeds(a);
@@ -429,10 +477,15 @@ namespace ufo
         
         if(has_bvsort(e))
         {
+          outs() << "After has_bvsort: " << e << "\n";
           e = eliminateQuantifiersRepl(e, vars2elim);
+          outs() << "After eliminateQuantifiersRepl: " << e << "\n";
           e = convertToGEandGT(e);
+          outs() << "After convertToGEandGT: " << e << "\n";
           e = replaceAll(e, hr.dstVars, hr.srcVars);
+          outs() << "After replaceAll: " << e << "\n";
           e = removeRedundant(e);
+          outs() << "obtaining seed from TR: " << e << "\n";
         }
         else
         {
@@ -442,7 +495,14 @@ namespace ufo
           e = convertToGEandGT(e);
           e = rewriteNegAnd(e);
         }
+        outs() << "Obtaining seeds from: " << e << "\n";
         obtainSeeds(e);
+      }
+
+      outs() << "Finished analyzing: " << body << "\n";
+      for(auto& c: candidates)
+      {
+        outs() << "  Candidate: " << c << "\n";
       }
     }
   };

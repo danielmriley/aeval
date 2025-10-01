@@ -29,6 +29,8 @@ namespace ufo
     bool doReg;
     bool doConnect;
     bool doGJ;
+    bool translate;
+    bool skipSampling;
     int maxAttempts;
     int debug;
 
@@ -379,7 +381,8 @@ namespace ufo
     }
 
   public:
-    BitHorn(ExprFactory &efac, EZ3 &z3, CHCs &input, int max, bool _d2, bool _doGJ, bool _doReg, bool _doCon, int _debug = 0) : 
+    BitHorn(ExprFactory &efac, EZ3 &z3, CHCs &input, int max, bool _d2, bool _doGJ, 
+      bool _doReg, bool _doCon, bool trslt, bool _skipSampling, int _debug = 0) : 
       m_efac(efac),
       m_z3(z3),
       m_liaChcs(new CHCs(efac, z3, _debug)),
@@ -393,6 +396,8 @@ namespace ufo
       doReg(_doReg),
       doConnect(_doCon),
       maxAttempts(max),
+      translate(trslt),
+      skipSampling(_skipSampling),
       debug(_debug)
     {
       if (debug >= 1)
@@ -713,6 +718,7 @@ namespace ufo
       sf.initialize(arr1, arrVars, arr2, m_original_bv_width);
 
       // normalize samples obtained from CHCs
+      outs() << "cands.size() : " << cands.size() << "\n";
       for (auto & cand : cands) Sampl& s = sf.exprToSampl(cand);
     }
 
@@ -831,11 +837,11 @@ namespace ufo
         if(debug >= 2) outs() << "Sample " << i+1 << ": " << cand << "\n";
 
         // Do some checks on the candidate produced and update the densities.
-        if(isTautology(cand))
-        {
-          sf.assignPrioritiesForLearned();
-          skip = true;
-        }
+        // if(isTautology(cand))
+        // {
+        //   sf.assignPrioritiesForLearned();
+        //   skip = true;
+        // }
 
         if(sf.bvf.nonlinVars.size() > 0 && u.isFalse(cand))
         {
@@ -911,7 +917,14 @@ namespace ufo
           return false;
         }
 
+        if(translate)
+        {
+          m_learnedLemmas.clear();
+          break;
+        } 
+
         isSafe = checkSafetyInBV();
+
 
         if (isSafe)
         {
@@ -957,9 +970,12 @@ namespace ufo
         // }
       }
 
-      std::srand(std::time(0));
-
-      synthesize(); // sampling candidates from grammar.
+      if(!skipSampling)
+      {
+        outs() << "Attempting to synthesize invariants through sampling...\n";
+        std::srand(std::time(0));
+        synthesize(); // sampling candidates from grammar.
+      }
 
       outs() << "Failed to find a safe solution after sampling.\n";
       return false;
@@ -1864,8 +1880,8 @@ namespace ufo
                                bool freqs, bool aggp, int dat, int mut, bool doElim, bool doArithm,
                                bool doDisj, int doProp, int mbpEqs, bool dAllMbp, bool dAddProp,
                                bool dAddDat, bool dStrenMbp, int dFwd, bool dRec, bool dGenerous,
-                               bool dSee, bool ser, bool horn, bool serTrans, bool d2, bool doGJ, 
-                               bool doReg, bool doCon, int debug)
+                               bool dSee, bool ser, bool horn, bool serTrans, bool d2, bool doGJ,
+                               bool doReg, bool doCon, bool translateBv2Lia, bool skipSampling, int debug)
   {
     ExprFactory efac;
     EZ3 z3(efac);
@@ -1883,7 +1899,7 @@ namespace ufo
       return 1;
     }
 
-    BitHorn bh(efac, z3, ruleManager, maxAttempts, d2, doGJ, doReg, doCon, debug);
+    BitHorn bh(efac, z3, ruleManager, maxAttempts, d2, doGJ, doReg, doCon, translateBv2Lia, skipSampling, debug);
 
     if (ser)
     {

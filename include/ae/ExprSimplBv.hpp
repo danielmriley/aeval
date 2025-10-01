@@ -381,6 +381,7 @@ namespace ufo
 
   inline static bool getBVCombCoefs(Expr ex, set<cpp_int> &intCoefs)
   {
+    outs() << "Getting BV comb coefs for: " << ex << "\n";
     bool res = true;
     if (isOpX<TRUE>(ex))
       return false;
@@ -391,33 +392,41 @@ namespace ufo
     }
     else if (isBVComparison(ex)) // assuming the bv.combination is on the left side
     {
-      if (!is_bvconst(ex->right()))
-        return false;
-      ExprVector addt;
-      getAddTermBV(ex->left(), addt);
-      for(auto &t: addt) outs() << "Term: " << t << "\n";
-      for (auto &t : addt)
+      outs() << "Checking: " << ex << "\n";
+      if (!is_bvnum(ex->left()))
       {
-        if(is_bvnum(t))
+        ExprVector addt;
+        outs() << "Getting add terms for left side: " << ex->left() << "\n";
+        getAddTermBV(ex->left(), addt);
+        for (auto & t : addt)
         {
-          outs() << "Adding coefficient: " << t << "\n";
-          intCoefs.insert(lexical_cast<cpp_int>(toMpz(t)));
+          if (isOpX<BMUL>(t) && t->arity() == 2 &&
+              is_bvnum(t->left()) && !is_bvnum(t->right()))
+            intCoefs.insert(lexical_cast<cpp_int> (toMpz(t->left())));
+          else if(is_bvconst(t))
+            intCoefs.insert(1);
+          else
+            return false;
         }
-        else if (isOpX<BMUL>(t) && t->arity() == 2 &&
-            is_bvnum(t->left()))
-        {
-          outs() << "Adding coefficient: " << t->left() << "\n";
-          intCoefs.insert(lexical_cast<cpp_int>(toMpz(t->left())));
-        }
-        else if (isOpX<BMUL>(t) && t->arity() == 2 &&
-                 is_bvnum(t->right()))
-        {
-          outs() << "Adding coefficient: " << t->right() << "\n";
-          intCoefs.insert(lexical_cast<cpp_int>(toMpz(t->right())));
-        }
-        else
-          return false;
       }
+      if (!is_bvnum(ex->right()))
+      {
+        ExprVector addt;
+        outs() << "Getting add terms for right side: " << ex->right() << "\n";
+        getAddTermBV(ex->right(), addt);
+        for (auto &t : addt)
+        {
+          if (isOpX<BMUL>(t) && t->arity() == 2 &&
+              is_bvnum(t->left()) && !is_bvnum(t->right()))
+            intCoefs.insert(lexical_cast<cpp_int>(toMpz(t->left())));
+          else if (is_bvconst(t))
+            intCoefs.insert(1);
+          else
+            return false;
+        }
+      }
+      if (!is_bvnum(ex->right()) && !is_bvnum(ex->left()))
+        return false;
     }
     return res;
   }
@@ -559,6 +568,7 @@ namespace ufo
 
   Expr rewriteMultAddBV(Expr exp)
   {
+    outs() << "Rewriting mult-add: " << exp << "\n";
     RW<AddMultDistrBV> mu(new AddMultDistrBV());
     return dagVisit(mu, exp);
   }
