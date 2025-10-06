@@ -20,12 +20,16 @@ namespace ufo
     bool dGenerous;
     int dFwd;
     int mbpEqs;
+    bool usingCTI = false;
+    int ctiCount = 0;
 
     map<int, ExprSet> mbps;
     map<int, ExprTree> mbpDt, strenDt;
 
     map<int, ExprSet> allDataCands;
     map<int, deque<Expr>> deferredCandidates;
+    map<int, deque<Expr>> ctiCandidates;
+    map<Expr, ExprSet> ctiTable;
 
     public:
 
@@ -72,6 +76,52 @@ namespace ufo
       return true;
     }
 
+    bool multiHoudini (vector<HornRuleExt*> worklist, bool recur = true)
+    {
+      if (printLog >= 3) outs () << "MultiHoudiniV4\n";
+      if (printLog >= 4) printCands();
+
+      bool res1 = true;
+      for (auto &hr: worklist)
+      {
+        if (printLog >= 3) outs () << "  Doing CHC check (" << hr->srcRelation << " -> "
+                                   << hr->dstRelation << ")\n";
+        if (hr->isQuery) continue;
+        tribool b = checkCHC(*hr, candidates);
+        if (b || indeterminate(b))
+        {
+          if (printLog >= 3) outs () << "    CHC check failed\n";
+          int invNum = getVarIndex(hr->dstRelation, decls);
+          SamplFactory& sf = sfs[invNum].back();
+
+          map<Expr, tribool> vals;
+          for (auto & cand : candidates[invNum])
+          {
+            Expr repl = cand;
+            repl = replaceAll(repl, invarVarsShort[invNum], hr->dstVars);
+            vals[cand] = u.eval(repl);
+          }
+
+          // first try to remove candidates immediately by their models (i.e., vals)
+          // then, invalidate (one-by-one) all candidates for which Z3 failed to find a model
+
+          for (int i = 0; i < 3 /*weakeningPriorities.size() */; i++)
+            if (weaken (invNum, candidates[invNum], vals, hr, sf, (*weakeningPriorities[i]), i > 0)) // DR : recheck
+              break;
+
+          if (recur)
+          {
+            res1 = false;
+            break;
+          }
+        }
+        else if (printLog >= 3) outs () << "    CHC check succeeded\n";
+      }
+      if (!recur) return false;
+      if (res1) return anyProgress(worklist);
+      else return multiHoudini(worklist);
+    }
+
     bool weaken (int invNum, ExprVector& ev,
                  map<Expr, tribool>& vals, HornRuleExt* hr, SamplFactory& sf,
                  function<bool(Expr, tribool)> cond, bool singleCand)
@@ -83,8 +133,7 @@ namespace ufo
         {
           weakened = true;
           if (printLog >= 3)
-            outs () << "    Failed cand for " << hr->dstRelation
-                    << ": " << *it << " 🔥\n";
+            outs () << "    V4 Failed cand for " << hr->dstRelation << ": " << *it << " 🔥\n";
           if (hr->isFact && !containsOp<ARRAY_TY>(*it) &&
               !containsOp<BOOL_TY>(*it) && !findNonlin(*it))
           {
@@ -92,9 +141,12 @@ namespace ufo
             if (statsInitialized)
             {
               Sampl& s = sf.exprToSampl(failedCand);
-              sf.assignPrioritiesForFailed();
+              assignPrioritiesForFailed(sf, hr->isInductive, failedCand);
             }
-            else tmpFailed[invNum].insert(failedCand);
+            else 
+            {
+              tmpFailed[invNum].insert(failedCand);
+            }
           }
           if (boot)
           {
@@ -109,6 +161,15 @@ namespace ufo
                 deferredCandidates[invNum].push_front(a);
                 deferredCandidates[invNum].push_front(mkNeg(a));
               }
+            }
+          }
+          if(hr->isInductive)
+          {
+            if (statsInitialized)
+            {
+              Expr failedCand = normalizeDisj(*it, invarVarsShort[invNum]);
+              Sampl &s = sf.exprToSampl(failedCand);
+              assignPrioritiesForFailed(sf, hr->isInductive, failedCand);
             }
           }
           it = ev.erase(it);
@@ -556,6 +617,86 @@ namespace ufo
       }
     }
 
+    void printCtiTable()
+    {
+      outs() << "CTI Table:\n";
+      for (auto & a : ctiTable)
+      {
+        outs() << " Model: " << a.first << "\n";
+        for (auto & b : a.second)
+          outs() << "   Failed cand: " << b << "\n";
+      }
+    }
+
+    void assignPrioritiesForLearned(Expr cand = NULL)
+    {
+      if(cand != NULL)
+      {
+        if (printLog >= 3)
+        {
+          outs() << "V4 Assigning priorities for learned candidates\n";
+          outs() << "  Learned cand: " << cand << "\n";
+        }
+        // check against CTI table
+        Expr candPrime = replaceAll(cand, ruleManager.invVars[ruleManager.loopheads[0]],
+                                    ruleManager.invVarsPrime[ruleManager.loopheads[0]]);
+        
+        for(auto & a : ctiTable) // use explicit iterators here since we want to erase.
+        {
+          if (printLog >= 3)
+            outs() << "  Checking CTI model: " << a.first << " for learned cand: " << candPrime << "\n";
+          if(!u.isSat(a.first, candPrime))
+          {
+            if (printLog >= 3)
+              outs() << "  Removing CTI model: " << a.first << " for learned cand: " << candPrime << "\n";
+            for(auto & b : a.second)
+            {
+              if(printLog >= 2) 
+                outs() << "    Reintroducing failed cand: " << b << "\n";
+              
+              if(!usingCTI)
+              {
+                int invNum = getVarIndex(ruleManager.loopheads[0], decls);
+                ctiCandidates[invNum].push_back(b);
+              }
+              // exit(1);
+            }
+            ctiTable.erase(a.first);
+            // break; // assuming one model per learned candidate
+          }
+          else
+          {
+            if(printLog >= 3) 
+              outs() << "  Keeping CTI model: " << a.first << " for learned cand: " << candPrime << "\n";
+          }
+        }
+      }
+      RndLearnerV3::assignPrioritiesForLearned();
+    }
+
+    void assignPrioritiesForFailed(SamplFactory &sf, bool isInductive, Expr failedCand)
+    {
+      if(isInductive)
+      {
+        // Only care about failed candidates that were from induction.
+        Expr model = u.getModel();
+        if(printLog >= 3)
+        {
+          outs() << "V4 Assigning priorities for failed candidate: "
+                 << failedCand << " with model: " << model << "\n";
+          outs() << "V4 Assigning priorities for failed candidates\n";
+        }
+  
+        if (printLog >= 2)
+          outs() << "  Adding CTI model: " << model << " for failed cand: " << failedCand << "\n";
+
+        ctiTable[model].insert(failedCand);
+      }
+      sf.assignPrioritiesForFailed();
+    }
+
+    int ctiCands = 0;
+    int ctiLemmas = 0;
     // currently, largely based on V3's version
     bool synthesize(unsigned maxAttempts)
     {
@@ -572,23 +713,38 @@ namespace ufo
       int lsz = ruleManager.loopheads.size();
       for (int i = 0; i < maxAttempts; i++)
       {
+        if (printLog >= 3) printCtiTable();
         // next cand (to be sampled)
         // TODO: find a smarter way to calculate; make parametrizable
         Expr rel = ruleManager.loopheads[i % lsz];
         int cycleNum = i % ruleManager.cycles[rel].size();
         int invNum = getVarIndex(rel, decls);
+        usingCTI = false;
         candidates.clear();
         SamplFactory& sf = sfs[invNum].back();
         Expr cand;
-        if (deferredCandidates[invNum].empty())
-        {
-          rndStarted = true;
-          cand = sf.getFreshCandidate();  // try simple array candidates first
-        }
-        else
+        if (!deferredCandidates[invNum].empty())
         {
           cand = deferredCandidates[invNum].back();
           deferredCandidates[invNum].pop_back();
+          if (printLog >= 2)
+            outs() << "  Reusing deferred cand for " << rel
+                   << ": " << cand << "\n";
+        }
+        else if(!ctiCandidates[invNum].empty())
+        {
+          cand = ctiCandidates[invNum].back();
+          ctiCandidates[invNum].pop_back();
+          usingCTI = true;
+          ctiCands++;
+          if(printLog >= 2)
+            outs () << "  Reusing CTI cand for " << rel
+                    << ": " << cand << "\n";
+        }
+        else
+        {
+          rndStarted = true;
+          cand = sf.getFreshCandidate(); // try simple array candidates first
         }
         if (cand != NULL && isOpX<FORALL>(cand) && isOpX<IMPL>(cand->last()))
         {
@@ -614,11 +770,14 @@ namespace ufo
         }
         if (lemma_found)
         {
-          assignPrioritiesForLearned();
+          if(usingCTI) ctiLemmas++;
+          assignPrioritiesForLearned(cand);
           generalizeArrInvars(invNum, sf);
           if (checkAllLemmas())
           {
+            if(printLog >= 2) outs() << "Tried " << ctiCands << " CTI candidates\n";
             outs () << "Success after " << (i+1) << " iterations "
+                    << (ctiLemmas > 0 ? "(+ cti) " + ctiLemmas + ' ' : "")  
                     << (rndStarted ? "(+ rnd)" :
                        (i > defSz[invNum]) ? "(+ rec)" : "" ) << "\n";
             printSolution();

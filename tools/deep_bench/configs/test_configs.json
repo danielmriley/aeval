@@ -1,0 +1,18 @@
+{
+  "configs": [
+    {
+      "name": "bv",
+      "tool": "./tools/deep/freqhorn",
+      "flags": "--bv",
+      "benchmarks": "../bench_horn_bv/",
+      "timeout": 10
+    },
+    {
+      "name": "bv-sampl",
+      "tool": "./tools/deep/freqhorn",
+      "flags": "--bv --skip-translation",
+      "benchmarks": "../bench_horn_bv/",
+      "timeout": 10
+    }
+  ]
+}
