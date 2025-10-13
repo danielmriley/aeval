@@ -14,12 +14,13 @@ from pathlib import Path
 from tqdm import tqdm
 
 class BenchmarkResult:
-    def __init__(self, filename, status, runtime, result="", error=""):
+    def __init__(self, filename, status, runtime, result="", error="", ctiLemmas=0):
         self.filename = filename
         self.status = status
         self.runtime = runtime
         self.result = result
         self.error = error
+        self.ctiLemmas = ctiLemmas
 
 def parse_args():
     parser = argparse.ArgumentParser(description='Run FreqHorn benchmarks')
@@ -45,14 +46,17 @@ def parse_args():
 def load_configs(config_file, default_args):
     if not config_file:
         # Use command line args as single config
-        return [{
+        config = {
             'name': default_args.tag or 'default',
             'tool': default_args.tool,
             'benchmarks': default_args.benchmarks,
             'timeout': default_args.timeout,
             'flags': default_args.flags,
             'pattern': default_args.pattern
-        }]
+        }
+        # Resolve tool path to absolute
+        config['tool'] = os.path.abspath(config['tool'])
+        return [config]
     
     with open(config_file) as f:
         all_configs = json.load(f)['configs']
@@ -77,6 +81,10 @@ def load_configs(config_file, default_args):
         config.setdefault('timeout', default_args.timeout)
         config.setdefault('flags', default_args.flags)
         config.setdefault('pattern', default_args.pattern)
+        # Ensure timeout is int
+        config['timeout'] = int(config['timeout'])
+        # Resolve tool path to absolute
+        config['tool'] = os.path.abspath(config['tool'])
     
     return all_configs
 
@@ -104,6 +112,13 @@ def run_benchmark(args):
         'flags': tool_flags,
         'benchmarks': str(Path(bench_file).parent)
     }
+    
+    # Check if the tool executable exists
+    if not os.path.isfile(tool):
+        result.status = "Tool not found"
+        result.runtime = 0
+        result.error = f"Tool executable not found at {tool}"
+        return result
     
     try:
         start_time = time.time()
@@ -142,6 +157,10 @@ def run_benchmark(args):
                 result.status = "Success"
                 parts = output.split("Success", 1)
                 result.result = "\n".join(parts[1].strip().split("\n")[-10:]) if len(parts) > 1 else ""
+                # Extract ctiLemmas
+                match = re.search(r'\(\+ cti\) (\d+)', output)
+                if match:
+                    result.ctiLemmas = int(match.group(1))
             elif "unknown" in output:
                 result.status = "unknown"
                 result.result = ""
@@ -257,7 +276,7 @@ def write_comparative_results(all_results, dirs, timestamp):
             # Write header
             header = ["Benchmark"]
             for config_name in grouped_configs.keys():
-                header.extend([f"{config_name} Status", f"{config_name} Time"])
+                header.extend([f"{config_name} Status", f"{config_name} Time", f"{config_name} ctiLemmas"])
             writer.writerow(header)
             
             # Write results side by side
@@ -266,9 +285,9 @@ def write_comparative_results(all_results, dirs, timestamp):
                 for results in grouped_configs.values():
                     result = next((r for r in results if os.path.basename(r.filename) == bench), None)
                     if result:
-                        row.extend([result.status, f"{result.runtime:.2f}"])
+                        row.extend([result.status, f"{result.runtime:.2f}", result.ctiLemmas])
                     else:
-                        row.extend(["N/A", "N/A"])
+                        row.extend(["N/A", "N/A", "N/A"])
                 writer.writerow(row)
             
             # Write statistics

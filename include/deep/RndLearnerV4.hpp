@@ -638,8 +638,8 @@ namespace ufo
           outs() << "  Learned cand: " << cand << "\n";
         }
         // check against CTI table
-        Expr candPrime = replaceAll(cand, ruleManager.invVars[ruleManager.loopheads[0]],
-                                    ruleManager.invVarsPrime[ruleManager.loopheads[0]]);
+        Expr candPrime = cand;
+        ExprSet toRemove;
         
         for(auto & a : ctiTable) // use explicit iterators here since we want to erase.
         {
@@ -661,7 +661,8 @@ namespace ufo
               }
               // exit(1);
             }
-            ctiTable.erase(a.first);
+            toRemove.insert(a.first);
+            // ctiTable.erase(a.first);
             // break; // assuming one model per learned candidate
           }
           else
@@ -670,6 +671,8 @@ namespace ufo
               outs() << "  Keeping CTI model: " << a.first << " for learned cand: " << candPrime << "\n";
           }
         }
+
+        for(auto & a : toRemove) ctiTable.erase(a);
       }
       RndLearnerV3::assignPrioritiesForLearned();
     }
