@@ -878,6 +878,12 @@ namespace ufo
 
     }
 
+    bool learnFromData()
+    {
+      BndExpl bnd(m_bvChcs, maxAttempts, debug);
+      
+    }
+
     bool solve(unsigned int to = 100)
     {
       if (debug >= 1)
@@ -886,6 +892,8 @@ namespace ufo
       }
 
       bool isSafe = false;
+
+      learnFromData();
 
       for (int i = 0; i < 3; i++)
       {
