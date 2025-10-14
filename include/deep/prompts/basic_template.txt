@@ -1,0 +1,25 @@
+Generate candidate lemmas for the given CHC system. The system has the following characteristics:
+
+{SYSTEM_INFO}
+
+The variables in the system are:
+{VARIABLES}
+
+Current learned lemmas that should be considered for generating new candidates:
+{LEARNED_LEMMAS}
+
+Please generate 3-5 candidate lemmas in PREFIX NOTATION (also called Polish notation). In prefix notation, the operator comes BEFORE the operands.
+
+EXAMPLES of prefix notation:
+- (>= _FH_0 0) means _FH_0 >= 0
+- (<= _FH_1 100) means _FH_1 <= 100
+- (= _FH_0 _FH_1) means _FH_0 = _FH_1
+- (> (+ _FH_0 _FH_1) 50) means _FH_0 + _FH_1 > 50
+
+Focus on:
+1. Simple equality constraints: (= var value) or (= var1 var2)
+2. Range constraints for variables: (>= var 0), (<= var MAX), etc.
+3. Relationships between variables: (>= var1 var2), (= (+ var1 var2) total)
+4. Array properties if applicable
+
+Each lemma should be on a separate line in prefix notation ONLY. Do not include any explanations or natural language - just the prefix notation expressions.

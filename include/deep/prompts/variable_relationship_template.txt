@@ -1,0 +1,13 @@
+Analyze variable relationships in this CHC system:
+
+System: {SYSTEM_INFO}
+Variables: {VARIABLES}
+Learned lemmas: {LEARNED_LEMMAS}
+
+Generate lemmas that capture relationships between variables such as:
+- Equality relationships: x = y, x = f(y)
+- Ordering relationships: x < y, x <= y
+- Arithmetic relationships: x = y + z, x = 2*y
+- Array relationships: a[i] = b[j], a[i] relates to loop variables
+
+Focus on how variables interact within the system's transitions.

@@ -2,6 +2,7 @@
 #define RNDLEARNERV4__HPP__
 
 #include "RndLearnerV3.hpp"
+#include "LlmSynthesizer.hpp"
 
 using namespace std;
 using namespace boost;
@@ -580,7 +581,13 @@ namespace ufo
         candidates.clear();
         SamplFactory& sf = sfs[invNum].back();
         Expr cand;
-        if (deferredCandidates[invNum].empty())
+
+        if(true)
+        {
+          cand = generateLlmLemma(invNum);
+          outs() << "LLM Synthesized candidate: " << cand << "\n";
+        }
+        else if (deferredCandidates[invNum].empty())
         {
           rndStarted = true;
           cand = sf.getFreshCandidate();  // try simple array candidates first
@@ -958,6 +965,23 @@ namespace ufo
         if (printLog >= 3) outs() << "rel: " << rel << " : has arrays\n";
         ruleManager.hasArrays[rel] = true;
       }
+    }
+
+    // Method to generate a new lemma using LLM based on current learned lemmas for a specific invariant and CHC system
+    Expr generateLlmLemma(int invNum) {
+      ExprSet learnedLemmas;
+      // Collect learned expressions from the SamplFactory for this specific invariant
+      if (invNum >= 0 && invNum < (int)sfs.size()) {
+        for (auto& sf : sfs[invNum]) {
+          for (auto& learned : sf.learnedExprs) {
+            learnedLemmas.insert(learned);
+          }
+        }
+      }
+      
+      // Create LlmSynthesizer instance and generate new lemma
+      LlmSynthesizer llm("gemma-3-1b-it-qat", printLog);
+      return llm.generateLemma(ruleManager, learnedLemmas);
     }
   };
 

@@ -1,0 +1,14 @@
+Analyze the following CHC system and generate candidate lemmas based on examples of similar systems:
+
+{SYSTEM_INFO}
+
+Variables: {VARIABLES}
+
+Learned lemmas so far: {LEARNED_LEMMAS}
+
+Consider these example patterns:
+- For loops: induction variables often satisfy i >= 0 and i < N
+- For arrays: elements are often initialized to default values
+- For counters: monotonic increase/decrease properties
+
+Generate lemmas that follow these patterns for this specific system.

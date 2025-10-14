@@ -134,6 +134,14 @@ if (ARMADILLO_FOUND)
   include_directories(${ARMADILLO_INCLUDE_DIR})
 endif()  
 
+set(CURL_USE_STATIC_LIBS OFF)
+set(CMAKE_FIND_LIBRARY_SUFFIXES ".so")
+set(CURL_LIBRARY /usr/lib/x86_64-linux-gnu/libcurl.so)
+find_package(CURL REQUIRED)
+if (CURL_FOUND)
+  include_directories(${CURL_INCLUDE_DIRS})
+endif()
+
 install(DIRECTORY include/
   DESTINATION include
   FILES_MATCHING

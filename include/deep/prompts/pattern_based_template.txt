@@ -1,0 +1,13 @@
+Use pattern-based reasoning to generate lemmas for this CHC system:
+
+System analysis: {SYSTEM_INFO}
+Variables: {VARIABLES}
+Current lemmas: {LEARNED_LEMMAS}
+
+Common patterns to consider:
+- Loop invariants: properties that hold before/after iterations
+- Array patterns: sorted arrays, initialized ranges, bounds checking
+- Counter patterns: increment/decrement behaviors
+- Conditional patterns: if-then-else relationships
+
+Generate lemmas that match these patterns and could strengthen the system's verification.
