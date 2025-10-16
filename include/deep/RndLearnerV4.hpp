@@ -635,7 +635,7 @@ namespace ufo
           }
         }
       }
-      outs() << "unknown\n";
+      if(printLog) outs() << "unknown\n";
       return false;
     }
 

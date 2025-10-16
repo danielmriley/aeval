@@ -718,7 +718,7 @@ namespace ufo
       sf.initialize(arr1, arrVars, arr2, m_original_bv_width);
 
       // normalize samples obtained from CHCs
-      outs() << "cands.size() : " << cands.size() << "\n";
+      // outs() << "cands.size() : " << cands.size() << "\n";
       for (auto & cand : cands) Sampl& s = sf.exprToSampl(cand);
     }
 
@@ -881,7 +881,7 @@ namespace ufo
     bool learnFromData()
     {
       BndExpl bnd(m_bvChcs, maxAttempts, debug);
-      
+      return true;
     }
 
     bool solve(unsigned int to = 100)
@@ -980,12 +980,12 @@ namespace ufo
 
       if(!skipSampling)
       {
-        outs() << "Attempting to synthesize invariants through sampling...\n";
+        // outs() << "Attempting to synthesize invariants through sampling...\n";
         std::srand(std::time(0));
         synthesize(); // sampling candidates from grammar.
       }
 
-      outs() << "Failed to find a safe solution after sampling.\n";
+      if(debug >= 1) outs() << "Failed to find a safe solution after sampling.\n";
       return false;
     }
 

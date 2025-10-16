@@ -532,7 +532,7 @@ namespace ufo
       {
         sfs[i].back().calculateStatistics(densecode, addepsilon);
 
-        // if (printLog >= 4)
+        if (printLog >= 4)
         {
           outs() << "\nSTATISTICS for " << *decls[i] << "\n==========\n";
           sfs[i].back().printStatistics();

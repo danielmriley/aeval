@@ -173,10 +173,10 @@ namespace ufo
         exprToSampl(mk<BUGE>(bvf.getVars()[0], bvnum(mpz_class(0), bvf.width, m_efac)));
       }
 
-      outs() << "samples.size() = " << samples.size() << "\n";
+      // outs() << "samples.size() = " << samples.size() << "\n";
       for (auto &s : samples)
       {
-        outs() << "maxArity = " << maxArity << " s.arity() = " << s.arity() << "\n";
+        // outs() << "maxArity = " << maxArity << " s.arity() = " << s.arity() << "\n";
         maxArity = max (maxArity, s.arity());
         orArities.insert(s.arity());
         orAritiesDensity[s.arity()] ++;
@@ -276,11 +276,11 @@ namespace ufo
       samples.push_back(Sampl());
       Sampl& curCand = samples.back();
 
-      outs() << "Trying to get a candidate with arity = " << arity
-             << ", hasBool = " << hasBool << ", hasLin = " << hasLin
-             << ", hasBV = " << (hasBV ? "1" : "0") << "\n";
+      // outs() << "Trying to get a candidate with arity = " << arity
+      //        << ", hasBool = " << hasBool << ", hasLin = " << hasLin
+      //        << ", hasBV = " << (hasBV ? "1" : "0") << "\n";
 
-             Expr lExpr;
+      Expr lExpr;
       if (!hasBV && hasLin > 0)
       {
         if (!lf.guessTerm(curCand.l_part, arity, hasLin)) return NULL;

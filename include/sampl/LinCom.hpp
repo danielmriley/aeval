@@ -334,7 +334,7 @@ namespace ufo
     {
       for (auto &v : s.vcs)
       {
-        outs() << "  ** v: " << v << "\n";
+        // outs() << "  ** v: " << v << "\n";
       }
       ExprVector apps;
 
@@ -390,30 +390,30 @@ namespace ufo
         LAterm s;
         if (!isNumericConst(ex->right()))
         {
-          outs() << "Right side of comparison is not a numeric constant: " << ex->right() << "\n";
+          // outs() << "Right side of comparison is not a numeric constant: " << ex->right() << "\n";
           return;
         } 
 
         ExprVector all;
         getAddTerm (ex->left(), all);
-        outs() << "--> all.size(): " << all.size() << "\n";
+        // outs() << "--> all.size(): " << all.size() << "\n";
         Expr aux = reBuildCmp(ex, auxVar1, auxVar2);
-        outs() << "  ** Rebuilt comparison: " << aux << "\n";
-        outs() << "  expr: " << ex << "\n";
+        // outs() << "  ** Rebuilt comparison: " << aux << "\n";
+        // outs() << "  expr: " << ex << "\n";
 
         s.arity = all.size();
-        outs() << "--> s.arity: " << s.arity << "\n";
+        // outs() << "--> s.arity: " << s.arity << "\n";
         s.cmpop = getVarIndex(aux, cmpOps);
         s.intconst = getVarIndex(lexical_cast<cpp_int>(ex->right()), intConsts);
-        outs() << "  ** arity: " << s.arity << "\n";
-        outs() << "  ** intconst: " << s.intconst << "\n";
-        outs() << "  ** cmpop: " << s.cmpop << "\n";
+        // outs() << "  ** arity: " << s.arity << "\n";
+        // outs() << "  ** intconst: " << s.intconst << "\n";
+        // outs() << "  ** cmpop: " << s.cmpop << "\n";
 
         if (s.intconst == -1 || s.cmpop == -1) return;
 
         for (auto &e : all)
         {
-          outs() << "  ** in loop exprToLAdisj for e: " << e << "\n";
+          // outs() << "  ** in loop exprToLAdisj for e: " << e << "\n";
           Expr curVar = NULL;
           cpp_int curCoef = 1;
           bool hasCoef = false;
@@ -422,7 +422,7 @@ namespace ufo
           getMultOps (e, ops);
           for (auto & o : ops)
           {
-            outs() << "  ** in loop exprToLAdisj for o: " << o << "\n";
+            // outs() << "  ** in loop exprToLAdisj for o: " << o << "\n";
             if (isNumericConst(o))
             {
               curCoef = lexical_cast<cpp_int>(o);
@@ -453,7 +453,7 @@ namespace ufo
         if (s.vcs.size() != 2*(s.arity)) return;
         addDisjFilter(s, sample);
       }
-      outs() << "  ** Finished exprToLAdisj for " << ex << "\n";
+      // outs() << "  ** Finished exprToLAdisj for " << ex << "\n";
     }
 
     cpp_int equalCoefs(LAterm& s)
@@ -677,7 +677,7 @@ namespace ufo
         {
           // disjunction of s and t is equal t, so s can be ignored
           skip = true;
-          outs() << "stronger: break\n";
+          // outs() << "stronger: break\n";
           break;
         }
         else if (weaker(s, t))
@@ -687,7 +687,7 @@ namespace ufo
           t.intconst = s.intconst;
 
           skip = true;
-          outs() << "weaker: break\n";
+          // outs() << "weaker: break\n";
           break;
         }
         else
@@ -697,15 +697,15 @@ namespace ufo
           if (stronger(u, s))
           {
             // disjunction of s and t is equal to true, to the entire LAdisj& d is a tautology
-            outs() << "stronger: return\n";
+            // outs() << "stronger: return\n";
             return false;
           }
         }
       }
       if (!skip)
       {
-        outs() << "Adding disjunction:\n";
-        s.printLAterm();
+        // outs() << "Adding disjunction:\n";
+        // s.printLAterm();
         d.addDisj(s);
       }
       return true;
@@ -856,7 +856,7 @@ namespace ufo
 
       if (ineqPriors[id].size() == 0)
       {
-        outs() << "WARNING: Priorities are not set up here\n";
+        // outs() << "WARNING: Priorities are not set up here\n";
         return false;
       }
 
@@ -1232,7 +1232,7 @@ namespace ufo
           set<int> vars;
           int vars_id = -1;
           for (int j = 0; j < lc.vcs.size(); j = j+2) vars.insert(lc.vcs[j]);
-          lc.printLAterm();
+          // lc.printLAterm();
           for (int j = 0; j < varCombinations[lc.arity].size(); j++)
           {
             if (varCombinations[lc.arity][j] == vars)
@@ -1273,7 +1273,7 @@ namespace ufo
           {
             vars.insert(lc.vcs[j]);
           }
-          lc.printLAterm();
+          // lc.printLAterm();
           for (int j = 0; j < varCombinations[lc.arity].size(); j++)
           {
             if (varCombinations[lc.arity][j] == vars)

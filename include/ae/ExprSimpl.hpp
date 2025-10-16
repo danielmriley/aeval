@@ -1747,8 +1747,8 @@ namespace ufo
       {
         Expr e1 = e->left();
         Expr e2 = e->right();
-        outs() << "Checking bitwidths: ";
-        outs() << "" << e1 << " " << e2 << "\n";
+        // outs() << "Checking bitwidths: ";
+        // outs() << "" << e1 << " " << e2 << "\n";
         assert(bitwidths.find(e1) != bitwidths.end() && bitwidths.find(e2) != bitwidths.end() && bitwidths[e1] == bitwidths[e2]);
 
         bitwidths[e] = bitwidths[e1];
@@ -4548,24 +4548,24 @@ namespace ufo
     bool res = true;
     if (isOpX<TRUE>(ex))
     {
-      outs() << "returning false because of isOpX<TRUE>(ex)\n";
+      // outs() << "returning false because of isOpX<TRUE>(ex)\n";
       return false;
     } 
     if (isOpX<OR>(ex))
     {
       for (auto it = ex->args_begin (), end = ex->args_end (); it != end; ++it)
       {
-        outs() << "Found OR arg: " << *it << "\n";
-        outs() << "res = " << (res ? "TRUE1" : "FALSE1") << "\n\n";
+        // outs() << "Found OR arg: " << *it << "\n";
+        // outs() << "res = " << (res ? "TRUE1" : "FALSE1") << "\n\n";
         res = res && getLinCombCoefs(*it, intCoefs);
-        outs() << "res = " << (res ? "TRUE2" : "FALSE2") << "\n\n";
+        // outs() << "res = " << (res ? "TRUE2" : "FALSE2") << "\n\n";
       }
     }
     else if (isOp<ComparissonOp>(ex)) // assuming the lin.combination is on the left side
     {
       if (!isOpX<MPZ>(ex->right()))
       {
-        outs() << "returning FALSE because of isOpX<MPZ>(ex->right())\n";
+        // outs() << "returning FALSE because of isOpX<MPZ>(ex->right())\n";
         return false;
       } 
       ExprVector addt;
@@ -4581,7 +4581,7 @@ namespace ufo
         }
         else
         {
-          outs() << "returning FALSE because of non-MPZ term in linear combination: " << *t << "\n";
+          // outs() << "returning FALSE because of non-MPZ term in linear combination: " << *t << "\n";
           return false;
         } 
       }

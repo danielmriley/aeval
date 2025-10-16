@@ -361,7 +361,7 @@ namespace ufo
     }
     else if (lexical_cast<string>(a) != "0")
     {
-      outs() << "In the lexical cast branch: " << a << "\n";
+      // outs() << "In the lexical cast branch: " << a << "\n";
       bool found = false;
       for (auto it = terms.begin(); it != terms.end();)
       {
@@ -381,7 +381,7 @@ namespace ufo
 
   inline static bool getBVCombCoefs(Expr ex, set<cpp_int> &intCoefs)
   {
-    outs() << "Getting BV comb coefs for: " << ex << "\n";
+    // outs() << "Getting BV comb coefs for: " << ex << "\n";
     bool res = true;
     if (isOpX<TRUE>(ex))
       return false;
@@ -392,11 +392,11 @@ namespace ufo
     }
     else if (isBVComparison(ex)) // assuming the bv.combination is on the left side
     {
-      outs() << "Checking: " << ex << "\n";
+      // outs() << "Checking: " << ex << "\n";
       if (!is_bvnum(ex->left()))
       {
         ExprVector addt;
-        outs() << "Getting add terms for left side: " << ex->left() << "\n";
+        // outs() << "Getting add terms for left side: " << ex->left() << "\n";
         getAddTermBV(ex->left(), addt);
         for (auto & t : addt)
         {
@@ -412,7 +412,7 @@ namespace ufo
       if (!is_bvnum(ex->right()))
       {
         ExprVector addt;
-        outs() << "Getting add terms for right side: " << ex->right() << "\n";
+        // outs() << "Getting add terms for right side: " << ex->right() << "\n";
         getAddTermBV(ex->right(), addt);
         for (auto &t : addt)
         {
@@ -568,7 +568,6 @@ namespace ufo
 
   Expr rewriteMultAddBV(Expr exp)
   {
-    outs() << "Rewriting mult-add: " << exp << "\n";
     RW<AddMultDistrBV> mu(new AddMultDistrBV());
     return dagVisit(mu, exp);
   }

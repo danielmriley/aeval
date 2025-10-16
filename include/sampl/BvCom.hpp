@@ -411,8 +411,8 @@ namespace ufo
         rhs.push_back(bvnum(0, width, m_efac));
       }
 
-      if(lhs.empty()) outs() << "  ** lhs is empty\n";
-      if(rhs.empty()) outs() << "  ** rhs is empty\n";
+      // if(lhs.empty()) outs() << "  ** lhs is empty\n";
+      // if(rhs.empty()) outs() << "  ** rhs is empty\n";
 
       Expr ineq = getAtom(templ, lhs, rhs);
 
@@ -448,7 +448,7 @@ namespace ufo
     {
       if (isOpX<OR>(ex))
       {
-        outs() << "Processing expression for BV disjunction: " << ex << "\n";
+        // outs() << "Processing expression for BV disjunction: " << ex << "\n";
         for (auto it = ex->args_begin (), end = ex->args_end (); it != end; ++it)
           exprToBVdisj(*it, sample);
       }
@@ -458,11 +458,11 @@ namespace ufo
         ExprVector all;
         Expr aux;
 
-        outs() << "ex: " << ex << "\n";
+        // outs() << "ex: " << ex << "\n";
 
         if (is_bvnum(ex->right()))
         {
-          outs() << "Right side of comparison is a bit-vector number: " << ex->right() << "\n";
+          // outs() << "Right side of comparison is a bit-vector number: " << ex->right() << "\n";
           getAddTermBV(ex->left(), all);
           aux = reBuildCmpBV(ex, auxVar1, auxVar2);
   
@@ -484,7 +484,7 @@ namespace ufo
 
         if (is_bvnum(ex->left()))
         {
-          outs() << "Left side of comparison is a bit-vector number: " << ex->left() << "\n";
+          // outs() << "Left side of comparison is a bit-vector number: " << ex->left() << "\n";
           getAddTermBV(ex->right(), all);
           aux = reBuildCmpBV(ex, auxVar1, auxVar2);
 
@@ -520,7 +520,7 @@ namespace ufo
           s.intconst = getVarIndex(lexical_cast<cpp_int>(0), intConsts);
         }
 
-        if (s.intconst == -1 || s.cmpop == -1) { outs() << "RETURNING3\n"; return; }
+        if (s.intconst == -1 || s.cmpop == -1) { return; }
 
         for (auto &e : all)
         {
@@ -539,7 +539,7 @@ namespace ufo
             } 
             else if (curVar != NULL)
             {
-              outs() << "Multiple variables in a term, skipping: " << e << "\n";
+              // outs() << "Multiple variables in a term, skipping: " << e << "\n";
               return;
             } 
             else curVar = o;
@@ -559,7 +559,7 @@ namespace ufo
           {
             if (curCoef == 0)
             {
-              outs() << "Continuing due to zero coefficient\n";
+              // outs() << "Continuing due to zero coefficient\n";
               // Skip zero-coefficient terms to avoid invalid combinations
               continue;
             }
@@ -588,7 +588,7 @@ namespace ufo
             }
             else
             {
-              outs() << "RETURNING4\n";
+              // outs() << "RETURNING4\n";
               return;
             }
           } 
@@ -598,10 +598,10 @@ namespace ufo
 
         }
 
-        for(int v : s.vcs) if (v < 0) { outs() << "RETURNING1\n"; return; } 
-        if (s.vcs.size() != 2*(s.arity)) { outs() << "RETURNING2\n"; return; }
+        for(int v : s.vcs) if (v < 0) { /* outs() << "RETURNING1\n"; */ return; } 
+        if (s.vcs.size() != 2*(s.arity)) { /* outs() << "RETURNING2\n"; */ return; }
 
-        outs() << "Going to addDisjFilter\n";
+        // outs() << "Going to addDisjFilter\n";
         addDisjFilter(s, sample);
       }
     }
@@ -812,7 +812,7 @@ namespace ufo
         if (stronger(s, t))
         {          // disjunction of s and t is equal to t, so s can be ignored
           skip = true;
-          outs() << "s is stronger than t\n";
+          // outs() << "s is stronger than t\n";
           break;
         }
         else if(weaker(s, t))
@@ -822,7 +822,7 @@ namespace ufo
           t.intconst = s.intconst;
 
           skip = true;
-          outs() << "s is weaker than t\n";
+          // outs() << "s is weaker than t\n";
           break;
         }
         else 
@@ -831,19 +831,19 @@ namespace ufo
           invertTerm(u, s);
           if (stronger(u, s))
           {
-            outs() << "s is redundant due to its inverse\n";
+            // outs() << "s is redundant due to its inverse\n";
             return false;
           }
         }
       }
       if(!skip)
       {
-        outs() << "\n** Adding a disjunct\n";
+        // outs() << "\n** Adding a disjunct\n";
         d.addDisj(s);
       }
       else
       {
-        outs() << "Skipping addition of a disjunct\n";
+        // outs() << "Skipping addition of a disjunct\n";
       }
       return true;
     }
@@ -852,7 +852,7 @@ namespace ufo
     {
       if(isEmpty(plusAritiesDensity[arity]))
       {
-        outs() << "** PLUSARITIES EMPTY **\n";
+        // outs() << "** PLUSARITIES EMPTY **\n";
         return false;
       } 
 
@@ -979,7 +979,7 @@ namespace ufo
 
       if (std::find(std::begin(s), std::end(s), disj) != std::end(s))
       {
-        outs() << "visiteed\n";
+        // outs() << "visiteed\n";
         return true;
       }
 
@@ -987,7 +987,7 @@ namespace ufo
 
       if (ineqPriors[id].size() == 0)
       {
-        outs() << "WARNING: Priorities are not set up here\n";
+        // outs() << "WARNING: Priorities are not set up here\n";
         return false;
       }
 
@@ -995,12 +995,12 @@ namespace ufo
       {
         if (d[i] != PRIORNOVISIT)
         {
-          outs() << "WARNING: Priorities are not set up heree\n";
+          // outs() << "WARNING: Priorities are not set up heree\n";
           return false;
         }
       }
       s.insert(disj);
-      outs() << "visited\n";
+      // outs() << "visited\n";
       return true;
     }
 
@@ -1352,7 +1352,7 @@ namespace ufo
           {
             varsSet.insert(bv.vcs[j]);
           }
-          bv.printBVterm();
+          // bv.printBVterm();
           for(int j = 0; j < varCombinations[bv.arity].size(); j++)
           {
             if (varCombinations[bv.arity][j] == varsSet)
