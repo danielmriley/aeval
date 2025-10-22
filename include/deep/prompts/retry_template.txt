@@ -1,0 +1,22 @@
+The previous response was malformed or unusable. Please try again and follow these instructions carefully.
+
+System overview:
+{SYSTEM_INFO}
+
+Allowed variables:
+{VARIABLES}
+
+Context:
+{PREVIOUS_LEMMAS}
+
+Previous response:
+{PREVIOUS_RESPONSE}
+
+Requirements:
+1. Use only the variable names listed above. Do not introduce any new variables, placeholders, or natural-language terms.
+2. Produce 3-5 lemmas that help strengthen the inductive invariant for this system.
+3. Each lemma must be written in strict prefix (Polish) notation, one lemma per line.
+4. Ensure every lemma is fully parenthesized and uses a supported logical or arithmetic operator.
+5. Avoid duplicating any lemmas that have already been provided in the context.
+
+Return only the prefix expressions, one per line, with no additional commentary.

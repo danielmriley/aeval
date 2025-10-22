@@ -1,0 +1,39 @@
+An inductive invariant is a logical property that holds at the beginning of the program, is preserved by every transition in the CHC system, and implies the desired postcondition when the program terminates. Lemmas are individual components or parts of such an inductive invariant.
+
+Generate candidate lemmas for the given CHC system that use IMPLICATION expressions. An implication (A ⇒ B) means "if A holds, then B must also hold". Use the antecedent (A) to describe a phase or condition in the loop, and the consequent (B) to describe variable relationships that hold under that condition.
+
+{SYSTEM_INFO}
+
+The variables in the system are:
+{VARIABLES}
+
+{PREVIOUS_LEMMAS}
+
+Examine the behavior of the CHC system to understand different phases or states that the system can be in. Consider how variables change during different parts of the execution and what relationships must hold conditionally.
+
+Generate 3-5 diverse candidate lemmas that use implication to express conditional relationships. Focus on different phases of the loop and the corresponding variable constraints that must hold in those phases.
+
+CRITICAL: You MUST generate expressions in STRICT PREFIX NOTATION (Polish notation) ONLY. The operator ALWAYS comes FIRST, before any operands. NEVER use infix notation like "x >= 0" or "x + y > 50". You must return expressions that are over the variables from the system!
+
+REQUIRED FORMAT: Each lemma must be a single parenthesized expression starting with an operator. You must use prefix notation. You must use the system variables given above. Be careful to give a well-formed response based on the rules below. Adhere to the SMT-LIB2 format for expressions!
+
+CORRECT EXAMPLES (prefix notation with implications):
+- (=> (>= x 0) (<= y 100)) means if x >= 0 then y <= 100
+- (=> (= phase 1) (= x y)) means if phase = 1 then x = y
+- (=> (> (+ x y) 50) (>= z 0)) means if x + y > 50 then z >= 0
+- (=> (and (>= x 0) (<= x 10)) (= y (* x 2))) means if 0 <= x <= 10 then y = 2*x
+- (=> (= flag 1) (> (- total x) 0)) means if flag = 1 then total > x
+
+INCORRECT EXAMPLES (do NOT use these):
+- (x >= 0) => (y <= 100) - wrong: infix implication
+- if x >= 0 then y <= 100 - wrong: natural language
+- (x >= 0) implies (y <= 100) - wrong: not prefix notation
+
+Focus on implication patterns:
+1. Phase-based implications: different behaviors in different loop phases
+2. Boundary condition implications: special relationships at boundaries
+3. State-dependent constraints: different invariants for different states
+4. Conditional arithmetic relationships: arithmetic properties that hold conditionally
+5. Guarded relationships: relationships that only hold when certain guards are satisfied
+
+Each lemma should be on a separate line in prefix notation ONLY. Do not include any explanations or natural language - just the prefix notation expressions.

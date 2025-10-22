@@ -1,25 +1,34 @@
+An inductive invariant is a logical property that holds at the beginning of the program, is preserved by every transition in the CHC system, and implies the desired postcondition when the program terminates. Lemmas are individual components or parts of such an inductive invariant.
+
 Generate candidate lemmas for the given CHC system. The system has the following characteristics:
 
 {SYSTEM_INFO}
 
-The variables in the system are:
+You must use the system variables. The variables in the system are:
 {VARIABLES}
 
-Current learned lemmas that should be considered for generating new candidates:
-{LEARNED_LEMMAS}
+{PREVIOUS_LEMMAS}
 
-Please generate 3-5 candidate lemmas in PREFIX NOTATION (also called Polish notation). In prefix notation, the operator comes BEFORE the operands.
+Examine the behavior of the CHC system to understand how the relations and variables evolve through transitions. Consider how the constraints propagate and what properties must hold to maintain the inductive invariant.
 
-EXAMPLES of prefix notation:
-- (>= _FH_0 0) means _FH_0 >= 0
-- (<= _FH_1 100) means _FH_1 <= 100
-- (= _FH_0 _FH_1) means _FH_0 = _FH_1
-- (> (+ _FH_0 _FH_1) 50) means _FH_0 + _FH_1 > 50
+Generate 1 diverse candidate lemma that strengthen the inductive invariant or provide a additional constraint. Focus on different types of constraints and relationships between variables. Avoid generating the same lemma multiple times.
 
-Focus on:
+CRITICAL: You MUST generate expressions in STRICT PREFIX NOTATION (Polish notation) ONLY. The operator ALWAYS comes FIRST, before any operands. NEVER use infix notation like "x >= 0" or "x + y > 50". You must use the variables for the system! This is critical!
+
+REQUIRED FORMAT: Each lemma must be a single parenthesized expression starting with an operator. You must use prefix notation. You must use the system variables given above. Be careful to give a well-formed response based on the rules below. Adhere to the SMT-LIB2 format for expressions!
+
+CORRECT EXAMPLES (prefix notation):
+- (>= x 0) means x >= 0
+- (<= y 100) means y <= 100
+- (= x y) means x = y
+- (> (+ x y) 50) means x + y > 50
+- (or (= x 0) (= x 1)) means x = 0 or x = 1
+- (>= (+ x (* 2 y)) 100) means x + 2*y >= 100
+
+Focus on different types of constraints:
 1. Simple equality constraints: (= var value) or (= var1 var2)
 2. Range constraints for variables: (>= var 0), (<= var MAX), etc.
-3. Relationships between variables: (>= var1 var2), (= (+ var1 var2) total)
-4. Array properties if applicable
+3. Relationships between variables: (>= var1 var2), (= (+ var1 var2) total), (< (- var1 var2) bound)
+4. Arithmetic relationships: (= (* var1 2) var2), (>= (+ var1 var2) threshold)
 
 Each lemma should be on a separate line in prefix notation ONLY. Do not include any explanations or natural language - just the prefix notation expressions.

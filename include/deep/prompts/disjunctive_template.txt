@@ -1,0 +1,41 @@
+An inductive invariant is a logical property that holds at the beginning of the program, is preserved by every transition in the CHC system, and implies the desired postcondition when the program terminates. Lemmas are individual components or parts of such an inductive invariant.
+
+Generate candidate lemmas for the given CHC system that use DISJUNCTIVE expressions. A disjunction (A ∨ B) means "either A holds or B holds (or both)". Use disjunctions to express alternative states or conditions that the system can be in.
+
+{SYSTEM_INFO}
+
+The variables in the system are:
+{VARIABLES}
+
+{PREVIOUS_LEMMAS}
+
+Examine the CHC system's behavior to identify alternative states, phases, or conditions that represent valid invariant states. Consider when the system can be in different modes or when variables can satisfy different (mutually compatible) constraints.
+
+Generate 3-5 diverse candidate lemmas that use disjunction to express alternative invariant conditions. Focus on different possible states or configurations that the system can validly be in.
+
+CRITICAL: You MUST generate expressions in STRICT PREFIX NOTATION (Polish notation) ONLY. The operator ALWAYS comes FIRST, before any operands. NEVER use infix notation like "x >= 0" or "x + y > 50".
+
+REQUIRED FORMAT: Each lemma must be a single parenthesized expression starting with an operator. You must use prefix notation. You must use the system variables given above. Be careful to give a well-formed response based on the rules below. Adhere to the SMT-LIB2 format for expressions!
+
+CORRECT EXAMPLES (prefix notation with disjunctions):
+- (or (= x 0) (= x 1)) means x = 0 or x = 1
+- (or (>= y 100) (<= y 0)) means y >= 100 or y <= 0
+- (or (and (= phase 1) (= x y)) (and (= phase 2) (= x (* y 2)))) means (phase=1 ∧ x=y) ∨ (phase=2 ∧ x=2*y)
+- (or (= status 0) (= status 1) (= status 2)) means status ∈ {0,1,2}
+- (or (> (+ x y) 100) (< (- x y) 0)) means x+y > 100 or x-y < 0
+
+INCORRECT EXAMPLES (do NOT use these):
+- (x = 0) or (x = 1) - wrong: not properly parenthesized
+- x = 0 or x = 1 - wrong: not parenthesized
+- (x >= 0) ∨ (x <= 100) - wrong: not prefix notation
+
+Focus on disjunctive patterns:
+1. State alternatives: different possible states of the system
+2. Value alternatives: variables can take specific alternative values
+3. Phase alternatives: different phases with different constraints
+4. Boundary alternatives: different behaviors at different boundaries
+5. Mode alternatives: different operational modes of the system
+6. Case alternatives: different cases that represent valid invariant states
+
+Each lemma should be on a separate line in prefix notation ONLY. Do not include any explanations or natural language - just the prefix notation expressions.</content>
+<parameter name="filePath">/home/daniel/Projects/aeval/include/deep/prompts/disjunctive_template.txt

@@ -14,6 +14,8 @@
 #include <unistd.h>
 #include <limits.h>
 #include <functional>
+#include <algorithm>
+#include <boost/lexical_cast.hpp>
 
 // Include expr headers for full functionality
 #include "ufo/Expr.hpp"
@@ -24,6 +26,7 @@ private:
     std::string model_;
     std::string url_ = "http://localhost:1234/v1/chat/completions";
     int printLog = 0;
+    expr::ExprSet previousGeneratedLemmas_;
 
 public:
     // Constructor
@@ -36,7 +39,7 @@ public:
         char exePath[PATH_MAX];
         ssize_t len = readlink("/proc/self/exe", exePath, sizeof(exePath) - 1);
         if (len == -1) {
-            if(printLog >= 2) std::cerr << "Failed to get executable path" << std::endl;
+            if(printLog >= 2) outs() << "Failed to get executable path" << std::endl;
             return "";
         }
         exePath[len] = '\0';
@@ -55,7 +58,7 @@ public:
             if (slash != std::string::npos) {
                 exeDir = exeDir.substr(0, slash);
             } else {
-                if(printLog >= 2) std::cerr << "Failed to navigate to project root" << std::endl;
+                if(printLog >= 2) outs() << "Failed to navigate to project root" << std::endl;
                 return "";
             }
         }
@@ -112,7 +115,7 @@ public:
 
     // Send the HTTP request and return the raw response
     std::string sendRequest(const std::string& json_body) {
-        if(printLog >= 2) std::cerr << "Sending JSON: " << json_body << std::endl;
+        if(printLog >= 2) outs() << "Sending JSON: " << json_body << std::endl;
         CURL *curl = curl_easy_init();
         std::string response;
         if (curl) {
@@ -127,15 +130,15 @@ public:
 
             CURLcode res = curl_easy_perform(curl);
             if (res != CURLE_OK) {
-                if(printLog >= 2) std::cerr << "curl_easy_perform() failed: " << curl_easy_strerror(res) << std::endl;
+                if(printLog >= 2) outs() << "curl_easy_perform() failed: " << curl_easy_strerror(res) << std::endl;
                 response.clear();
             } else {
                 long http_code = 0;
                 curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &http_code);
-                if(printLog >= 2) std::cerr << "HTTP response code: " << http_code << std::endl;
+                if(printLog >= 2) outs() << "HTTP response code: " << http_code << std::endl;
                 if (http_code != 200) {
-                    std::cerr << "HTTP error: " << http_code << std::endl;
-                    std::cerr << "Response body: " << response << std::endl;
+                    outs() << "HTTP error: " << http_code << std::endl;
+                    outs() << "Response body: " << response << std::endl;
                     response.clear();
                 }
             }
@@ -154,13 +157,13 @@ public:
 
         size_t key_pos = raw_response.find("\"content\"");
         if (key_pos == std::string::npos) {
-            if(printLog >= 2) std::cerr << "Failed to find content key in response." << std::endl;
+            if(printLog >= 2) outs() << "Failed to find content key in response." << std::endl;
             return "";
         }
 
         size_t colon_pos = raw_response.find(":", key_pos + 9); // After "\"content\""
         if (colon_pos == std::string::npos) {
-            if(printLog >= 2) std::cerr << "Failed to find colon after content key." << std::endl;
+            if(printLog >= 2) outs() << "Failed to find colon after content key." << std::endl;
             return "";
         }
 
@@ -170,7 +173,7 @@ public:
             ++value_start;
         }
         if (value_start >= raw_response.size() || raw_response[value_start] != '"') {
-            if(printLog >= 2) std::cerr << "Failed to find start of content value." << std::endl;
+            if(printLog >= 2) outs() << "Failed to find start of content value." << std::endl;
             return "";
         }
 
@@ -190,7 +193,7 @@ public:
             ++content_end;
         }
         if (content_end >= raw_response.size() || raw_response[content_end] != '"') {
-            if(printLog >= 2) std::cerr << "Failed to find end of content." << std::endl;
+            if(printLog >= 2) outs() << "Failed to find end of content." << std::endl;
             return "";
         }
 
@@ -231,13 +234,13 @@ public:
     std::string loadTemplate(const std::string& templateName) {
         std::string projectRoot = getProjectRoot();
         if (projectRoot.empty()) {
-            if(printLog >= 2) std::cerr << "Failed to determine project root directory" << std::endl;
+            if(printLog >= 2) outs() << "Failed to determine project root directory" << std::endl;
             return "";
         }
                 std::string templatePath = projectRoot + "/include/deep/prompts/" + templateName + ".txt";
         std::ifstream file(templatePath);
         if (!file.is_open()) {
-            if(printLog >= 2) std::cerr << "Failed to open template file: " << templatePath << std::endl;
+            if(printLog >= 2) outs() << "Failed to open template file: " << templatePath << std::endl;
             return "";
         }
         std::string content((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
@@ -248,7 +251,9 @@ public:
     // Fill in template placeholders with system information
     std::string fillTemplate(const std::string& templateContent,
                            const std::string& systemInfo,
-                           const std::string& variables) {
+                           const std::string& variables,
+                           const std::string& previousLemmas,
+                           const std::string& previousResponse) {
         std::string filled = templateContent;
         size_t pos;
 
@@ -264,18 +269,32 @@ public:
             filled.replace(pos, 11, variables);
         }
 
+        // Replace {PREVIOUS_LEMMAS}
+        pos = filled.find("{PREVIOUS_LEMMAS}");
+        if (pos != std::string::npos) {
+            filled.replace(pos, 17, previousLemmas);
+        }
+
+        // Replace {PREVIOUS_RESPONSE}
+        pos = filled.find("{PREVIOUS_RESPONSE}");
+        if (pos != std::string::npos) {
+            filled.replace(pos, 19, previousResponse);
+        }
+
         return filled;
     }
 
     // Load template and fill it in one step
     std::string preparePrompt(const std::string& templateName,
                             const std::string& systemInfo,
-                            const std::string& variables) {
+                            const std::string& variables,
+                            const std::string& previousLemmas,
+                            const std::string& previousResponse) {
         std::string templateContent = loadTemplate(templateName);
         if (templateContent.empty()) {
             return "";
         }
-        return fillTemplate(templateContent, systemInfo, variables);
+        return fillTemplate(templateContent, systemInfo, variables, previousLemmas, previousResponse);
     }
 
     // Extract system information from CHCs for prompt
@@ -324,63 +343,96 @@ public:
             ss << "\nNote: Variables are named with _FH_ prefix (e.g., _FH_0, _FH_1, etc.)\n";
         }
 
+        ss << "\nUse only the variable names listed above when forming lemmas. Do not introduce any new variables.\n";
+
         return ss.str();
     }
 
-    // Parse a prefix-form lemma string and convert to Expr
-    expr::Expr parseLemmaToExpr(const std::string& lemmaStr, const ufo::CHCs& chcs) {
-        if(printLog >= 2) std::cerr << "Parsing lemma response: " << lemmaStr << std::endl;
-
-        if (lemmaStr.empty()) return expr::Expr();
+    // Parse a prefix-form lemma string and convert to multiple Expr objects
+    std::vector<expr::Expr> parseLemmasToExprs(const std::string& lemmaStr, const ufo::CHCs& chcs) {
+        std::vector<expr::Expr> results;
+        if (lemmaStr.empty()) {
+            return results;
+        }
 
         // Split the response into individual lines
         std::vector<std::string> lines;
         std::stringstream ss(lemmaStr);
         std::string line;
         while (std::getline(ss, line)) {
-            // Trim whitespace
             line.erase(line.begin(), std::find_if(line.begin(), line.end(), [](unsigned char ch) {
                 return !std::isspace(ch);
             }));
             line.erase(std::find_if(line.rbegin(), line.rend(), [](unsigned char ch) {
                 return !std::isspace(ch);
             }).base(), line.end());
-            
+
             if (!line.empty()) {
                 lines.push_back(line);
             }
         }
 
-        // For now, return a simple working expression instead of parsing LLM response
-        // TODO: Fix the marshalling issue with parsed expressions
-        if (!chcs.invVars.empty()) {
-            auto& invVars = chcs.invVars.begin()->second;  // Get variables for the first relation
-            if (invVars.size() >= 3) {  // Make sure we have at least 3 variables like _FH_2
-                return expr::mk<expr::op::GEQ>(invVars[2], expr::mkTerm<mpz_class>(0, chcs.m_efac));
-            }
-        }
-        
-        // Fallback: try to parse as before
         // Create a map from variable names to Expr objects
         std::map<std::string, expr::Expr> varMap;
-        
-        // Add variables with _FH_ prefix mapping
         for (const auto& pair : chcs.invVars) {
             for (size_t i = 0; i < pair.second.size(); ++i) {
                 std::string fhName = "_FH_" + std::to_string(i);
                 varMap[fhName] = pair.second[i];
+
+                std::string originalName;
+                try {
+                    originalName = boost::lexical_cast<std::string>(pair.second[i]);
+                } catch (...) {
+                    originalName.clear();
+                }
+
+                if (!originalName.empty()) {
+                    auto trim = [](std::string& s) {
+                        s.erase(s.begin(), std::find_if(s.begin(), s.end(), [](unsigned char ch) { return !std::isspace(ch); }));
+                        s.erase(std::find_if(s.rbegin(), s.rend(), [](unsigned char ch) { return !std::isspace(ch); }).base(), s.end());
+                    };
+
+                    trim(originalName);
+                    if (!originalName.empty() && originalName.front() == '|' && originalName.back() == '|') {
+                        originalName = originalName.substr(1, originalName.size() - 2);
+                        trim(originalName);
+                    }
+
+                    if (!originalName.empty() && originalName.find_first_of(" ()") == std::string::npos) {
+                        varMap[originalName] = pair.second[i];
+                    }
+                }
             }
         }
 
-        // Try to parse each line as a lemma expression
         for (const auto& singleLemma : lines) {
             expr::Expr result = parseParenthesizedExpression(singleLemma, chcs.m_efac, varMap);
             if (result) {
-                return result;  // Return the first successfully parsed expression
+                results.push_back(result);
             }
         }
 
-        if(printLog >= 2) std::cerr << "Failed to parse any valid lemma from response" << std::endl;
+        return results;
+    }
+
+    // Parse a prefix-form lemma string and convert to Expr
+    expr::Expr parseLemmaToExpr(const std::string& lemmaStr, const ufo::CHCs& chcs) {
+        if(printLog >= 2) outs() << "Parsing lemma response: " << lemmaStr << std::endl;
+
+        auto results = parseLemmasToExprs(lemmaStr, chcs);
+        if (!results.empty()) {
+            return results.front();
+        }
+
+        if(printLog >= 2) outs() << "Failed to parse any valid lemma from response" << std::endl;
+
+        if (!chcs.invVars.empty()) {
+            auto& invVars = chcs.invVars.begin()->second;
+            if (!invVars.empty()) {
+                return expr::mk<expr::op::GEQ>(invVars[0], expr::mkTerm<mpz_class>(0, chcs.m_efac));
+            }
+        }
+
         return expr::Expr();
     }
 
@@ -394,41 +446,89 @@ public:
             clean = clean.substr(1, clean.size() - 2);
         }
 
-        // Handle complex expressions by finding the operator
-        size_t opEnd = clean.find_first_of(" _FH_0123456789");
-        if (opEnd == std::string::npos) {
-            if(printLog >= 2) std::cerr << "No operator found in: " << clean << std::endl;
+        auto trim = [](std::string& s) {
+            s.erase(s.begin(), std::find_if(s.begin(), s.end(), [](unsigned char ch) { return !std::isspace(ch); }));
+            s.erase(std::find_if(s.rbegin(), s.rend(), [](unsigned char ch) { return !std::isspace(ch); }).base(), s.end());
+        };
+
+        trim(clean);
+        if (clean.empty()) {
+            if(printLog >= 2) outs() << "Cannot parse empty expression" << std::endl;
             return expr::Expr();
         }
 
-        std::string op = clean.substr(0, opEnd);
-        std::string rest = clean.substr(opEnd);
+        std::string op;
+        std::string rest;
 
-        // Handle different operators
-        if (op == ">=") {
-            return parseBinaryOp(rest, efac, [](expr::Expr a, expr::Expr b) { return expr::mk<expr::op::GEQ>(a, b); }, varMap);
-        } else if (op == "<=") {
-            return parseBinaryOp(rest, efac, [](expr::Expr a, expr::Expr b) { return expr::mk<expr::op::LEQ>(a, b); }, varMap);
-        } else if (op == ">") {
-            return parseBinaryOp(rest, efac, [](expr::Expr a, expr::Expr b) { return expr::mk<expr::op::GT>(a, b); }, varMap);
-        } else if (op == "<") {
-            return parseBinaryOp(rest, efac, [](expr::Expr a, expr::Expr b) { return expr::mk<expr::op::LT>(a, b); }, varMap);
-        } else if (op == "=") {
-            return parseBinaryOp(rest, efac, [](expr::Expr a, expr::Expr b) { return expr::mk<expr::op::EQ>(a, b); }, varMap);
-        } else if (op == "+") {
-            return parseBinaryOp(rest, efac, [](expr::Expr a, expr::Expr b) { return expr::mk<expr::op::PLUS>(a, b); }, varMap);
-        } else if (op == "-") {
-            return parseBinaryOp(rest, efac, [](expr::Expr a, expr::Expr b) { return expr::mk<expr::op::MINUS>(a, b); }, varMap);
-        } else if (op == "*") {
-            return parseBinaryOp(rest, efac, [](expr::Expr a, expr::Expr b) { return expr::mk<expr::op::MULT>(a, b); }, varMap);
+        size_t firstSpace = clean.find(' ');
+        if (firstSpace != std::string::npos) {
+            op = clean.substr(0, firstSpace);
+            rest = clean.substr(firstSpace + 1);
+            trim(rest);
         } else {
-            if(printLog >= 2) std::cerr << "Unknown operator: " << op << std::endl;
+            static const std::vector<std::string> infixOps = {">=", "<=", "==", "!=", ">", "<", "="};
+            size_t foundPos = std::string::npos;
+            std::string foundOp;
+            for (const auto& candidate : infixOps) {
+                size_t pos = clean.find(candidate);
+                if (pos != std::string::npos) {
+                    foundPos = pos;
+                    foundOp = candidate;
+                    break;
+                }
+            }
+
+            if (foundPos == std::string::npos) {
+                if(printLog >= 2) outs() << "No operator found in: " << clean << std::endl;
+                return expr::Expr();
+            }
+
+            op = foundOp;
+            std::string lhs = clean.substr(0, foundPos);
+            std::string rhs = clean.substr(foundPos + foundOp.size());
+            trim(lhs);
+            trim(rhs);
+            rest = lhs + " " + rhs;
+        }
+
+        if (op == ">=") {
+            return parseBinaryOp(op, rest, efac, [](expr::Expr a, expr::Expr b) { return expr::mk<expr::op::GEQ>(a, b); }, varMap);
+        } else if (op == "<=") {
+            return parseBinaryOp(op, rest, efac, [](expr::Expr a, expr::Expr b) { return expr::mk<expr::op::LEQ>(a, b); }, varMap);
+        } else if (op == ">") {
+            return parseBinaryOp(op, rest, efac, [](expr::Expr a, expr::Expr b) { return expr::mk<expr::op::GT>(a, b); }, varMap);
+        } else if (op == "<") {
+            return parseBinaryOp(op, rest, efac, [](expr::Expr a, expr::Expr b) { return expr::mk<expr::op::LT>(a, b); }, varMap);
+        } else if (op == "=" || op == "==") {
+            return parseBinaryOp(op, rest, efac, [](expr::Expr a, expr::Expr b) { return expr::mk<expr::op::EQ>(a, b); }, varMap);
+        } else if (op == "!=") {
+            return parseBinaryOp(op, rest, efac, [](expr::Expr a, expr::Expr b) { return expr::mk<expr::op::NEQ>(a, b); }, varMap);
+        } else if (op == "+") {
+            return parseBinaryOp(op, rest, efac, [](expr::Expr a, expr::Expr b) { return expr::mk<expr::op::PLUS>(a, b); }, varMap);
+        } else if (op == "-") {
+            return parseBinaryOp(op, rest, efac, [](expr::Expr a, expr::Expr b) { return expr::mk<expr::op::MINUS>(a, b); }, varMap);
+        } else if (op == "*") {
+            return parseBinaryOp(op, rest, efac, [](expr::Expr a, expr::Expr b) { return expr::mk<expr::op::MULT>(a, b); }, varMap);
+        } else if (op == "=>" || op == "implies") {
+            return parseBinaryOp(op, rest, efac, [](expr::Expr a, expr::Expr b) { return expr::mk<expr::op::IMPL>(a, b); }, varMap);
+        } else if (op == "and") {
+            return parseBinaryOp(op, rest, efac, [](expr::Expr a, expr::Expr b) { return expr::mk<expr::op::AND>(a, b); }, varMap);
+        } else if (op == "or") {
+            return parseBinaryOp(op, rest, efac, [](expr::Expr a, expr::Expr b) { return expr::mk<expr::op::OR>(a, b); }, varMap);
+        } else if (op == "not") {
+            expr::Expr arg = parseOperand(rest, efac, varMap);
+            if (arg) {
+                return expr::mk<expr::op::NEG>(arg);
+            }
+            return expr::Expr();
+        } else {
+            if(printLog >= 2) outs() << "Unknown operator: " << op << std::endl;
             return expr::Expr();
         }
     }
 
     // Parse binary operations from the rest of the expression
-    expr::Expr parseBinaryOp(const std::string& rest, expr::ExprFactory& efac,
+    expr::Expr parseBinaryOp(const std::string& opName, const std::string& rest, expr::ExprFactory& efac,
                             std::function<expr::Expr(expr::Expr, expr::Expr)> opFunc,
                             const std::map<std::string, expr::Expr>& varMap) {
         // Find the two operands
@@ -459,18 +559,36 @@ public:
         }
 
         if (operands.size() != 2) {
-            if(printLog >= 2) std::cerr << "Expected 2 operands, got " << operands.size() << std::endl;
+            if(printLog >= 2) outs() << "Expected 2 operands, got " << operands.size() << std::endl;
             return expr::Expr();
         }
 
         auto lhs = parseOperand(operands[0], efac, varMap);
         auto rhs = parseOperand(operands[1], efac, varMap);
 
-        if (lhs && rhs) {
-            return opFunc(lhs, rhs);
+        if (!lhs || !rhs) {
+            return expr::Expr();
         }
 
-        return expr::Expr();
+        auto isBoolLiteral = [](const expr::Expr& e) {
+            return expr::isOpX<expr::op::TRUE>(e) || expr::isOpX<expr::op::FALSE>(e);
+        };
+
+        bool lhsBool = isBoolLiteral(lhs);
+        bool rhsBool = isBoolLiteral(rhs);
+
+        if ((opName == ">=" || opName == ">" || opName == "<=" || opName == "<" ||
+             opName == "+" || opName == "-" || opName == "*") && (lhsBool || rhsBool)) {
+            if(printLog >= 2) outs() << "Boolean operand not allowed for operator " << opName << std::endl;
+            return expr::Expr();
+        }
+
+        if ((opName == "=" || opName == "==" || opName == "!=") && (lhsBool != rhsBool)) {
+            if(printLog >= 2) outs() << "Mismatched operand types for operator " << opName << std::endl;
+            return expr::Expr();
+        }
+
+        return opFunc(lhs, rhs);
     }
 
     // Parse individual operands (variables, numbers, or subexpressions)
@@ -493,18 +611,38 @@ public:
             return parseParenthesizedExpression(clean, efac, varMap);
         }
 
+        if (clean == "true") {
+            return expr::mk<expr::op::TRUE>(efac);
+        }
+        if (clean == "false") {
+            return expr::mk<expr::op::FALSE>(efac);
+        }
+
         // Check if it's a variable (look it up in varMap)
         auto varIt = varMap.find(clean);
         if (varIt != varMap.end()) {
             return varIt->second;
         }
 
-        // Try to parse as integer
+        auto isIdentifier = [](const std::string& name) {
+            if (name.empty()) return false;
+            unsigned char first = static_cast<unsigned char>(name[0]);
+            if (!(std::isalpha(first) || first == '_')) return false;
+            return std::all_of(name.begin() + 1, name.end(), [](unsigned char ch) {
+                return std::isalnum(ch) || ch == '_' || ch == '\'';
+            });
+        };
+
+        // Try to parse as integer literal
         try {
             int val = std::stoi(clean);
             return expr::mkTerm<mpz_class>(val, efac);
         } catch (...) {
-            if(printLog >= 2) std::cerr << "Failed to parse operand: " << clean << std::endl;
+            if (isIdentifier(clean)) {
+                if(printLog >= 2) outs() << "Rejected lemma containing unknown variable: " << clean << std::endl;
+            } else if(printLog >= 2) {
+                outs() << "Failed to parse operand: " << clean << std::endl;
+            }
             return expr::Expr();
         }
     }
@@ -516,9 +654,11 @@ public:
         return parseResponse(raw_response);
     }
 
-    // Generate a candidate lemma using LLM based on CHCs and learned lemmas
-    expr::Expr generateLemma(const ufo::CHCs& chcs, const expr::ExprSet& learnedLemmas,
-                           const std::string& templateName = "basic_template") {
+    // Generate multiple lemmas using the LLM
+    std::vector<expr::Expr> generateLemmas(const ufo::CHCs& chcs,
+                                          const expr::ExprSet& learnedLemmas,
+                                          const expr::ExprSet& previousLemmas,
+                                          const std::string& templateName = "basic_template") {
         // Extract system information
         std::string systemInfo = extractSystemInfo(chcs);
         std::string variablesInfo = extractVariablesInfo(chcs);
@@ -528,9 +668,13 @@ public:
             std::stringstream ss;
             ss << systemInfo << "\nExisting learned lemmas:\n";
             size_t count = 0;
+            size_t totalLearned = learnedLemmas.size();
             for (const auto& lemma : learnedLemmas) {
                 if (count >= 5) { // Limit to 5 lemmas for brevity
-                    ss << "  ... and " << (learnedLemmas.size() - 5) << " more\n";
+                    size_t remaining = totalLearned > 5 ? (totalLearned - 5) : 0;
+                    if (remaining > 0) {
+                        ss << "  ... and " << remaining << " more\n";
+                    }
                     break;
                 }
                 ss << "  " << lemma << "\n";
@@ -539,23 +683,115 @@ public:
             systemInfo = ss.str();
         }
 
-        // Prepare the prompt
-        std::string prompt = preparePrompt(templateName, systemInfo, variablesInfo);
-        if (prompt.empty()) {
-            if(printLog >= 2) std::cerr << "Failed to prepare prompt" << std::endl;
-            return expr::Expr();
+        auto appendLemmaSet = [](const expr::ExprSet& lemmas, const std::string& header) {
+            std::stringstream ss;
+            if (lemmas.empty()) {
+                return std::string();
+            }
+
+            ss << header << "\n";
+            size_t count = 0;
+            size_t total = lemmas.size();
+            for (const auto& lemma : lemmas) {
+                if (count >= 5) {
+                    size_t remaining = total > 5 ? (total - 5) : 0;
+                    if (remaining > 0) {
+                        ss << "  ... and " << remaining << " more\n";
+                    }
+                    break;
+                }
+                ss << "  " << lemma << "\n";
+                ++count;
+            }
+            ss << "\n";
+            return ss.str();
+        };
+
+        std::stringstream previousSection;
+        previousSection << appendLemmaSet(previousLemmas, "Previously accepted lemmas:");
+        previousSection << appendLemmaSet(previousGeneratedLemmas_, "Recent LLM lemmas:");
+
+        std::string previousStr = previousSection.str();
+        if (previousStr.empty()) {
+            previousStr = "No previous lemmas provided.\n";
         }
 
-        // Get LLM response
-        std::string response = synthesize(prompt);
-        if (response.empty()) {
-            if(printLog >= 2) std::cerr << "Empty response from LLM" << std::endl;
-            return expr::Expr();
+        bool allowRetry = false;
+        std::string retryContext;
+
+        for (int attempt = 0; attempt < 2; ++attempt) {
+            bool isRetry = (attempt == 1);
+            if (isRetry && !allowRetry) {
+                break;
+            }
+
+            std::string currentTemplate = isRetry ? "retry_template" : templateName;
+            std::string prompt = preparePrompt(currentTemplate, systemInfo, variablesInfo, previousStr,
+                                               isRetry ? retryContext : "");
+            if (prompt.empty()) {
+                if(printLog >= 2) outs() << "Failed to prepare " << currentTemplate << " prompt" << std::endl;
+                break;
+            }
+
+            std::string response = synthesize(prompt);
+            if (response.empty()) {
+                if(printLog >= 2) outs() << "Empty response from LLM" << std::endl;
+                if (!isRetry) {
+                    allowRetry = true;
+                    retryContext = "Previous response was empty. Please return valid lemmas.\n";
+                    if(printLog >= 2) outs() << "Retrying with mitigation prompt" << std::endl;
+                    continue;
+                }
+                break;
+            }
+
+            if(printLog >= 2) outs() << "LLM raw response: " << response << std::endl;
+
+            std::vector<expr::Expr> lemmas = parseLemmasToExprs(response, chcs);
+            std::vector<expr::Expr> uniqueLemmas;
+            expr::ExprSet seenCurrentResponse;
+            for (const auto& lemma : lemmas) {
+                if (!lemma) {
+                    continue;
+                }
+
+                if (learnedLemmas.count(lemma) || previousLemmas.count(lemma) || previousGeneratedLemmas_.count(lemma) ||
+                    seenCurrentResponse.count(lemma)) {
+                    if (printLog >= 2) {
+                        outs() << "Skipping duplicate lemma: " << lemma << std::endl;
+                    }
+                    continue;
+                }
+
+                seenCurrentResponse.insert(lemma);
+                uniqueLemmas.push_back(lemma);
+            }
+
+            if (!uniqueLemmas.empty()) {
+                return uniqueLemmas;
+            }
+
+            if (!isRetry) {
+                allowRetry = true;
+                retryContext = "Previous response was malformed or unusable:\n" + response + "\n";
+                if(printLog >= 2) outs() << "Response produced no usable lemmas; retrying with mitigation prompt" << std::endl;
+                continue;
+            }
+
+            if(printLog >= 2) outs() << "Retry response still produced no usable lemmas" << std::endl;
+            break;
         }
 
-        if(printLog >= 2) std::cerr << "LLM raw response: " << response << std::endl;
-        // Parse the response as a lemma
-        return parseLemmaToExpr(response, chcs);
+        if (printLog >= 2) outs() << "No new lemmas generated after retry attempts" << std::endl;
+        return {};
+    }
+
+    // Generate a candidate lemma using LLM based on CHCs and learned lemmas
+    expr::Expr generateLemma(const ufo::CHCs& chcs, const expr::ExprSet& learnedLemmas,
+                           const std::string& templateName = "basic_template") {
+        expr::ExprSet emptyPrevious;
+        auto lemmas = generateLemmas(chcs, learnedLemmas, emptyPrevious, templateName);
+        return lemmas.empty() ? expr::Expr() : lemmas.front();
     }
 
     // Generate multiple lemma candidates using different templates
@@ -563,14 +799,19 @@ public:
                                                    const std::vector<std::string>& templates = {"basic_template", "constraint_focused_template"}) {
         std::vector<expr::Expr> candidates;
 
+        expr::ExprSet emptyPrevious;
         for (const auto& templateName : templates) {
-            expr::Expr lemma = generateLemma(chcs, learnedLemmas, templateName);
-            if (lemma) {
-                candidates.push_back(lemma);
-            }
+            auto lemmas = generateLemmas(chcs, learnedLemmas, emptyPrevious, templateName);
+            candidates.insert(candidates.end(), lemmas.begin(), lemmas.end());
         }
 
         return candidates;
+    }
+
+    void recordSampledLemma(const expr::Expr& lemma) {
+        if (lemma) {
+            previousGeneratedLemmas_.insert(lemma);
+        }
     }
 };
 

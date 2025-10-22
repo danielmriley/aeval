@@ -1,6 +1,8 @@
 #ifndef RNDLEARNERV4__HPP__
 #define RNDLEARNERV4__HPP__
 
+#include <string>
+
 #include "RndLearnerV3.hpp"
 #include "LlmSynthesizer.hpp"
 
@@ -25,19 +27,25 @@ namespace ufo
     map<int, ExprSet> mbps;
     map<int, ExprTree> mbpDt, strenDt;
 
-    map<int, ExprSet> allDataCands;
-    map<int, deque<Expr>> deferredCandidates;
+  map<int, ExprSet> allDataCands;
+  map<int, deque<Expr>> deferredCandidates;
+  map<int, ExprSet> pendingLlmCandidates_;
+
+  string llmModel_;
+    LlmSynthesizer* llm_ = nullptr;
+    int templateCycleCounter_ = 0;
 
     public:
 
     RndLearnerV4 (ExprFactory &_e, EZ3 &_z3, CHCs& _r, unsigned _to, bool _freqs,
                   bool _aggp, int _mu, int _da, bool _d, int _m, bool _dAllMbp,
                   bool _dAddProp, bool _dAddDat, bool _dStrenMbp, int _dFwd,
-                  bool _dR, bool _dG, int _debug) :
+          bool _dR, bool _dG, int _debug, const string& llmModel) :
       RndLearnerV3 (_e, _z3, _r, _to, _freqs, _aggp, _mu, _da, _debug),
                   dDisj(_d), mbpEqs(_m), dAllMbp(_dAllMbp),
                   dAddProp(_dAddProp), dAddDat(_dAddDat), dStrenMbp(_dStrenMbp),
-                  dFwd(_dFwd), dRecycleCands(_dR), dGenerous(_dG) {}
+          dFwd(_dFwd), dRecycleCands(_dR), dGenerous(_dG),
+          llmModel_(llmModel.empty() ? string("gemma-3-1b-it-qat") : llmModel) {}
 
     bool simplLemmas() { return !dDisj; }
 
@@ -584,8 +592,23 @@ namespace ufo
 
         if(true)
         {
-          cand = generateLlmLemma(invNum);
-          outs() << "LLM Synthesized candidate: " << cand << "\n";
+          auto llmCandidates = generateLlmLemmas(invNum);
+          if (!llmCandidates.empty()) {
+            for (const auto& lemma : llmCandidates) {
+              pendingLlmCandidates_[invNum].insert(lemma);
+            }
+            // Add all LLM candidates to deferred candidates for processing
+            for (auto it = llmCandidates.rbegin(); it != llmCandidates.rend(); ++it) {
+              deferredCandidates[invNum].push_back(*it);
+              if (printLog >= 3) outs() << "LLM Synthesized candidate: " << *it << "\n";
+            }
+            // Use the first one for immediate processing
+            cand = llmCandidates[0];
+            outs() << "LLM Synthesized candidate: " << cand << "\n";
+          } else {
+            cand = NULL;
+            if (printLog >= 2) outs() << "  LLM returned no candidates\n";
+          }
         }
         else if (deferredCandidates[invNum].empty())
         {
@@ -597,11 +620,18 @@ namespace ufo
           cand = deferredCandidates[invNum].back();
           deferredCandidates[invNum].pop_back();
         }
+
         if (cand != NULL && isOpX<FORALL>(cand) && isOpX<IMPL>(cand->last()))
         {
           if (!u.isSat(cand->last()->left())) cand = NULL;
         }
-        if (cand == NULL) continue;
+
+        if (cand == NULL)
+        {
+          if (printLog >= 2) outs() << "  cand is NULL\n";
+          continue;
+        } 
+
         if (printLog >= 3 && dRecycleCands)
           outs () << "Number of deferred candidates: "
                   << deferredCandidates[invNum].size() << "\n";
@@ -609,7 +639,21 @@ namespace ufo
           outs () << " - - - Sampled cand (#" << i << ") for "
                   << decls[invNum] << ": "
                   << cand << (printLog >= 3 ? " 😎\n" : "\n");
-        if (!addCandidate(invNum, cand)) continue;
+        if (!addCandidate(invNum, cand))
+        {
+          if (printLog) outs () << "    Failed addCandidate\n";
+          continue;
+        } 
+
+        auto pendingIt = pendingLlmCandidates_.find(invNum);
+        if (pendingIt != pendingLlmCandidates_.end())
+        {
+          if (pendingIt->second.erase(cand) > 0 && llm_)
+          {
+            llm_->recordSampledLemma(cand);
+          }
+          if (pendingIt->second.empty()) pendingLlmCandidates_.erase(pendingIt);
+        }
 
         bool lemma_found = checkCand(invNum);
         if (dDisj && (isOp<ComparissonOp>(cand) || isOpX<FORALL>(cand)))
@@ -968,7 +1012,7 @@ namespace ufo
     }
 
     // Method to generate a new lemma using LLM based on current learned lemmas for a specific invariant and CHC system
-    Expr generateLlmLemma(int invNum) {
+    std::vector<Expr> generateLlmLemmas(int invNum) {
       ExprSet learnedLemmas;
       // Collect learned expressions from the SamplFactory for this specific invariant
       if (invNum >= 0 && invNum < (int)sfs.size()) {
@@ -979,9 +1023,46 @@ namespace ufo
         }
       }
       
-      // Create LlmSynthesizer instance and generate new lemma
-      LlmSynthesizer llm("gemma-3-1b-it-qat", printLog);
-      return llm.generateLemma(ruleManager, learnedLemmas);
+      // Create LlmSynthesizer instance if not exists
+      if (!llm_) {
+        llm_ = new LlmSynthesizer(llmModel_, printLog);
+      }
+
+      // Cycle through different prompt templates every few iterations
+      std::vector<std::string> templates = {
+        "basic_template",
+        "implication_template", 
+        "arithmetic_relationships_template",
+        "disjunctive_template",
+        "array_relationships_template"
+      };
+      
+      // Cycle through templates: use basic_template for first few calls, then rotate
+      int templateIndex = templateCycleCounter_ / 3; // Change template every 3 calls
+      templateIndex = templateIndex % templates.size();
+      std::string selectedTemplate = templates[templateIndex];
+      
+      templateCycleCounter_++; // Increment counter for next call
+      
+      if (printLog >= 3) {
+        outs() << "Using LLM template: " << selectedTemplate << " (cycle: " << templateCycleCounter_ << ")" << std::endl;
+      }
+      
+      expr::ExprSet emptyPrevious;
+      return llm_->generateLemmas(ruleManager, learnedLemmas, emptyPrevious, selectedTemplate);
+    }
+
+    // For backward compatibility
+    Expr generateLlmLemma(int invNum) {
+      auto lemmas = generateLlmLemmas(invNum);
+      return lemmas.empty() ? Expr() : lemmas[0];
+    }
+
+    ~RndLearnerV4() {
+      if (llm_) {
+        delete llm_;
+        llm_ = nullptr;
+      }
     }
   };
 
@@ -990,7 +1071,7 @@ namespace ufo
        bool freqs, bool aggp, int dat, int mut, bool doElim, bool doArithm,
        bool doDisj, int doProp, int mbpEqs, bool dAllMbp, bool dAddProp,
        bool dAddDat, bool dStrenMbp, int dFwd, bool dRec, bool dGenerous,
-       bool dSee, bool ser, int debug)
+    bool dSee, bool ser, int debug, const string& llmModel)
   {
     ExprFactory m_efac;
     EZ3 z3(m_efac);
@@ -1015,9 +1096,9 @@ namespace ufo
     if (!ruleManager.hasCycles())
       return (void)bnd.exploreTraces(1, ruleManager.chcs.size(), true);
 
-    RndLearnerV4 ds(m_efac, z3, ruleManager, to, freqs, aggp, mut, dat,
-                    doDisj, mbpEqs, dAllMbp, dAddProp, dAddDat, dStrenMbp,
-                    dFwd, dRec, dGenerous, debug);
+  RndLearnerV4 ds(m_efac, z3, ruleManager, to, freqs, aggp, mut, dat,
+          doDisj, mbpEqs, dAllMbp, dAddProp, dAddDat, dStrenMbp,
+          dFwd, dRec, dGenerous, debug, llmModel);
 
     map<Expr, ExprSet> cands;
     for (auto& cyc : ruleManager.cycles)

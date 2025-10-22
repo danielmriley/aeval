@@ -82,6 +82,7 @@ int main (int argc, char ** argv)
   const char *OPT_REC = "--re";
   const char *OPT_MBP = "--eqs-mbp";
   const char *OPT_SER = "--serialize";
+  const char *OPT_LLM = "--llm";
   const char *OPT_DEBUG = "--debug";
 
   if (getBoolValue(OPT_HELP, false, argc, argv) || argc == 1){
@@ -103,7 +104,8 @@ int main (int argc, char ** argv)
         " " << OPT_ARITHM << "                   do not apply arithmetic constant propagation during parsing\n" <<
         " " << OPT_TO << "                            timeout for each Z3 run in ms (default: 1000)\n" <<
         " " << OPT_SER << "                     serialize the intermediate CHC representation to `chc.smt2` (and exit)\n" <<
-        " " << OPT_DEBUG << " <LVL>                   print debugging information during run (default level: 0)\n\n" <<
+  " " << OPT_DEBUG << " <LVL>                   print debugging information during run (default level: 0)\n" <<
+  " " << OPT_LLM << " <MODEL>                  choose LLM model for lemma synthesis (default: gemma-3-1b-it-qat)\n\n" <<
         "V1 options only:\n" <<
         " " << OPT_ADD_EPSILON << "                           add small probabilities to features that never happen in the code\n" <<
         " " << OPT_K_IND << "                          run k-induction after each learned lemma\n\n" <<
@@ -171,6 +173,8 @@ int main (int argc, char ** argv)
   bool d_r = getBoolValue(OPT_REC, false, argc, argv);
   bool d_ser = getBoolValue(OPT_SER, false, argc, argv);
   int debug = getIntValue(OPT_DEBUG, 0, argc, argv);
+  char * llm_model_arg = getStrValue(OPT_LLM, (char *)"gemma-3-1b-it-qat", argc, argv);
+  string llm_model = llm_model_arg ? string(llm_model_arg) : string("gemma-3-1b-it-qat");
 
   if (d_m || d_p || d_d || d_s) do_disj = true;
   if (do_disj)
@@ -192,9 +196,9 @@ int main (int argc, char ** argv)
   }
 
   if (vers4)      // MBP-based, path-sensitive algorithms
-    learnInvariants4(string(argv[argc-1]), max_attempts, to, densecode, aggressivepruning,
-                   do_dl, do_mu, do_elim, do_arithm, do_disj, do_prop, mbp_eqs,
-                   d_m, d_p, d_d, d_s, d_f, d_r, d_g, d_se, d_ser, debug);
+  learnInvariants4(string(argv[argc-1]), max_attempts, to, densecode, aggressivepruning,
+           do_dl, do_mu, do_elim, do_arithm, do_disj, do_prop, mbp_eqs,
+           d_m, d_p, d_d, d_s, d_f, d_r, d_g, d_se, d_ser, debug, llm_model);
   else if (vers3) // FMCAD'18 + CAV'19 + experiments with data
     learnInvariants3(string(argv[argc-1]), max_attempts, to, densecode, aggressivepruning,
                      do_dl, do_mu, do_elim, do_arithm, do_prop, d_se, d_ser, debug);

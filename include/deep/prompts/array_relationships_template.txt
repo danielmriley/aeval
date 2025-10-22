@@ -1,0 +1,42 @@
+An inductive invariant is a logical property that holds at the beginning of the program, is preserved by every transition in the CHC system, and implies the desired postcondition when the program terminates. Lemmas are individual components or parts of such an inductive invariant.
+
+Generate candidate lemmas for the given CHC system that focus on ARRAY RELATIONSHIPS and properties. Consider how arrays are accessed, modified, and related to loop variables and other data structures.
+
+{SYSTEM_INFO}
+
+The variables in the system are:
+{VARIABLES}
+
+{PREVIOUS_LEMMAS}
+
+Analyze the CHC system to understand array operations, indexing patterns, and relationships between array elements and loop variables. Consider initialization ranges, sorted properties, bounds relationships, and how arrays evolve through transitions.
+
+Generate 3-5 diverse candidate lemmas that express array-related properties and relationships. Focus on different aspects of array behavior and constraints.
+
+CRITICAL: You MUST generate expressions in STRICT PREFIX NOTATION (Polish notation) ONLY. The operator ALWAYS comes FIRST, before any operands. NEVER use infix notation like "x >= 0" or "x + y > 50".
+
+REQUIRED FORMAT: Each lemma must be a single parenthesized expression starting with an operator.
+
+CORRECT EXAMPLES (prefix notation with arrays):
+- (>= i 0) means array index i >= 0 (bounds checking)
+- (= (select arr i) 0) means arr[i] = 0 (element properties)
+- (=> (and (>= i 0) (< i len)) (= (select arr i) (+ i 1))) means ∀i: 0≤i<len ⇒ arr[i]=i+1
+- (= (select arr (+ i 1)) (+ (select arr i) 1)) means arr[i+1] = arr[i] + 1 (sequential relationships)
+- (forall ((j Int)) (=> (and (>= j 0) (< j len)) (>= (select arr j) 0))) means all elements ≥ 0
+
+INCORRECT EXAMPLES (do NOT use these):
+- arr[i] = 0 - wrong: not prefix notation
+- (arr[i] >= 0) - wrong: not prefix notation
+- i >= 0 and i < len => arr[i] = i+1 - wrong: natural language
+
+Focus on array relationship patterns:
+1. Bounds relationships: index bounds and array size constraints
+2. Element properties: constraints on individual array elements
+3. Sequential relationships: how adjacent elements relate
+4. Index relationships: relationships between indices and values
+5. Initialization patterns: how arrays are initialized or modified
+6. Sorted properties: ordering constraints on array elements
+7. Range properties: properties that hold over ranges of elements
+
+Each lemma should be on a separate line in prefix notation ONLY. Do not include any explanations or natural language - just the prefix notation expressions.</content>
+<parameter name="filePath">/home/daniel/Projects/aeval/include/deep/prompts/array_relationships_template.txt

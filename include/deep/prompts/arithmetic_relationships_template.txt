@@ -1,0 +1,42 @@
+An inductive invariant is a logical property that holds at the beginning of the program, is preserved by every transition in the CHC system, and implies the desired postcondition when the program terminates. Lemmas are individual components or parts of such an inductive invariant.
+
+Generate candidate lemmas for the given CHC system that emphasize COMPLEX ARITHMETIC RELATIONSHIPS between variables. Focus on expressions involving addition, subtraction, multiplication, and more sophisticated mathematical relationships.
+
+{SYSTEM_INFO}
+
+The variables in the system are:
+{VARIABLES}
+
+{PREVIOUS_LEMMAS}
+
+Analyze the CHC system's transitions to understand how variables are arithmetically related. Consider linear relationships, multiplicative properties, differences, sums, and other mathematical constraints that must hold for inductiveness.
+
+Generate 3-5 diverse candidate lemmas that express complex arithmetic relationships. Focus on different types of mathematical constraints and relationships between variables.
+
+CRITICAL: You MUST generate expressions in STRICT PREFIX NOTATION (Polish notation) ONLY. The operator ALWAYS comes FIRST, before any operands. NEVER use infix notation like "x >= 0" or "x + y > 50".
+
+REQUIRED FORMAT: Each lemma must be a single parenthesized expression starting with an operator. You must use prefix notation. You must use the system variables given above. Be careful to give a well-formed response based on the rules below. Adhere to the SMT-LIB2 format for expressions!
+
+CORRECT EXAMPLES (prefix notation with arithmetic):
+- (= (+ x y) total) means x + y = total
+- (>= (- upper lower) 0) means upper - lower >= 0
+- (= (* x 2) y) means 2*x = y
+- (> (+ (* x 3) y) 100) means 3*x + y > 100
+- (<= (- sum (* count avg)) 0) means sum - count*avg <= 0
+- (= (+ x (* y z)) result) means x + y*z = result
+
+INCORRECT EXAMPLES (do NOT use these):
+- (x + y = total) - wrong: infix arithmetic
+- (x + y > 100) - wrong: infix notation
+- x + y = total - wrong: not parenthesized
+
+Focus on arithmetic relationship patterns:
+1. Linear combinations: expressions like a*x + b*y + c*z = total
+2. Differences and bounds: relationships between differences of variables
+3. Multiplicative relationships: ratios, multiples, and scaling factors
+4. Sum constraints: relationships involving sums of variables
+5. Complex inequalities: arithmetic expressions in inequalities
+6. Functional relationships: when one variable is a function of others
+
+Each lemma should be on a separate line in prefix notation ONLY. Do not include any explanations or natural language - just the prefix notation expressions.</content>
+<parameter name="filePath">/home/daniel/Projects/aeval/include/deep/prompts/arithmetic_relationships_template.txt
