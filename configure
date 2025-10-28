@@ -1,0 +1,27 @@
+#!/usr/bin/env bash
+# Convenience bootstrap script for configuring and compiling FreqHorn.
+# Creates the build directory, runs CMake, and performs the two-pass make build
+# (first Z3, then the project binaries) while ensuring PYTHON=python3 for Z3.
+
+set -euo pipefail
+
+ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+BUILD_DIR="${ROOT_DIR}/build"
+
+mkdir -p "${BUILD_DIR}"
+
+echo "[configure] Using build directory: ${BUILD_DIR}"
+
+(
+  export PYTHON=python3
+  cd "${BUILD_DIR}"
+
+  echo "[configure] Running cmake .. $*"
+  cmake .. "$@"
+
+  echo "[configure] Building Z3 (first make pass)"
+  make z3
+
+  echo "[configure] Building FreqHorn (second make pass)"
+  make
+)

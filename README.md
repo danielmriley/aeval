@@ -8,6 +8,14 @@ Installation
 
 Compiles with gcc-7 (on Linux) and clang-1001 (on Mac). Assumes preinstalled <a href="https://gmplib.org/">GMP</a>, and Boost (libboost-system1.74-dev) packages. Additionally, armadillo package to get candidates from behaviors. 
 
+Run the provided `configure` helper from the repository root to perform the full build:
+
+* `./configure`
+
+The script creates (or reuses) the `build` directory, temporarily exports `PYTHON=python3`, runs `cmake ..`, and then executes `make z3` followed by `make` so both Z3 and FreqHorn are up to date. Additional CMake options can be passed after `./configure`, e.g. `./configure -DCMAKE_BUILD_TYPE=Release`.
+
+To perform the steps manually:
+
 * `cd aeval ; mkdir build ; cd build`
 * `cmake ../`
 * `make` to build dependencies (Z3)
