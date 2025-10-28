@@ -7,6 +7,7 @@
 #include "simpl/Bv2Lia.hpp"
 #include "simpl/Lia2Bv.hpp"
 #include "ae/ExprSimpl.hpp" // Include ExprSimpl for simplification functions
+#include "ufo/ExprBv.hh"   // Include ExprBv for BV operations
 #include "sampl/Sampl.hpp"
 #include "sampl/SeedMiner.hpp"
 
@@ -38,6 +39,12 @@ namespace ufo
     unsigned m_original_bv_width = 0;
     map<Expr, ExprSet> m_liaSolutionMap; // Maps LIA relation -> LIA solution ExprSet
     map<Expr, Expr> m_bvSolutionMap;     // Maps BV relation -> combined BV solution Expr
+
+    // Members for MBP generation
+    int mbpEqs;
+    map<int, ExprSet> mbps;
+    map<int, Expr> prefs;
+    map<int, Expr> ssas;
 
     map<Expr, ExprVector> origBvVars;       // Original BV variables in the program
     map<Expr, ExprVector> origBvVarsPrime;  // Original primed BV variables in the program
@@ -398,7 +405,8 @@ namespace ufo
       maxAttempts(max),
       translate(trslt),
       skipSampling(_skipSampling),
-      debug(_debug)
+      debug(_debug),
+      mbpEqs(2)  // Default value for MBP equations
     {
       if (debug >= 1)
       {
@@ -894,6 +902,23 @@ namespace ufo
       bool isSafe = false;
 
       learnFromData();
+
+      // Test generateMbpsBv with the first BV rule
+      if (!m_bvChcs.chcs.empty())
+      {
+        if (debug >= 3) outs() << "  About to call generateMbpsBv\n";
+        auto &hr = m_bvChcs.chcs[0];
+        int invNum = 0; // Dummy invariant number for testing
+        Expr ssa = hr.body;
+        ExprVector srcVars = hr.srcVars;
+        ExprVector dstVars = hr.dstVars;
+        ExprSet cands;
+        generateMbpsBv(invNum, ssa, srcVars, dstVars, cands);
+        if (debug >= 2)
+        {
+          outs() << "  Generated " << cands.size() << " BV MBP candidates for testing\n";
+        }
+      }
 
       for (int i = 0; i < 3; i++)
       {
@@ -1705,6 +1730,190 @@ namespace ufo
       printBvSolutionMap(m_bvSolutionMap);
     }
 
+    // BV-adapted quantifier elimination functions
+
+    void findComplexNumericsBv(Expr a, ExprSet &terms)
+    {
+      if (bv::is_bvconst(a) || bv::is_bvnum(a) || isOp<FDECL>(a)) return;
+      if (isOp<BvOp>(a) && !isOpX<ITE>(a))
+      {
+        bool hasNoBv = false;
+        for (unsigned i = 0; i < a->arity(); i++)
+          if (!bv::has_bvsort(a->arg(i))) hasNoBv = true;
+        if (hasNoBv)
+        {
+          terms.insert(a);
+          return;
+        }
+      }
+      for (unsigned i = 0; i < a->arity(); i++)
+        findComplexNumericsBv(a->arg(i), terms);
+    }
+
+    template<typename Range> Expr eliminateQuantifiersBv(Expr fla, Range& qVars, bool doArithm = true, bool doCore = true)
+    {
+      if (qVars.size() == 0) return fla;
+      ExprSet dsjs, newDsjs;
+      getDisj(fla, dsjs);
+      if (dsjs.size() > 1)
+      {
+        for (auto & d : dsjs) newDsjs.insert(eliminateQuantifiersBv(d, qVars, doArithm, doCore));
+        return disjoin(newDsjs, m_efac);
+      }
+
+      ExprSet hardVars;
+      filter (fla, bind::IsConst (), inserter(hardVars, hardVars.begin()));
+      minusSets(hardVars, qVars);
+      ExprSet cnjs;
+      getConj(fla, cnjs);
+      constantPropagation(hardVars, cnjs, doArithm);
+      Expr tmp = simpEquivClasses(hardVars, cnjs, m_efac);
+      tmp = simpleQE(tmp, qVars);
+      if (doCore)
+        return coreQEBv(tmp, qVars);
+      else
+        return tmp;
+    }
+
+    Expr coreQEBv(Expr fla, ExprSet& vars)
+    {
+      if (!emptyIntersect(fla, vars) &&
+          !containsOp<FORALL>(fla) && !containsOp<EXISTS>(fla) && !qeUnsupportedBv(fla))
+      {
+        // For BV, use direct Z3 QE or skip core for simplicity
+        return fla; // Placeholder, as AeValSolver is LIA-specific
+      }
+      return fla;
+    }
+
+    Expr coreQEBv(Expr fla, ExprVector& vars)
+    {
+      ExprSet varsSet;
+      for (auto & v : vars) varsSet.insert(v);
+      return coreQEBv(fla, varsSet);
+    }
+
+    bool qeUnsupportedBv(Expr e)
+    {
+      if (containsOp<ARRAY_TY>(e)) return true;
+      // Add BV-specific unsupported ops if any, e.g., complex shifts
+      return false; // Assume BV QE is supported
+    }
+
+    template<typename Range> Expr eliminateQuantifiersReplBv(Expr fla, Range& vars)
+    {
+      if (debug >= 4) outs() << "    eliminateQuantifiersReplBv called with fla: " << *fla << "\n";
+      ExprSet complex;
+      findComplexNumericsBv(fla, complex);
+      if (debug >= 4) outs() << "    Found " << complex.size() << " complex expressions\n";
+      ExprMap repls;
+      ExprSet varsCond; varsCond.insert(vars.begin(), vars.end());
+      for (auto & a : complex)
+      {
+        Expr replName = mkTerm<string>("__repl_bv_" + lexical_cast<string>(repls.size()), m_efac);
+        Expr repl = bv::bvConst(replName, m_original_bv_width);
+        repls[a] = repl;
+        for (auto & v : vars) if (contains(a, v)) varsCond.erase(v);
+      }
+      if (debug >= 4) outs() << "    After replacements, varsCond size: " << varsCond.size() << "\n";
+      Expr condTmp = replaceAll(fla, repls);
+      Expr tmp = eliminateQuantifiersBv(condTmp, varsCond, true, false); // Disable core QE for BV
+      tmp = replaceAllRev(tmp, repls);
+      return eliminateQuantifiersBv(tmp, vars, true, false); // Disable core QE for BV
+    }
+
+    void generateMbpsBv(int invNum, Expr ssa, ExprVector& srcVars,
+                        ExprVector& dstVars, ExprSet& cands)
+    {
+      if (debug >= 3) outs() << "  Starting generateMbpsBv for invNum " << invNum << "\n";
+      ExprVector vars2keep, prjcts, prjcts1, prjcts2;
+      bool hasArray = false;
+      for (int i = 0; i < srcVars.size(); i++)
+        if (containsOp<ARRAY_TY>(srcVars[i]))
+        {
+          hasArray = true;
+          vars2keep.push_back(dstVars[i]);
+        }
+        else
+          vars2keep.push_back(srcVars[i]);
+
+      if (debug >= 3) outs() << "  vars2keep size: " << vars2keep.size() << ", hasArray: " << hasArray << "\n";
+
+      // BV-adapted QE function
+      auto bvQE = [this](Expr fla, ExprVector& vars) { 
+        if (debug >= 4) outs() << "    bvQE called with fla: " << *fla << "\n";
+        return eliminateQuantifiersReplBv(fla, vars); 
+      };
+
+      if (mbpEqs != 0) {
+        if (debug >= 3) outs() << "  Calling u.flatten with splitEqs=false\n";
+        u.flatten(ssa, prjcts1, false, vars2keep, bvQE);
+        if (debug >= 3) outs() << "  prjcts1 size after flatten: " << prjcts1.size() << "\n";
+      }
+      if (mbpEqs != 1) {
+        if (debug >= 3) outs() << "  Calling u.flatten with splitEqs=true\n";
+        u.flatten(ssa, prjcts2, true, vars2keep, bvQE);
+        if (debug >= 3) outs() << "  prjcts2 size after flatten: " << prjcts2.size() << "\n";
+      }
+
+      prjcts1.insert(prjcts1.end(), prjcts2.begin(), prjcts2.end());
+      if (debug >= 3) outs() << "  Total prjcts1 size: " << prjcts1.size() << "\n";
+
+      for (auto p : prjcts1)
+      {
+        if (debug >= 4) outs() << "    Processing p: " << *p << "\n";
+        if (hasArray)
+        {
+          getConj(replaceAll(p, dstVars, srcVars), cands);
+          p = eliminateQuantifiersBv(p, dstVars);
+          p = weakenForVars(p, dstVars);
+        }
+        else
+        {
+          p = weakenForVars(p, dstVars);
+          p = simplifyArithm(normalize(p));
+          getConj(p, cands);
+        }
+        prjcts.push_back(p);
+        if (debug >= 2) outs() << "Generated BV MBP: " << p << "\n";
+      }
+
+      if (debug >= 3) outs() << "  prjcts size after processing: " << prjcts.size() << "\n";
+
+      // heuristics: to optimize the range computation
+      u.removeRedundantConjunctsVec(prjcts);
+      if (debug >= 3) outs() << "  After removeRedundantConjunctsVec, prjcts size: " << prjcts.size() << "\n";
+
+      for (auto p = prjcts.begin(); p != prjcts.end(); )
+      {
+        if (debug >= 4) outs() << "    Checking sat for p: " << **p << "\n";
+        if (!u.isSat(prefs[invNum], *p) &&
+            !u.isSat(mkNeg(*p), ssa, replaceAll(*p, srcVars, dstVars)))
+            {
+              if (debug >= 3)
+                outs() << "Erasing BV MBP: " << *p
+                       << " since it is negatively inductive\n";
+              p = prjcts.erase(p);
+            }
+        else ++p;
+      }
+
+      if (debug >= 3) outs() << "  After inductive check, prjcts size: " << prjcts.size() << "\n";
+
+      if (hasArray)
+      {
+         // for array benchmarks, since more expensive
+         // otherwise, ranges won't be computed
+        u.removeRedundantDisjuncts(prjcts);
+        if (prjcts.empty()) prjcts.push_back(mk<TRUE>(m_efac));
+      }
+
+      for (auto p : prjcts)
+        mbps[invNum].insert(simplifyArithm(p));
+
+      if (debug >= 3) outs() << "  Final mbps[" << invNum << "] size: " << mbps[invNum].size() << "\n";
+    }
+
     Expr abduce(Expr goal, Expr assm)
     {
       if (debug >= 2)
@@ -1717,17 +1926,17 @@ namespace ufo
       ExprFactory &efac = goal->getFactory();
       SMTUtils u(efac);
       ExprSet complex;
-      findComplexNumerics(assm, complex);
-      findComplexNumerics(goal, complex);
+      findComplexNumericsBv(goal, complex);
+      findComplexNumericsBv(assm, complex);
       
       if (debug >= 3)
       {
-        outs() << "  Found " << complex.size() << " complex numeric expressions to replace\n";
+        outs() << "  Found " << complex.size() << " complex BV numeric expressions to replace\n";
         if (debug >= 4)
         {
           for (auto &expr : complex)
           {
-            outs() << "    Complex expr: " << *expr << "\n";
+            outs() << "    Complex BV expr: " << *expr << "\n";
           }
         }
       }
@@ -1736,7 +1945,8 @@ namespace ufo
       ExprMap replsRev;
       for (auto &a : complex)
       {
-        Expr repl = bind::intConst(mkTerm<string>("__repl_" + lexical_cast<string>(repls.size()), efac));
+        Expr replName = mkTerm<string>("__repl_bv_" + lexical_cast<string>(repls.size()), efac);
+        Expr repl = bv::bvConst(replName, m_original_bv_width);
         repls[a] = repl;
         replsRev[repl] = a;
         
@@ -1763,7 +1973,7 @@ namespace ufo
         outs() << "  Eliminating quantifiers over " << vars.size() << " variables\n";
       }
       
-      Expr tmp = mkNeg(eliminateQuantifiers(mkNeg(mk<IMPL>(assmTmp, goalTmp)), vars));
+      Expr tmp = mkNeg(eliminateQuantifiersBv(mkNeg(mk<IMPL>(assmTmp, goalTmp)), vars));
       tmp = replaceAll(tmp, replsRev);
       
       if (debug >= 2)
