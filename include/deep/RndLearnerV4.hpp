@@ -1,7 +1,9 @@
 #ifndef RNDLEARNERV4__HPP__
 #define RNDLEARNERV4__HPP__
 
+#include <deque>
 #include <string>
+#include <vector>
 
 #include "RndLearnerV3.hpp"
 #include "LlmSynthesizer.hpp"
@@ -30,22 +32,62 @@ namespace ufo
   map<int, ExprSet> allDataCands;
   map<int, deque<Expr>> deferredCandidates;
   map<int, ExprSet> pendingLlmCandidates_;
+  map<int, deque<Expr>> recentFailedCandidates_;
+  map<int, unsigned> llmAttemptsPerInv_;
+  map<int, int> llmLastInvocationIteration_;
 
   string llmModel_;
     LlmSynthesizer* llm_ = nullptr;
     int templateCycleCounter_ = 0;
+    bool useLlmGapRefine_ = true;
+    unsigned llmMaxAttemptsPerInv_ = 2;
+    unsigned llmCooldownIterations_ = 5;
+    const size_t maxRecentFailuresTracked_ = 5;
+
+    enum class LlmTrigger {
+      Exhausted,
+      FailedCheck
+    };
+
+  Expr fetchDeferredCandidate(int invNum);
+  Expr sampleFreshCandidate(int invNum, SamplFactory& sf, bool& rndStarted);
+    bool shouldInvokeLlm(int invNum, int iteration) const;
+    void noteLlmInvocation(int invNum, int iteration);
+    expr::ExprSet collectLearnedLemmas(int invNum) const;
+    expr::ExprSet convertToExprSet(const ExprSet& source, size_t maxItems = 0) const;
+    expr::ExprSet convertDequeToExprSet(const deque<Expr>& source, size_t maxItems = 0) const;
+  expr::ExprSet collectMbpGuards(int invNum, size_t maxItems = 0) const;
+  expr::ExprSet collectPhaseGuards(int invNum, size_t maxItems = 0) const;
+    void rememberFailedCandidate(int invNum, Expr cand);
+    LlmSynthesizer::GapPromptContext buildGapContext(int invNum,
+                                                     int cycleNum,
+                                                     int iteration,
+                                                     LlmTrigger trigger,
+                                                     Expr referenceCand);
+    std::vector<Expr> requestLlmGapLemmas(int invNum,
+                                          int cycleNum,
+                                          int iteration,
+                                          LlmTrigger trigger,
+                                          Expr referenceCand);
+    std::string selectLlmTemplate();
 
     public:
 
     RndLearnerV4 (ExprFactory &_e, EZ3 &_z3, CHCs& _r, unsigned _to, bool _freqs,
                   bool _aggp, int _mu, int _da, bool _d, int _m, bool _dAllMbp,
                   bool _dAddProp, bool _dAddDat, bool _dStrenMbp, int _dFwd,
-          bool _dR, bool _dG, int _debug, const string& llmModel) :
+          bool _dR, bool _dG, int _debug, const string& llmModel,
+          bool enableLlmGapRefine = true,
+          unsigned llmMaxAttemptsPerInv = 2,
+          unsigned llmCooldownIterations = 5) :
       RndLearnerV3 (_e, _z3, _r, _to, _freqs, _aggp, _mu, _da, _debug),
                   dDisj(_d), mbpEqs(_m), dAllMbp(_dAllMbp),
                   dAddProp(_dAddProp), dAddDat(_dAddDat), dStrenMbp(_dStrenMbp),
           dFwd(_dFwd), dRecycleCands(_dR), dGenerous(_dG),
-          llmModel_(llmModel.empty() ? string("gemma-3-1b-it-qat") : llmModel) {}
+          llmModel_(llmModel.empty() ? string("gemma-3-1b-it-qat") : llmModel),
+          useLlmGapRefine_(enableLlmGapRefine),
+          llmMaxAttemptsPerInv_(llmMaxAttemptsPerInv),
+          llmCooldownIterations_(llmCooldownIterations) {}
 
     bool simplLemmas() { return !dDisj; }
 
@@ -588,37 +630,43 @@ namespace ufo
         int invNum = getVarIndex(rel, decls);
         candidates.clear();
         SamplFactory& sf = sfs[invNum].back();
-        Expr cand;
 
-        if(true)
+        Expr cand = fetchDeferredCandidate(invNum);
+        if (cand == NULL)
         {
-          auto llmCandidates = generateLlmLemmas(invNum);
-          if (!llmCandidates.empty()) {
-            for (const auto& lemma : llmCandidates) {
+          cand = sampleFreshCandidate(invNum, sf, rndStarted);
+        }
+
+        if (cand == NULL && shouldInvokeLlm(invNum, i))
+        {
+          auto llmCandidates = requestLlmGapLemmas(invNum,
+                                                   cycleNum,
+                                                   i,
+                                                   LlmTrigger::Exhausted,
+                                                   Expr());
+          if (!llmCandidates.empty())
+          {
+            for (const auto& lemma : llmCandidates)
+            {
               pendingLlmCandidates_[invNum].insert(lemma);
             }
-            // Add all LLM candidates to deferred candidates for processing
-            for (auto it = llmCandidates.rbegin(); it != llmCandidates.rend(); ++it) {
+            for (auto it = llmCandidates.rbegin(); it != llmCandidates.rend(); ++it)
+            {
               deferredCandidates[invNum].push_back(*it);
-              if (printLog >= 3) outs() << "LLM Synthesized candidate: " << *it << "\n";
+              if (printLog >= 3) outs() << "LLM synthesized candidate (queued): " << *it << "\n";
             }
-            // Use the first one for immediate processing
-            cand = llmCandidates[0];
-            outs() << "LLM Synthesized candidate: " << cand << "\n";
-          } else {
-            cand = NULL;
-            if (printLog >= 2) outs() << "  LLM returned no candidates\n";
+            cand = fetchDeferredCandidate(invNum);
+          }
+          else if (printLog >= 2)
+          {
+            outs() << "  LLM returned no candidates\n";
           }
         }
-        else if (deferredCandidates[invNum].empty())
+
+        if (cand == NULL)
         {
-          rndStarted = true;
-          cand = sf.getFreshCandidate();  // try simple array candidates first
-        }
-        else
-        {
-          cand = deferredCandidates[invNum].back();
-          deferredCandidates[invNum].pop_back();
+          if (printLog >= 2) outs() << "  cand is NULL\n";
+          continue;
         }
 
         if (cand != NULL && isOpX<FORALL>(cand) && isOpX<IMPL>(cand->last()))
@@ -630,7 +678,7 @@ namespace ufo
         {
           if (printLog >= 2) outs() << "  cand is NULL\n";
           continue;
-        } 
+        }
 
         if (printLog >= 3 && dRecycleCands)
           outs () << "Number of deferred candidates: "
@@ -663,6 +711,31 @@ namespace ufo
           multiHoudini(ruleManager.dwtoCHCs);
           if (printLog) outs () << "\n";
         }
+        if (!lemma_found)
+        {
+          rememberFailedCandidate(invNum, cand);
+          if (shouldInvokeLlm(invNum, i))
+          {
+            auto llmCandidates = requestLlmGapLemmas(invNum,
+                                                     cycleNum,
+                                                     i,
+                                                     LlmTrigger::FailedCheck,
+                                                     cand);
+            if (!llmCandidates.empty())
+            {
+              for (const auto& lemma : llmCandidates)
+              {
+                pendingLlmCandidates_[invNum].insert(lemma);
+              }
+              for (auto it = llmCandidates.rbegin(); it != llmCandidates.rend(); ++it)
+              {
+                deferredCandidates[invNum].push_back(*it);
+                if (printLog >= 3) outs() << "LLM synthesized candidate (queued): " << *it << "\n";
+              }
+            }
+          }
+          continue;
+        }
         if (lemma_found)
         {
           assignPrioritiesForLearned();
@@ -679,6 +752,246 @@ namespace ufo
       }
       outs() << "unknown\n";
       return false;
+    }
+
+    Expr fetchDeferredCandidate(int invNum)
+    {
+      auto it = deferredCandidates.find(invNum);
+      if (it == deferredCandidates.end() || it->second.empty()) return NULL;
+      Expr cand = it->second.back();
+      it->second.pop_back();
+      return cand;
+    }
+
+    Expr sampleFreshCandidate(int invNum, SamplFactory& sf, bool& rndStarted)
+    {
+      (void)invNum;
+      Expr cand = sf.getFreshCandidate();
+      if (cand != NULL) rndStarted = true;
+      return cand;
+    }
+
+    bool shouldInvokeLlm(int invNum, int iteration) const
+    {
+      if (!useLlmGapRefine_ || llmMaxAttemptsPerInv_ == 0) return false;
+
+      auto attemptsIt = llmAttemptsPerInv_.find(invNum);
+      unsigned attempts = (attemptsIt == llmAttemptsPerInv_.end()) ? 0 : attemptsIt->second;
+      if (attempts >= llmMaxAttemptsPerInv_) return false;
+
+      auto cooldownIt = llmLastInvocationIteration_.find(invNum);
+      if (cooldownIt != llmLastInvocationIteration_.end())
+      {
+        int delta = iteration - cooldownIt->second;
+        if (delta < static_cast<int>(llmCooldownIterations_)) return false;
+      }
+      return true;
+    }
+
+    void noteLlmInvocation(int invNum, int iteration)
+    {
+      llmAttemptsPerInv_[invNum]++;
+      llmLastInvocationIteration_[invNum] = iteration;
+    }
+
+    expr::ExprSet collectLearnedLemmas(int invNum) const
+    {
+      expr::ExprSet result;
+      if (invNum < 0 || invNum >= static_cast<int>(sfs.size())) return result;
+
+      for (const auto& factory : sfs[invNum])
+      {
+        result.insert(factory.learnedExprs.begin(), factory.learnedExprs.end());
+      }
+      return result;
+    }
+
+    expr::ExprSet convertToExprSet(const ExprSet& source, size_t maxItems) const
+    {
+      expr::ExprSet result;
+      size_t count = 0;
+      for (const auto& expr : source)
+      {
+        if (maxItems && count >= maxItems) break;
+        result.insert(expr);
+        ++count;
+      }
+      return result;
+    }
+
+    expr::ExprSet convertDequeToExprSet(const deque<Expr>& source, size_t maxItems) const
+    {
+      expr::ExprSet result;
+      size_t count = 0;
+      for (auto it = source.rbegin(); it != source.rend(); ++it)
+      {
+        if (maxItems && count >= maxItems) break;
+        result.insert(*it);
+        ++count;
+      }
+      return result;
+    }
+
+    expr::ExprSet collectMbpGuards(int invNum, size_t maxItems) const
+    {
+      expr::ExprSet result;
+
+      auto mbpIt = mbps.find(invNum);
+      if (mbpIt != mbps.end())
+      {
+        size_t count = 0;
+        for (const auto& guard : mbpIt->second)
+        {
+          if (maxItems && count >= maxItems) break;
+          result.insert(guard);
+          ++count;
+        }
+      }
+
+      return result;
+    }
+
+    expr::ExprSet collectPhaseGuards(int invNum, size_t maxItems) const
+    {
+      expr::ExprSet result;
+
+      auto strenIt = strenDt.find(invNum);
+      if (strenIt != strenDt.end())
+      {
+        for (const auto& entry : strenIt->second.tree_cont)
+        {
+          if (!entry.second) continue;
+          result.insert(entry.second);
+          if (maxItems && result.size() >= maxItems) break;
+        }
+      }
+      return result;
+    }
+
+    void rememberFailedCandidate(int invNum, Expr cand)
+    {
+      if (cand == NULL) return;
+      auto& queue = recentFailedCandidates_[invNum];
+      queue.push_back(cand);
+      while (queue.size() > maxRecentFailuresTracked_)
+      {
+        queue.pop_front();
+      }
+    }
+
+    LlmSynthesizer::GapPromptContext buildGapContext(int invNum,
+                                                     int cycleNum,
+                                                     int iteration,
+                                                     LlmTrigger trigger,
+                                                     Expr referenceCand)
+    {
+      LlmSynthesizer::GapPromptContext ctx;
+      ctx.referenceCandidate = referenceCand;
+      ctx.iteration = iteration;
+      ctx.cycle = cycleNum;
+
+      try
+      {
+        ctx.relationName = boost::lexical_cast<std::string>(decls[invNum]);
+      }
+      catch (...)
+      {
+        ctx.relationName.clear();
+      }
+
+      ctx.triggerReason = (trigger == LlmTrigger::Exhausted) ?
+        "no viable candidate available" : "candidate failed inductiveness";
+
+      ctx.learnedForRelation = collectLearnedLemmas(invNum);
+
+      auto failedIt = recentFailedCandidates_.find(invNum);
+      if (failedIt != recentFailedCandidates_.end())
+        ctx.failedCandidates = convertDequeToExprSet(failedIt->second, maxRecentFailuresTracked_);
+
+      ctx.mbpGuards = collectMbpGuards(invNum, maxRecentFailuresTracked_);
+      ctx.phaseGuards = collectPhaseGuards(invNum, maxRecentFailuresTracked_);
+
+      auto deferredIt = deferredCandidates.find(invNum);
+      if (deferredIt != deferredCandidates.end())
+        ctx.deferredCandidates = convertDequeToExprSet(deferredIt->second, maxRecentFailuresTracked_);
+
+      auto pendingIt = pendingLlmCandidates_.find(invNum);
+      if (pendingIt != pendingLlmCandidates_.end())
+        ctx.pendingLemmas = convertToExprSet(pendingIt->second, maxRecentFailuresTracked_);
+
+      auto attemptsIt = llmAttemptsPerInv_.find(invNum);
+      ctx.attemptCount = (attemptsIt == llmAttemptsPerInv_.end()) ? 0 : attemptsIt->second;
+
+      size_t deferredSize = (deferredIt != deferredCandidates.end()) ? deferredIt->second.size() : 0;
+      size_t failureSize = (failedIt != recentFailedCandidates_.end()) ? failedIt->second.size() : 0;
+      size_t pendingSize = (pendingIt != pendingLlmCandidates_.end()) ? pendingIt->second.size() : 0;
+
+      ctx.diagnostics.push_back("deferred queue size: " + std::to_string(deferredSize));
+      ctx.diagnostics.push_back("recent failures tracked: " + std::to_string(failureSize));
+      ctx.diagnostics.push_back("pending LLM lemmas: " + std::to_string(pendingSize));
+      ctx.diagnostics.push_back("MBP guards provided: " + std::to_string(ctx.mbpGuards.size()));
+      ctx.diagnostics.push_back("phase guards provided: " + std::to_string(ctx.phaseGuards.size()));
+
+      return ctx;
+    }
+
+    std::vector<Expr> requestLlmGapLemmas(int invNum,
+                                          int cycleNum,
+                                          int iteration,
+                                          LlmTrigger trigger,
+                                          Expr referenceCand)
+    {
+      if (!shouldInvokeLlm(invNum, iteration)) return {};
+
+      if (!llm_)
+      {
+        llm_ = new LlmSynthesizer(llmModel_, printLog);
+      }
+
+      LlmSynthesizer::GapPromptContext ctx = buildGapContext(invNum, cycleNum, iteration, trigger, referenceCand);
+
+      expr::ExprSet previous = ctx.learnedForRelation;
+      previous.insert(ctx.failedCandidates.begin(), ctx.failedCandidates.end());
+      previous.insert(ctx.deferredCandidates.begin(), ctx.deferredCandidates.end());
+      previous.insert(ctx.pendingLemmas.begin(), ctx.pendingLemmas.end());
+
+      std::string templateName = selectLlmTemplate();
+
+      noteLlmInvocation(invNum, iteration);
+      auto lemmas = llm_->generateGapLemmas(ruleManager, ctx, previous, templateName);
+
+      if (lemmas.empty() && printLog >= 2)
+      {
+        outs() << "  LLM produced no gap lemmas\n";
+      }
+      else if (printLog >= 2)
+      {
+        outs() << "  LLM produced " << lemmas.size() << " gap candidate(s)\n";
+      }
+      return lemmas;
+    }
+
+    std::string selectLlmTemplate()
+    {
+      static const std::vector<std::string> templates = {
+        "basic_template",
+        "implication_template",
+        "arithmetic_relationships_template",
+        "disjunctive_template",
+        "array_relationships_template"
+      };
+
+      if (templates.empty()) return "basic_template";
+
+      std::size_t templateIndex = (templates.size() == 1) ? 0 : (templateCycleCounter_ / 3) % templates.size();
+      std::string selected = templates[templateIndex];
+      templateCycleCounter_++;
+
+      if (printLog >= 3)
+      {
+        outs() << "Using LLM template: " << selected << " (cycle: " << templateCycleCounter_ << ")\n";
+      }
+      return selected;
     }
 
     void generateMbps(int invNum, Expr ssa, ExprVector& srcVars,
@@ -1013,43 +1326,18 @@ namespace ufo
 
     // Method to generate a new lemma using LLM based on current learned lemmas for a specific invariant and CHC system
     std::vector<Expr> generateLlmLemmas(int invNum) {
-      ExprSet learnedLemmas;
-      // Collect learned expressions from the SamplFactory for this specific invariant
-      if (invNum >= 0 && invNum < (int)sfs.size()) {
-        for (auto& sf : sfs[invNum]) {
-          for (auto& learned : sf.learnedExprs) {
-            learnedLemmas.insert(learned);
-          }
-        }
-      }
-      
-      // Create LlmSynthesizer instance if not exists
-      if (!llm_) {
-        llm_ = new LlmSynthesizer(llmModel_, printLog);
+      auto it = llmLastInvocationIteration_.find(invNum);
+      int pseudoIteration = static_cast<int>(llmCooldownIterations_);
+      if (it != llmLastInvocationIteration_.end())
+      {
+        pseudoIteration = it->second + static_cast<int>(llmCooldownIterations_);
       }
 
-      // Cycle through different prompt templates every few iterations
-      std::vector<std::string> templates = {
-        "basic_template",
-        "implication_template", 
-        "arithmetic_relationships_template",
-        "disjunctive_template",
-        "array_relationships_template"
-      };
-      
-      // Cycle through templates: use basic_template for first few calls, then rotate
-      int templateIndex = templateCycleCounter_ / 3; // Change template every 3 calls
-      templateIndex = templateIndex % templates.size();
-      std::string selectedTemplate = templates[templateIndex];
-      
-      templateCycleCounter_++; // Increment counter for next call
-      
-      if (printLog >= 3) {
-        outs() << "Using LLM template: " << selectedTemplate << " (cycle: " << templateCycleCounter_ << ")" << std::endl;
-      }
-      
-      expr::ExprSet emptyPrevious;
-      return llm_->generateLemmas(ruleManager, learnedLemmas, emptyPrevious, selectedTemplate);
+      return requestLlmGapLemmas(invNum,
+                                  /*cycleNum=*/0,
+                                  pseudoIteration,
+                                  LlmTrigger::Exhausted,
+                                  Expr());
     }
 
     // For backward compatibility

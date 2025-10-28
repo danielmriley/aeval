@@ -5,6 +5,7 @@
 #include <curl/curl.h>
 #include <iostream>
 #include <cctype>
+#include <cstdio>
 #include <fstream>
 #include <sstream>
 #include <vector>
@@ -27,11 +28,32 @@ private:
     std::string url_ = "http://localhost:1234/v1/chat/completions";
     int printLog = 0;
     expr::ExprSet previousGeneratedLemmas_;
+    std::function<std::string(const std::string&)> transportOverride_;
 
 public:
+    struct GapPromptContext {
+        std::string relationName;
+        std::string triggerReason;
+        expr::ExprSet learnedForRelation;
+        expr::ExprSet failedCandidates;
+        expr::ExprSet mbpGuards;
+        expr::ExprSet phaseGuards;
+        expr::Expr referenceCandidate;
+        expr::ExprSet deferredCandidates;
+        expr::ExprSet pendingLemmas;
+        std::vector<std::string> diagnostics;
+        unsigned attemptCount = 0;
+        unsigned iteration = 0;
+        unsigned cycle = 0;
+    };
+
     // Constructor
     LlmSynthesizer(const std::string& model, int pl = 0) : model_(model), printLog(pl+1) {
         curl_global_init(CURL_GLOBAL_DEFAULT);
+    }
+
+    void setTransportOverride(std::function<std::string(const std::string&)> overrideFn) {
+        transportOverride_ = std::move(overrideFn);
     }
 
     // Get the project root directory
@@ -76,6 +98,7 @@ public:
     // Escape a string for JSON
     std::string escapeJsonString(const std::string& str) {
         std::string escaped;
+        escaped.reserve(str.size());
         for (char c : str) {
             switch (c) {
                 case '"': escaped += "\\\""; break;
@@ -86,10 +109,9 @@ public:
                 case '\r': escaped += "\\r"; break;
                 case '\t': escaped += "\\t"; break;
                 default:
-                    if (c < 32) {
-                        // Escape control characters
+                    if (static_cast<unsigned char>(c) < 32) {
                         char buf[8];
-                        sprintf(buf, "\\u%04x", (unsigned char)c);
+                        std::snprintf(buf, sizeof(buf), "\\u%04x", static_cast<unsigned char>(c));
                         escaped += buf;
                     } else {
                         escaped += c;
@@ -103,13 +125,13 @@ public:
     std::string buildJsonBody(const std::string& prompt) {
         std::string escapedPrompt = escapeJsonString(prompt);
         return R"({
-            "model": ")" + model_ +
-            R"(",
-            "messages": [{"role": "user", "content": ")" +
-            escapedPrompt + R"("}],
-            "max_tokens": 512,
-            "temperature": 0.7,
-            "stream": false
+            \"model\": \""" + model_ +
+            R"("\",
+            \"messages\": [{\"role\": \"user\", \"content\": \""" +
+            escapedPrompt + R"("\"}],
+            \"max_tokens\": 512,
+            \"temperature\": 0.7,
+            \"stream\": false
         })";
     }
 
@@ -161,14 +183,13 @@ public:
             return "";
         }
 
-        size_t colon_pos = raw_response.find(":", key_pos + 9); // After "\"content\""
+        size_t colon_pos = raw_response.find(":", key_pos + 9);
         if (colon_pos == std::string::npos) {
             if(printLog >= 2) outs() << "Failed to find colon after content key." << std::endl;
             return "";
         }
 
         size_t value_start = colon_pos + 1;
-        // Skip whitespaces
         while (value_start < raw_response.size() && std::isspace(static_cast<unsigned char>(raw_response[value_start]))) {
             ++value_start;
         }
@@ -199,7 +220,6 @@ public:
 
         std::string content = raw_response.substr(content_start, content_end - content_start);
 
-        // Unescape common sequences
         size_t pos = 0;
         while (pos < content.size()) {
             if (content[pos] == '\\') {
@@ -649,6 +669,9 @@ public:
 
     // Main method to synthesize response from prompt
     std::string synthesize(const std::string& prompt) {
+        if (transportOverride_) {
+            return transportOverride_(prompt);
+        }
         std::string json_body = buildJsonBody(prompt);
         std::string raw_response = sendRequest(json_body);
         return parseResponse(raw_response);
@@ -812,6 +835,216 @@ public:
         if (lemma) {
             previousGeneratedLemmas_.insert(lemma);
         }
+    }
+
+    std::vector<expr::Expr> generateGapLemmas(const ufo::CHCs& chcs,
+                                             const GapPromptContext& context,
+                                             const expr::ExprSet& previousLemmas,
+                                             const std::string& templateName = "basic_template") {
+        std::string systemInfo = extendSystemInfoWithLearned(chcs, context.learnedForRelation);
+        if (!context.relationName.empty()) {
+            systemInfo += "\nFocused relation: " + context.relationName + "\n";
+        }
+        if (!context.triggerReason.empty()) {
+            systemInfo += "Trigger: " + context.triggerReason + "\n";
+        }
+        if (context.iteration > 0) {
+            systemInfo += "Iteration: " + std::to_string(context.iteration) + "\n";
+        }
+        if (context.cycle > 0) {
+            systemInfo += "Cycle index: " + std::to_string(context.cycle) + "\n";
+        }
+        if (context.attemptCount > 0) {
+            systemInfo += "LLM attempts on relation: " + std::to_string(context.attemptCount) + "\n";
+        }
+
+        std::string variablesInfo = extractVariablesInfo(chcs);
+
+        std::stringstream previousSection;
+        previousSection << buildGapContextSection(context);
+        previousSection << buildLemmaSetSection(previousLemmas, "Previously accepted lemmas:");
+        previousSection << buildLemmaSetSection(previousGeneratedLemmas_, "Recent LLM lemmas:");
+
+        std::string previousStr = previousSection.str();
+        if (previousStr.empty()) {
+            previousStr = "No previous lemmas provided.\n";
+        }
+
+        return generateLemmasFromSections(chcs,
+                                          context.learnedForRelation,
+                                          previousLemmas,
+                                          systemInfo,
+                                          variablesInfo,
+                                          previousStr,
+                                          templateName,
+                                          "");
+    }
+
+private:
+    std::string extendSystemInfoWithLearned(const ufo::CHCs& chcs,
+                                            const expr::ExprSet& learnedLemmas) const {
+        std::string systemInfo = extractSystemInfo(chcs);
+        if (learnedLemmas.empty()) {
+            return systemInfo;
+        }
+
+        std::stringstream ss;
+        ss << systemInfo << "\nExisting learned lemmas:\n";
+        size_t count = 0;
+        size_t totalLearned = learnedLemmas.size();
+        for (const auto& lemma : learnedLemmas) {
+            if (count >= 5) {
+                size_t remaining = totalLearned > 5 ? (totalLearned - 5) : 0;
+                if (remaining > 0) {
+                    ss << "  ... and " << remaining << " more\n";
+                }
+                break;
+            }
+            ss << "  " << exprToString(lemma) << "\n";
+            ++count;
+        }
+        return ss.str();
+    }
+
+    std::string buildLemmaSetSection(const expr::ExprSet& lemmas,
+                                     const std::string& header,
+                                     size_t maxItems = 5) const {
+        if (lemmas.empty()) {
+            return std::string();
+        }
+
+        std::stringstream ss;
+        ss << header << "\n";
+        size_t count = 0;
+        size_t total = lemmas.size();
+        for (const auto& lemma : lemmas) {
+            if (count >= maxItems) {
+                size_t remaining = total > maxItems ? (total - maxItems) : 0;
+                if (remaining > 0) {
+                    ss << "  ... and " << remaining << " more\n";
+                }
+                break;
+            }
+            ss << "  " << exprToString(lemma) << "\n";
+            ++count;
+        }
+        ss << "\n";
+        return ss.str();
+    }
+
+    std::string exprToString(const expr::Expr& e) const {
+        if (!e) {
+            return "<null>";
+        }
+        try {
+            return boost::lexical_cast<std::string>(e);
+        } catch (...) {
+            std::stringstream ss;
+            ss << e;
+            return ss.str();
+        }
+    }
+
+    std::string buildGapContextSection(const GapPromptContext& context,
+                                       size_t maxItems = 5) const {
+        std::stringstream ss;
+        if (context.referenceCandidate) {
+            ss << "Reference candidate under analysis:\n  "
+               << exprToString(context.referenceCandidate) << "\n\n";
+        }
+        if (!context.diagnostics.empty()) {
+            ss << "Diagnostics:\n";
+            for (const auto& line : context.diagnostics) {
+                ss << "  - " << line << "\n";
+            }
+            ss << "\n";
+        }
+        ss << buildLemmaSetSection(context.failedCandidates, "Recently failed candidates:", maxItems);
+        ss << buildLemmaSetSection(context.mbpGuards, "Relevant MBP guards:", maxItems);
+        ss << buildLemmaSetSection(context.phaseGuards, "Phase guards:", maxItems);
+        ss << buildLemmaSetSection(context.deferredCandidates, "Deferred candidates:", maxItems);
+        ss << buildLemmaSetSection(context.pendingLemmas, "Pending LLM lemmas:", maxItems);
+        return ss.str();
+    }
+
+    std::vector<expr::Expr> generateLemmasFromSections(
+        const ufo::CHCs& chcs,
+        const expr::ExprSet& learnedLemmas,
+        const expr::ExprSet& previousLemmas,
+        const std::string& systemInfo,
+        const std::string& variablesInfo,
+        const std::string& previousSection,
+        const std::string& templateName,
+        const std::string& previousResponse) {
+        bool allowRetry = false;
+        std::string retryContext;
+
+        for (int attempt = 0; attempt < 2; ++attempt) {
+            bool isRetry = (attempt == 1);
+            if (isRetry && !allowRetry) {
+                break;
+            }
+
+            std::string currentTemplate = isRetry ? "retry_template" : templateName;
+            std::string prompt = preparePrompt(currentTemplate, systemInfo, variablesInfo, previousSection,
+                                               isRetry ? retryContext : previousResponse);
+            if (prompt.empty()) {
+                if(printLog >= 2) outs() << "Failed to prepare " << currentTemplate << " prompt" << std::endl;
+                break;
+            }
+
+            std::string response = synthesize(prompt);
+            if (response.empty()) {
+                if(printLog >= 2) outs() << "Empty response from LLM" << std::endl;
+                if (!isRetry) {
+                    allowRetry = true;
+                    retryContext = "Previous response was empty. Please return valid lemmas.\n";
+                    if(printLog >= 2) outs() << "Retrying with mitigation prompt" << std::endl;
+                    continue;
+                }
+                break;
+            }
+
+            if(printLog >= 2) outs() << "LLM raw response: " << response << std::endl;
+
+            std::vector<expr::Expr> lemmas = parseLemmasToExprs(response, chcs);
+            std::vector<expr::Expr> uniqueLemmas;
+            expr::ExprSet seenCurrentResponse;
+            for (const auto& lemma : lemmas) {
+                if (!lemma) {
+                    continue;
+                }
+
+                if (learnedLemmas.count(lemma) || previousLemmas.count(lemma) || previousGeneratedLemmas_.count(lemma) ||
+                    seenCurrentResponse.count(lemma)) {
+                    if (printLog >= 2) {
+                        outs() << "Skipping duplicate lemma: " << exprToString(lemma) << std::endl;
+                    }
+                    continue;
+                }
+
+                seenCurrentResponse.insert(lemma);
+                uniqueLemmas.push_back(lemma);
+            }
+
+            if (!uniqueLemmas.empty()) {
+                previousGeneratedLemmas_.insert(uniqueLemmas.begin(), uniqueLemmas.end());
+                return uniqueLemmas;
+            }
+
+            if (!isRetry) {
+                allowRetry = true;
+                retryContext = "Previous response was malformed or unusable:\n" + response + "\n";
+                if(printLog >= 2) outs() << "Response produced no usable lemmas; retrying with mitigation prompt" << std::endl;
+                continue;
+            }
+
+            if(printLog >= 2) outs() << "Retry response still produced no usable lemmas" << std::endl;
+            break;
+        }
+
+        if (printLog >= 2) outs() << "No new lemmas generated after retry attempts" << std::endl;
+        return {};
     }
 };
 
