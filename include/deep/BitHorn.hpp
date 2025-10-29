@@ -1,9 +1,12 @@
 #ifndef BITHORN__HPP__
 #define BITHORN__HPP__
 
+#include <algorithm>
 #include <utility>          // Needed for std::pair
+#include <boost/logic/tribool.hpp>
 
 #include "Horn.hpp"
+#include "deep/DataLearner2.hpp"
 #include "simpl/Bv2Lia.hpp"
 #include "simpl/Lia2Bv.hpp"
 #include "ae/ExprSimpl.hpp" // Include ExprSimpl for simplification functions
@@ -887,8 +890,98 @@ namespace ufo
 
     bool learnFromData()
     {
-      BndExpl bnd(m_bvChcs, maxAttempts, debug);
-      return true;
+      if (!d2)
+      {
+        if (debug >= 3)
+          outs() << "Data learner V2 is disabled; skipping learnFromData()\n";
+        return false;
+      }
+
+      if (debug >= 2)
+        outs() << "\n--- Learning Candidates From Data (BV pipeline) ---\n";
+
+      // Translate BV CHCs to LIA so DataLearner2/BndExpl can operate over integers.
+      CHCs liaChcsLocal = m_Bv2LiaTranslator.translate(m_bvChcs, false);
+      DataLearner2 dataLearner(liaChcsLocal, m_z3, debug);
+
+      const auto &bvToLiaMap = m_Bv2LiaTranslator.getBvToLiaDeclMap();
+      map<Expr, Expr> liaToBvMap;
+      for (auto &kv : bvToLiaMap)
+        liaToBvMap[kv.second] = kv.first;
+
+      map<Expr, ExprVector> liaArrRanges;
+      map<Expr, ExprSet> liaConstr;
+      bool produced = false;
+
+      for (auto decl : liaChcsLocal.decls)
+      {
+        if (decl == NULL)
+          continue;
+        Expr liaRel = decl->left();
+        if (!liaRel || liaRel == liaChcsLocal.failDecl || isOpX<TRUE>(liaRel))
+          continue;
+
+        bool runGJ = doGJ || (!doReg && !doConnect);
+        boost::tribool res = dataLearner.computeData(liaRel, liaArrRanges, liaConstr, runGJ, doReg, doConnect);
+        if (boost::logic::indeterminate(res) || !res)
+          continue;
+
+        ExprSet liaCands;
+        dataLearner.getDataCands(liaCands, liaRel);
+        if (liaCands.empty())
+          continue;
+
+        liaConstr[liaRel].insert(liaCands.begin(), liaCands.end());
+
+        auto bvIt = liaToBvMap.find(liaRel);
+        if (bvIt == liaToBvMap.end())
+          continue;
+        Expr bvRel = bvIt->second;
+
+        ExprVector liaVars;
+        ExprVector bvVars;
+        if (liaChcsLocal.invVars.count(liaRel))
+          liaVars = liaChcsLocal.invVars[liaRel];
+        if (m_bvChcs.invVars.count(bvRel))
+          bvVars = m_bvChcs.invVars[bvRel];
+
+        for (auto cand : liaCands)
+        {
+          if (!cand)
+            continue;
+
+          Expr normalized = normalizeExpr(normalizePositive(cand, m_efac, debug));
+          Expr simplified = simplifyArithm(normalized, false, false);
+          if (!simplified || isOpX<TRUE>(simplified))
+            continue;
+
+          Expr bvExpr = m_Lia2BvTranslator.translateExpr(simplified, m_original_bv_width);
+          if (!bvExpr)
+            continue;
+
+          if (!liaVars.empty() && liaVars.size() == bvVars.size())
+            bvExpr = replaceAll(bvExpr, liaVars, bvVars);
+
+          if (!bvExpr || isOpX<TRUE>(bvExpr))
+            continue;
+
+          Expr reduced = simplifyArithm(bvExpr, false, false);
+          if (!reduced || isOpX<TRUE>(reduced))
+            continue;
+
+          mbpCandidatesBv[bvRel].insert(reduced);
+          produced = true;
+
+          if (debug >= 3)
+            outs() << "    Added BV data candidate for " << *bvRel << ": " << *reduced << "\n";
+        }
+      }
+      
+
+      if (debug >= 2)
+        outs() << "--- Data learning complete. Added " << (produced ? "some" : "no") << " candidates. ---\n";
+
+      return produced;
     }
 
     bool solve(unsigned int to = 100)
@@ -901,6 +994,7 @@ namespace ufo
       bool isSafe = false;
 
       learnFromData();
+      exit(0);
 
       // Test generateMbpsBv with the first BV rule
       if (!m_bvChcs.chcs.empty())

@@ -1294,7 +1294,7 @@ namespace ufo
     {
       if (debug >= 1)
         outs() << "\n======== COMPUTE DATA ========\n";
-      models.clear();
+  models[srcRel].clear();
       // invVars.clear();
       boost::tribool res = bnd.unrollAndExecuteMultiple(invVars, models, arrRanges, constr);
 
@@ -1317,7 +1317,7 @@ namespace ufo
     {
       if (debug >= 1)
         outs() << "\n======== COMPUTE DATA PHASE ========\n";
-      models.clear();
+  models[srcRel].clear();
       // invVars.clear();
       //  Get data matrix.
       boost::tribool res = bnd.unrollAndExecuteSplitter(srcRel, invVars[srcRel], models[srcRel], splitter, invs, fwd, constr);
