@@ -907,7 +907,15 @@ namespace ufo
       if (!m_bvChcs.chcs.empty())
       {
         if (debug >= 3) outs() << "  About to call generateMbpsBv\n";
-        auto &hr = m_bvChcs.chcs[0];
+        HornRuleExt hr;
+        for (const auto rule : m_bvChcs.chcs)
+        {
+          if(rule.isInductive)
+          {
+            hr = rule;
+            break;
+          }
+        }
         int invNum = 0; // Dummy invariant number for testing
         Expr ssa = hr.body;
         ExprVector srcVars = hr.srcVars;
@@ -1826,61 +1834,68 @@ namespace ufo
                         ExprVector& dstVars, ExprSet& cands)
     {
       if (debug >= 3) outs() << "  Starting generateMbpsBv for invNum " << invNum << "\n";
-      ExprVector vars2keep, prjcts, prjcts1, prjcts2;
       bool hasArray = false;
       for (int i = 0; i < srcVars.size(); i++)
         if (containsOp<ARRAY_TY>(srcVars[i]))
         {
           hasArray = true;
-          vars2keep.push_back(dstVars[i]);
+          break;
         }
-        else
-          vars2keep.push_back(srcVars[i]);
 
-      if (debug >= 3) outs() << "  vars2keep size: " << vars2keep.size() << ", hasArray: " << hasArray << "\n";
-
-      // BV-adapted QE function
-      auto bvQE = [this](Expr fla, ExprVector& vars) { 
-        if (debug >= 4) outs() << "    bvQE called with fla: " << *fla << "\n";
-        return eliminateQuantifiersReplBv(fla, vars); 
-      };
-
-      if (mbpEqs != 0) {
-        if (debug >= 3) outs() << "  Calling u.flatten with splitEqs=false\n";
-        u.flatten(ssa, prjcts1, false, vars2keep, bvQE);
-        if (debug >= 3) outs() << "  prjcts1 size after flatten: " << prjcts1.size() << "\n";
-      }
-      if (mbpEqs != 1) {
-        if (debug >= 3) outs() << "  Calling u.flatten with splitEqs=true\n";
-        u.flatten(ssa, prjcts2, true, vars2keep, bvQE);
-        if (debug >= 3) outs() << "  prjcts2 size after flatten: " << prjcts2.size() << "\n";
-      }
-
-      prjcts1.insert(prjcts1.end(), prjcts2.begin(), prjcts2.end());
-      if (debug >= 3) outs() << "  Total prjcts1 size: " << prjcts1.size() << "\n";
-
-      for (auto p : prjcts1)
+      ExprVector ites;
+      getITEs(ssa, ites);
+      if (ites.empty())
       {
-        if (debug >= 4) outs() << "    Processing p: " << *p << "\n";
-        if (hasArray)
-        {
-          getConj(replaceAll(p, dstVars, srcVars), cands);
-          p = eliminateQuantifiersBv(p, dstVars);
-          p = weakenForVars(p, dstVars);
-        }
-        else
-        {
-          p = weakenForVars(p, dstVars);
-          p = simplifyArithm(normalize(p));
-          getConj(p, cands);
-        }
-        prjcts.push_back(p);
-        if (debug >= 2) outs() << "Generated BV MBP: " << p << "\n";
+        if (debug >= 2)
+          outs() << "  No ITE expressions found in inductive CHC body; skipping MBP extraction\n";
+        return;
       }
 
-      if (debug >= 3) outs() << "  prjcts size after processing: " << prjcts.size() << "\n";
+      ExprSet guardCandidates;
+      for (auto & ite : ites)
+        guardCandidates.insert(ite->arg(0));
 
-      // heuristics: to optimize the range computation
+      ExprSet processed;
+      ExprVector prjcts;
+
+      for (auto & guard : guardCandidates)
+      {
+        ExprVector variants;
+        variants.push_back(guard);
+        variants.push_back(mkNeg(guard));
+
+        for (auto & variant : variants)
+        {
+          Expr candidateRaw = simplifyBool(simplifyArithm(normalize(variant)));
+
+          if (hasArray)
+            getConj(replaceAll(candidateRaw, dstVars, srcVars), cands);
+
+          Expr processedCandidate = weakenForVars(candidateRaw, dstVars);
+          processedCandidate = simplifyBool(simplifyArithm(normalize(processedCandidate)));
+
+          if (!hasArray)
+            getConj(processedCandidate, cands);
+
+          if (isOpX<TRUE>(processedCandidate) || isOpX<FALSE>(processedCandidate))
+            continue;
+
+          if (!processed.insert(processedCandidate).second)
+            continue;
+
+          prjcts.push_back(processedCandidate);
+          if (debug >= 2)
+            outs() << "Generated BV MBP candidate from ITE guard: " << processedCandidate << "\n";
+        }
+      }
+
+      if (prjcts.empty())
+      {
+        if (debug >= 2)
+          outs() << "  No non-trivial MBP candidates obtained from ITE guards\n";
+        return;
+      }
+
       u.removeRedundantConjunctsVec(prjcts);
       if (debug >= 3) outs() << "  After removeRedundantConjunctsVec, prjcts size: " << prjcts.size() << "\n";
 
@@ -1889,12 +1904,12 @@ namespace ufo
         if (debug >= 4) outs() << "    Checking sat for p: " << **p << "\n";
         if (!u.isSat(prefs[invNum], *p) &&
             !u.isSat(mkNeg(*p), ssa, replaceAll(*p, srcVars, dstVars)))
-            {
-              if (debug >= 3)
-                outs() << "Erasing BV MBP: " << *p
-                       << " since it is negatively inductive\n";
-              p = prjcts.erase(p);
-            }
+        {
+          if (debug >= 3)
+            outs() << "Erasing BV MBP: " << *p
+                   << " since it is negatively inductive\n";
+          p = prjcts.erase(p);
+        }
         else ++p;
       }
 
@@ -1902,8 +1917,6 @@ namespace ufo
 
       if (hasArray)
       {
-         // for array benchmarks, since more expensive
-         // otherwise, ranges won't be computed
         u.removeRedundantDisjuncts(prjcts);
         if (prjcts.empty()) prjcts.push_back(mk<TRUE>(m_efac));
       }
