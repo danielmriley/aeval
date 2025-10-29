@@ -13,8 +13,8 @@
 
 (rule (=> (and true (and (= #x00000000 |_FH_0'|) (= #x00000000 |_FH_1'|) (= #x00000000 |_FH_2'|))) (inv |_FH_0'| |_FH_1'| |_FH_2'|)))
 
-(rule (=> (and (inv _FH_0 _FH_1 _FH_2) (and (= |_FH_1'| (bvadd _FH_0 _FH_1)) (= |_FH_0'| (bvadd _FH_0 #x00000001)) (= |_FH_2'| _FH_2))) (inv |_FH_0'| |_FH_1'| |_FH_2'|)))
+(rule (=> (and (inv _FH_0 _FH_1 _FH_2) (and (= |_FH_1'| (bvadd _FH_0 _FH_1)) (= |_FH_0'| (bvadd _FH_0 #x00000001)) (= |_FH_2'| (bvadd _FH_2 (ite (bvugt _FH_1 _FH_0) #x00000001 #x00000000))))) (inv |_FH_0'| |_FH_1'| |_FH_2'|)))
 
-(rule (=> (and (inv _FH_0 _FH_1 _FH_2) (and (bvsge _FH_0 #x0034adcd) (bvsle _FH_2 #x00000000))) fail))
+(rule (=> (and (inv _FH_0 _FH_1 _FH_2) (and (bvuge _FH_0 #x0034adcd) (bvule _FH_2 #x00000000))) fail))
 
 (query fail)

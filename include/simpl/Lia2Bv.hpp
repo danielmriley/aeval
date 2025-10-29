@@ -700,7 +700,19 @@ namespace ufo
         }
 
         // Handle LIA arithmetic operations -> BV operations (signed)
-        e = normalizePositive(e, m_efac, debug); // Normalize to remove unnecessary negations
+        // Skip normalization when ITEs are present; normalizePositive drops non-linear pieces like ITE
+        if (!expr::containsOp<ITE>(e))
+        {
+          e = normalizePositive(e, m_efac, debug); // Normalize to remove unnecessary negations
+        }
+
+        // If expression is already BV-typed (e.g., a BV constant), return it unchanged
+        Expr exprType = bind::typeOf(e);
+        if (exprType && isOpX<BVSORT>(exprType))
+        {
+          if (debug >= 3) outs() << "Kept existing BV expression: " << *e << "\n";
+          return e;
+        }
         if (isOpX<PLUS>(e))
         {
           // Check for patterns that can be converted to BVSUB

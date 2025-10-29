@@ -9,7 +9,7 @@
 (declare-var |_FH_0'| (_ BitVec 4))
 (declare-var |_FH_1'| (_ BitVec 4))
 
-(rule (=> (and true (and (bvsge |_FH_0'| #x0) (bvsle |_FH_0'| #x2) (bvsge |_FH_1'| #x0) (bvsle |_FH_1'| #x2))) (inv |_FH_0'| |_FH_1'|)))
+(rule (=> (and true (and (bvuge |_FH_0'| #x0) (bvule |_FH_0'| #x2) (bvuge |_FH_1'| #x0) (bvule |_FH_1'| #x2))) (inv |_FH_0'| |_FH_1'|)))
 
 (rule (=> (and (inv _FH_0 _FH_1) (and (= |_FH_0'| (bvadd _FH_0 #x2)) (= |_FH_1'| (bvadd _FH_1 #x2)))) (inv |_FH_0'| |_FH_1'|)))
 

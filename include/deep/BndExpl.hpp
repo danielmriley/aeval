@@ -681,41 +681,6 @@ namespace ufo
       return true;
     }
 
-    vector<vector<double>> unrollAndExecuteBV(
-        CHCs &bvRuleManager,
-        Expr srcRel,
-        ExprVector &invVars,
-        Expr phaseGuard, Expr invs, bool fwd, ExprSet &constr, int k = 10)
-    {
-      // Assume 32-bit BV
-      unsigned width = 32;
-      Bv2LiaTranslator translator(bvRuleManager.m_efac, bvRuleManager.m_z3, width, debug);
-      CHCs liaRuleManager = translator.translate(bvRuleManager);
-
-      // Translate expressions
-      Expr liaPhaseGuard = translator.translateExpr(phaseGuard);
-      Expr liaInvs = translator.translateExpr(invs);
-      Expr liaSrcRel = srcRel; // Assume relation names are preserved
-
-      // Translate invVars
-      ExprVector liaInvVars;
-      for (auto &v : invVars) {
-        liaInvVars.push_back(translator.translateExpr(v));
-      }
-
-      // Create BndExpl for LIA
-      BndExpl liaBnd(liaRuleManager, debug);
-
-      // Call unrollAndExecuteSplitter
-      vector<vector<double>> models;
-      liaBnd.unrollAndExecuteSplitter(liaSrcRel, liaInvVars, models, liaPhaseGuard, liaInvs, fwd, constr, k);
-
-      // Update invVars to translated vars
-      invVars = liaInvVars;
-
-      return models;
-    }
-
     bool unrollAndExecuteGhost(
         Expr src, Expr dst,
         Expr srcRel,

@@ -42,8 +42,7 @@ namespace ufo
 
     // Members for MBP generation
     int mbpEqs;
-    map<int, ExprSet> mbps;
-    map<int, Expr> prefs;
+  map<Expr, ExprSet> mbpCandidatesBv;
     map<int, Expr> ssas;
 
     map<Expr, ExprVector> origBvVars;       // Original BV variables in the program
@@ -916,12 +915,12 @@ namespace ufo
             break;
           }
         }
-        int invNum = 0; // Dummy invariant number for testing
-        Expr ssa = hr.body;
+  Expr invRel = hr.dstRelation ? hr.dstRelation : hr.srcRelation;
+  Expr ssa = hr.body;
         ExprVector srcVars = hr.srcVars;
         ExprVector dstVars = hr.dstVars;
         ExprSet cands;
-        generateMbpsBv(invNum, ssa, srcVars, dstVars, cands);
+  generateMbpsBv(invRel, ssa, srcVars, dstVars, cands);
         if (debug >= 2)
         {
           outs() << "  Generated " << cands.size() << " BV MBP candidates for testing\n";
@@ -1120,6 +1119,8 @@ namespace ufo
           solver->initializeAux(cands[rel], bnd, rel, i, pref);
         }
       }
+
+      injectMbpCandidates(cands);
 
       if (da > 0)
       {
@@ -1830,10 +1831,10 @@ namespace ufo
       return eliminateQuantifiersBv(tmp, vars, true, false); // Disable core QE for BV
     }
 
-    void generateMbpsBv(int invNum, Expr ssa, ExprVector& srcVars,
+    void generateMbpsBv(Expr invRel, Expr ssa, ExprVector& srcVars,
                         ExprVector& dstVars, ExprSet& cands)
     {
-      if (debug >= 3) outs() << "  Starting generateMbpsBv for invNum " << invNum << "\n";
+      if (debug >= 3) outs() << "  Starting generateMbpsBv for relation " << *invRel << "\n";
       bool hasArray = false;
       for (int i = 0; i < srcVars.size(); i++)
         if (containsOp<ARRAY_TY>(srcVars[i]))
@@ -1902,7 +1903,7 @@ namespace ufo
       for (auto p = prjcts.begin(); p != prjcts.end(); )
       {
         if (debug >= 4) outs() << "    Checking sat for p: " << **p << "\n";
-        if (!u.isSat(prefs[invNum], *p) &&
+        if (!u.isSat(mk<TRUE>(m_efac), *p) &&
             !u.isSat(mkNeg(*p), ssa, replaceAll(*p, srcVars, dstVars)))
         {
           if (debug >= 3)
@@ -1921,10 +1922,49 @@ namespace ufo
         if (prjcts.empty()) prjcts.push_back(mk<TRUE>(m_efac));
       }
 
+      ExprSet &stored = mbpCandidatesBv[invRel];
       for (auto p : prjcts)
-        mbps[invNum].insert(simplifyArithm(p));
+        stored.insert(simplifyArithm(p));
 
-      if (debug >= 3) outs() << "  Final mbps[" << invNum << "] size: " << mbps[invNum].size() << "\n";
+      if (debug >= 3) outs() << "  Final BV MBP count for " << *invRel << ": " << stored.size() << "\n";
+    }
+
+    void injectMbpCandidates(map<Expr, ExprSet> &liaCandidates)
+    {
+      if (mbpCandidatesBv.empty())
+        return;
+
+      const auto &nameMap = m_Bv2LiaTranslator.getBvToLiaDeclMap();
+      for (const auto &kv : mbpCandidatesBv)
+      {
+        auto liaIt = nameMap.find(kv.first);
+        if (liaIt == nameMap.end())
+          continue;
+
+        Expr liaRel = liaIt->second;
+        ExprSet &target = liaCandidates[liaRel];
+
+        for (Expr guard : kv.second)
+        {
+          Expr translated = m_Bv2LiaTranslator.translateExpr(guard);
+          if (!translated)
+            continue;
+
+          Expr normalized = normalizeExpr(normalizePositive(translated, m_efac, debug));
+          Expr simplified = simplifyArithm(normalized, false, false);
+
+          if (!simplified || isOpX<TRUE>(simplified))
+            continue;
+
+          target.insert(simplified);
+
+          if (debug >= 3)
+          {
+            outs() << "  Injected MBP candidate for " << *liaRel
+                   << ": " << *simplified << "\n";
+          }
+        }
+      }
     }
 
     Expr abduce(Expr goal, Expr assm)

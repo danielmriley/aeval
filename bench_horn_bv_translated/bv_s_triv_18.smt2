@@ -13,6 +13,6 @@
 
 (rule (=> (and (inv _FH_0 _FH_1) (and |_FH_0'| (= |_FH_1'| (bvadd (bvmul #x000000000003cbc4 _FH_1) #x000000004ef0379e)))) (inv |_FH_0'| |_FH_1'|)))
 
-(rule (=> (and (inv _FH_0 _FH_1) (and _FH_0 (bvslt _FH_1 #x0000003272d783ba))) fail))
+(rule (=> (and (inv _FH_0 _FH_1) (and _FH_0 (bvult _FH_1 #x0000003272d783ba))) fail))
 
 (query fail)

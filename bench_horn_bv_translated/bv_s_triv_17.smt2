@@ -25,6 +25,6 @@
 
 (rule (=> (and (inv _FH_0 _FH_1 _FH_2 _FH_3 _FH_4 _FH_5 _FH_6 _FH_7) (or (and |_FH_0'| (= |_FH_5'| _FH_5) (= |_FH_4'| (bvadd _FH_4 #x1)) (= |_FH_6'| _FH_6) (= |_FH_7'| _FH_7)) (and |_FH_1'| (= |_FH_5'| (bvadd _FH_5 #x1)) (= |_FH_4'| _FH_4) (= |_FH_6'| _FH_6) (= |_FH_7'| _FH_7)) (and |_FH_2'| (= |_FH_5'| _FH_5) (= |_FH_4'| _FH_4) (= |_FH_6'| (bvadd _FH_6 #x1)) (= |_FH_7'| _FH_7)) (and |_FH_3'| (= |_FH_5'| _FH_5) (= |_FH_4'| _FH_4) (= |_FH_6'| _FH_6) (= |_FH_7'| (bvadd _FH_7 #x1))))) (inv |_FH_0'| |_FH_1'| |_FH_2'| |_FH_3'| |_FH_4'| |_FH_5'| |_FH_6'| |_FH_7'|)))
 
-(rule (=> (and (inv _FH_0 _FH_1 _FH_2 _FH_3 _FH_4 _FH_5 _FH_6 _FH_7) (and (not _FH_0) (not _FH_1) (bvsgt (bvadd _FH_4 _FH_5) #x0) (not _FH_3) (not _FH_2))) fail))
+(rule (=> (and (inv _FH_0 _FH_1 _FH_2 _FH_3 _FH_4 _FH_5 _FH_6 _FH_7) (and (not _FH_0) (not _FH_1) (bvugt (bvadd _FH_4 _FH_5) #x0) (not _FH_3) (not _FH_2))) fail))
 
 (query fail)

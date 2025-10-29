@@ -19,7 +19,7 @@
 
 (rule (=> (and true (and (= #x1 |_FH_0'|) (= #x0 |_FH_1'|) (= #x0 |_FH_3'|) (= #x0 |_FH_4'|) (= #x0 |_FH_5'|) (= #x1 |_FH_2'|))) (inv |_FH_0'| |_FH_1'| |_FH_2'| |_FH_3'| |_FH_4'| |_FH_5'|)))
 
-(rule (=> (and (inv _FH_0 _FH_1 _FH_2 _FH_3 _FH_4 _FH_5) (and (= |_FH_4'| (bvadd _FH_4 #x1)) (= _FH_0 |_FH_0'|) (= |_FH_5'| (bvadd _FH_5 #x2)) (= |_FH_2'| (bvadd _FH_2 _FH_3)) (= _FH_1 |_FH_1'|) (= |_FH_3'| _FH_3))) (inv |_FH_0'| |_FH_1'| |_FH_2'| |_FH_3'| |_FH_4'| |_FH_5'|)))
+(rule (=> (and (inv _FH_0 _FH_1 _FH_2 _FH_3 _FH_4 _FH_5) (and (= |_FH_4'| (bvadd _FH_4 #x1)) (= _FH_0 |_FH_0'|) (= |_FH_5'| (bvadd _FH_5 #x2)) (= |_FH_2'| (bvadd _FH_2 _FH_3)) (= _FH_1 |_FH_1'|) (= |_FH_3'| (bvadd _FH_3 (ite false #x1 #x0))))) (inv |_FH_0'| |_FH_1'| |_FH_2'| |_FH_3'| |_FH_4'| |_FH_5'|)))
 
 (rule (=> (and (inv _FH_0 _FH_1 _FH_2 _FH_3 _FH_4 _FH_5) (distinct _FH_3 _FH_4)) fail))
 

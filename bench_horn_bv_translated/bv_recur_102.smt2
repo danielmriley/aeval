@@ -15,6 +15,6 @@
 
 (rule (=> (and (itp1 _FH_0 _FH_1) (ite (and (= m #x1) (= _FH_1 #x0)) (and (= |_FH_0'| _FH_0) (= |_FH_1'| #x1)) (ite (and (= m #x2) (= _FH_1 #x1)) (and (= |_FH_0'| (bvadd _FH_0 #x1)) (= |_FH_1'| #x0)) (and (= |_FH_0'| _FH_0) (= |_FH_1'| _FH_1))))) (itp1 |_FH_0'| |_FH_1'|)))
 
-(rule (=> (and (itp1 _FH_0 _FH_1) (or (bvsgt _FH_1 #x1) (bvslt _FH_0 #x0))) fail))
+(rule (=> (and (itp1 _FH_0 _FH_1) (or (bvugt _FH_1 #x1) (bvult _FH_0 #x0))) fail))
 
 (query fail)

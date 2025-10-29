@@ -11,8 +11,8 @@
 
 (rule (=> (and true (and (= #x9c |_FH_0'|) (= #x9c |_FH_1'|))) (inv |_FH_0'| |_FH_1'|)))
 
-(rule (=> (and (inv _FH_0 _FH_1) (and (= |_FH_0'| #x00) (= |_FH_1'| #x00))) (inv |_FH_0'| |_FH_1'|)))
+(rule (=> (and (inv _FH_0 _FH_1) (and (= |_FH_0'| #x00) (= |_FH_1'| (ite (bvult _FH_1 #x04) (bvadd _FH_1 #x01) (bvsrem _FH_1 #x04))))) (inv |_FH_0'| |_FH_1'|)))
 
-(rule (=> (and (inv _FH_0 _FH_1) (and (bvsge _FH_1 #x00) (distinct _FH_0 _FH_1))) fail))
+(rule (=> (and (inv _FH_0 _FH_1) (and (bvuge _FH_1 #x00) (distinct _FH_0 _FH_1))) fail))
 
 (query fail)

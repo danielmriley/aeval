@@ -13,10 +13,10 @@
 (declare-var |_FH_2'| (_ BitVec 4))
 (declare-var |_FH_3'| (_ BitVec 4))
 
-(rule (=> (and true (and (= |_FH_1'| |_FH_3'|) (bvsgt |_FH_1'| #x0) (= |_FH_0'| |_FH_2'|) (bvsgt |_FH_0'| #x0))) (inv |_FH_0'| |_FH_1'| |_FH_2'| |_FH_3'|)))
+(rule (=> (and true (and (= |_FH_1'| |_FH_3'|) (bvugt |_FH_1'| #x0) (= |_FH_0'| |_FH_2'|) (bvugt |_FH_0'| #x0))) (inv |_FH_0'| |_FH_1'| |_FH_2'| |_FH_3'|)))
 
-(rule (=> (and (inv _FH_0 _FH_1 _FH_2 _FH_3) (and (= _FH_1 |_FH_1'|) (= _FH_0 |_FH_0'|) (distinct _FH_2 _FH_3) (= |_FH_2'| _FH_2) (= |_FH_3'| _FH_3))) (inv |_FH_0'| |_FH_1'| |_FH_2'| |_FH_3'|)))
+(rule (=> (and (inv _FH_0 _FH_1 _FH_2 _FH_3) (and (= _FH_1 |_FH_1'|) (= _FH_0 |_FH_0'|) (distinct _FH_2 _FH_3) (= |_FH_2'| (bvadd _FH_2 (ite (bvugt _FH_2 _FH_3) (bvneg _FH_3) #x0))) (= |_FH_3'| (bvadd _FH_3 (ite (not (bvugt _FH_2 _FH_3)) (bvneg _FH_2) #x0))))) (inv |_FH_0'| |_FH_1'| |_FH_2'| |_FH_3'|)))
 
-(rule (=> (and (inv _FH_0 _FH_1 _FH_2 _FH_3) (and (bvslt _FH_2 #x1) (= _FH_2 _FH_3))) fail))
+(rule (=> (and (inv _FH_0 _FH_1 _FH_2 _FH_3) (and (bvult _FH_2 #x1) (= _FH_2 _FH_3))) fail))
 
 (query fail)

@@ -9,10 +9,10 @@
 (declare-var |_FH_0'| (_ BitVec 4))
 (declare-var |_FH_1'| (_ BitVec 4))
 
-(rule (=> (and true (and (= #x0 |_FH_0'|) (bvsge |_FH_1'| #x0))) (itp |_FH_0'| |_FH_1'|)))
+(rule (=> (and true (and (= #x0 |_FH_0'|) (bvuge |_FH_1'| #x0))) (itp |_FH_0'| |_FH_1'|)))
 
-(rule (=> (and (itp _FH_0 _FH_1) (and (bvslt _FH_0 _FH_1) (= _FH_1 |_FH_1'|) (= |_FH_0'| (bvadd _FH_0 #x1)))) (itp |_FH_0'| |_FH_1'|)))
+(rule (=> (and (itp _FH_0 _FH_1) (and (bvult _FH_0 _FH_1) (= _FH_1 |_FH_1'|) (= |_FH_0'| (bvadd _FH_0 #x1)))) (itp |_FH_0'| |_FH_1'|)))
 
-(rule (=> (and (itp _FH_0 _FH_1) (and (bvsge _FH_0 _FH_1) (distinct _FH_0 _FH_1))) fail))
+(rule (=> (and (itp _FH_0 _FH_1) (and (bvuge _FH_0 _FH_1) (distinct _FH_0 _FH_1))) fail))
 
 (query fail)

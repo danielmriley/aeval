@@ -15,8 +15,8 @@
 
 (rule (=> (and true (and (= #x1 |_FH_0'|) (= #x1 |_FH_1'|) (= #x1 |_FH_2'|) (= #x1 |_FH_3'|))) (FUN |_FH_0'| |_FH_1'| |_FH_2'| |_FH_3'|)))
 
-(rule (=> (and (FUN _FH_0 _FH_1 _FH_2 _FH_3) (and (= _FH_1 |_FH_1'|) (= _FH_0 |_FH_0'|) (= _FH_2 |_FH_2'|) (bvslt _FH_3 _FH_2) (= |_FH_3'| (bvmul #x2 _FH_3)))) (FUN |_FH_0'| |_FH_1'| |_FH_2'| |_FH_3'|)))
+(rule (=> (and (FUN _FH_0 _FH_1 _FH_2 _FH_3) (and (= _FH_1 |_FH_1'|) (= _FH_0 |_FH_0'|) (= _FH_2 |_FH_2'|) (bvult _FH_3 _FH_2) (= |_FH_3'| (bvmul #x2 _FH_3)))) (FUN |_FH_0'| |_FH_1'| |_FH_2'| |_FH_3'|)))
 
-(rule (=> (and (FUN _FH_0 _FH_1 _FH_2 _FH_3) (and (bvsge _FH_3 _FH_2) (bvslt _FH_3 #x1))) fail))
+(rule (=> (and (FUN _FH_0 _FH_1 _FH_2 _FH_3) (and (bvuge _FH_3 _FH_2) (bvult _FH_3 #x1))) fail))
 
 (query fail)

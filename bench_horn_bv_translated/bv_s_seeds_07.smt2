@@ -9,8 +9,8 @@
 
 (rule (=> (and true (= #x00 |_FH_0'|)) (itp |_FH_0'|)))
 
-(rule (=> (and (itp _FH_0) (= |_FH_0'| #x00)) (itp |_FH_0'|)))
+(rule (=> (and (itp _FH_0) (= |_FH_0'| (ite (= _FH_0 #x0a) #x00 (bvadd _FH_0 #x01)))) (itp |_FH_0'|)))
 
-(rule (=> (and (itp _FH_0) (bvsgt _FH_0 #x0a)) fail))
+(rule (=> (and (itp _FH_0) (bvugt _FH_0 #x0a)) fail))
 
 (query fail)

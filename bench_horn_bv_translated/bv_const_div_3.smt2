@@ -15,6 +15,6 @@
 
 (rule (=> (and (inv _FH_0 _FH_1 _FH_2) (and (= |_FH_1'| (bvadd _FH_1 #x01)) (= #x00 _FH_1) (= |_FH_0'| (bvadd _FH_0 #x33)) (= |_FH_2'| (bvadd _FH_2 #xff)))) (inv |_FH_0'| |_FH_1'| |_FH_2'|)))
 
-(rule (=> (and (inv _FH_0 _FH_1 _FH_2) (and (= #x00 _FH_1) (bvslt _FH_2 #x00))) fail))
+(rule (=> (and (inv _FH_0 _FH_1 _FH_2) (and (= #x00 _FH_1) (bvult _FH_2 #x00))) fail))
 
 (query fail)

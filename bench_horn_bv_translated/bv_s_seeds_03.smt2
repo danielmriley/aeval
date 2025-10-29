@@ -13,6 +13,6 @@
 
 (rule (=> (and (itp _FH_0 _FH_1) (and (= |_FH_1'| (bvadd _FH_1 #xf)) (= |_FH_0'| (bvadd _FH_0 #x1)))) (itp |_FH_0'| |_FH_1'|)))
 
-(rule (=> (and (itp _FH_0 _FH_1) (or (bvslt _FH_0 #x0) (bvsgt _FH_1 #x0))) fail))
+(rule (=> (and (itp _FH_0 _FH_1) (or (bvult _FH_0 #x0) (bvugt _FH_1 #x0))) fail))
 
 (query fail)
