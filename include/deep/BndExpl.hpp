@@ -5,6 +5,8 @@
 #include "Distribution.hpp"
 #include "ae/AeValSolver.hpp"
 #include "simpl/Bv2Lia.hpp"
+#include "ufo/ExprBv.hh"
+#include <algorithm>
 #include <limits>
 
 using namespace std;
@@ -28,6 +30,32 @@ namespace ufo
     Expr inv; // 1-inductive proof
 
     bool debug;
+
+    Expr toIntegerExpr(Expr val, double &asDouble, const cpp_int &maxDouble)
+    {
+      if (val == NULL)
+        return NULL;
+
+      cpp_int asInt;
+      if (isOpX<MPZ>(val))
+      {
+        asInt = lexical_cast<cpp_int>(val);
+      }
+      else if (bv::is_bvnum(val) || bv::is_bvconst(val))
+      {
+        asInt = lexical_cast<cpp_int>(bv::toMpz(val).get_str());
+      }
+      else
+      {
+        return NULL;
+      }
+
+      if (asInt > maxDouble || asInt < -maxDouble)
+        return NULL;
+
+      asDouble = asInt.convert_to<double>();
+      return mkMPZ(asInt, m_efac);
+    }
 
   public:
     vector<ExprVector> bindVars;
@@ -564,6 +592,14 @@ namespace ufo
           }
           bindVars.pop_back();
 
+          if(debug)
+          {
+            outs() << "SSA: \n";
+            for (auto &s : ssa)
+              outs() << *s << " /\\ ";
+            outs() << "\n";
+          }
+
           // compute vars for opt constraint
           vector<ExprVector> versVars;
           ExprSet allVars;
@@ -679,6 +715,281 @@ namespace ufo
       }
 
       return true;
+    }
+
+    bool unrollAndExecuteSplitterBv(
+        Bv2LiaTranslator &translator,
+        Expr srcRel,
+        ExprVector &liaInvVars,
+        ExprVector &bvInvVars,
+        vector<vector<double>> &models,
+        Expr phaseGuard,
+        Expr invs,
+        bool fwd,
+        ExprSet &constr,
+        const ExprVector &mbpGuides,
+        int k = 10)
+    {
+      assert(phaseGuard != NULL);
+
+      string str = to_string(numeric_limits<double>::max());
+      str = str.substr(0, str.find('.'));
+      cpp_int max_double = lexical_cast<cpp_int>(str);
+
+      bool res = false;
+
+      for (auto &cycleEntry : ruleManager.cycles)
+      {
+        Expr invRel = cycleEntry.first;
+        for (int cyc = 0; cyc < ruleManager.cycles[invRel].size(); cyc++)
+        {
+          vector<int> mainInds;
+          auto &loop = ruleManager.cycles[invRel][cyc];
+          ExprVector &srcVars = ruleManager.chcs[loop[0]].srcVars;
+          if (srcRel != ruleManager.chcs[loop[0]].srcRelation)
+            continue;
+          if (models.size() > 0)
+            continue;
+
+          ExprVector varsMask;
+          ExprVector bvVarsLocal;
+          ExprVector liaVarsLocal;
+
+          for (int i = 0; i < srcVars.size(); i++)
+          {
+            Expr ty = typeOf(srcVars[i]);
+
+            if (isOpX<INT_TY>(ty))
+            {
+              mainInds.push_back(i);
+              bvVarsLocal.push_back(srcVars[i]);
+              liaVarsLocal.push_back(srcVars[i]);
+              varsMask.push_back(srcVars[i]);
+              continue;
+            }
+
+            if (isOpX<ARRAY_TY>(ty) && ruleManager.hasArrays[srcRel])
+            {
+              Expr selectExpr = findSelect(loop[0], i);
+              if (selectExpr != NULL)
+              {
+                Expr liaSelect = translator.translateExpr(selectExpr);
+                if (liaSelect != NULL)
+                {
+                  bvVarsLocal.push_back(selectExpr);
+                  liaVarsLocal.push_back(liaSelect);
+                  mainInds.push_back(-i - 1);
+                  varsMask.push_back(srcVars[i]);
+                }
+              }
+              continue;
+            }
+
+            if (isOpX<BVSORT>(ty))
+            {
+              Expr liaVar = translator.translateExpr(srcVars[i]);
+              if (liaVar != NULL)
+              {
+                mainInds.push_back(i);
+                bvVarsLocal.push_back(srcVars[i]);
+                liaVarsLocal.push_back(liaVar);
+                varsMask.push_back(srcVars[i]);
+              }
+            }
+          }
+
+          if (bvVarsLocal.empty())
+            continue;
+
+          bvInvVars = bvVarsLocal;
+          liaInvVars = liaVarsLocal;
+
+          vector<int> trace;
+          int l = 0;
+          if (ruleManager.hasArrays[srcRel])
+            l++;
+
+          for (int j = 0; j < k; j++)
+            for (int m = 0; m < loop.size(); m++)
+              trace.push_back(loop[m]);
+
+          ExprVector ssa;
+          getSSA(trace, ssa);
+          ExprVector guideInstances;
+          if (!mbpGuides.empty() && !bindVars.empty())
+          {
+            size_t limit = std::min(mbpGuides.size(), bindVars.size());
+            for (size_t idx = 0; idx < limit; idx++)
+            {
+              Expr inst = replaceAll(mbpGuides[idx], srcVars, bindVars[idx]);
+              if (inst != NULL && !isOpX<TRUE>(inst))
+              {
+                if (debug)
+                  outs() << "Applying MBP guide (prefix " << idx << "): " << *mbpGuides[idx] << "\n";
+                guideInstances.push_back(inst);
+              }
+            }
+            for (size_t idx = limit; idx < mbpGuides.size(); idx++)
+            {
+              Expr inst = replaceAll(mbpGuides[idx], srcVars, bindVars.back());
+              if (inst != NULL && !isOpX<TRUE>(inst))
+              {
+                if (debug)
+                  outs() << "Applying MBP guide (tail " << idx << "): " << *mbpGuides[idx] << "\n";
+                guideInstances.push_back(inst);
+              }
+            }
+          }
+
+          Expr phaseGuardInst = fwd ? replaceAll(phaseGuard, srcVars, bindVars[loop.size() - 1])
+                                    : phaseGuard;
+          Expr invsInst = NULL;
+          if (invs != NULL)
+          {
+            invsInst = fwd ? invs
+                           : replaceAll(invs, srcVars, bindVars[loop.size() - 1]);
+          }
+
+          if (fwd)
+          {
+            if (invsInst != NULL)
+              ssa.push_back(invsInst);
+            ssa.push_back(phaseGuardInst);
+          }
+          else
+          {
+            ssa.push_back(phaseGuardInst);
+            if (invsInst != NULL)
+              ssa.push_back(invsInst);
+          }
+
+          ssa.insert(ssa.end(), guideInstances.begin(), guideInstances.end());
+
+          if (debug)
+          {
+            outs() << "SSA:\n";
+            for (auto &s : ssa)
+              outs() << "  " << *s << "\n";
+            outs() << "\n";
+          }
+
+          bindVars.pop_back();
+
+          vector<ExprVector> versVars;
+          ExprSet allVars;
+          ExprVector diseqs;
+          fillVars(srcRel, srcVars, bvVarsLocal, l, loop.size(), mainInds, versVars, allVars);
+          getOptimConstr(versVars, bvVarsLocal.size(), srcVars, constr, phaseGuard, diseqs);
+
+          Expr cntvar = bind::intConst(mkTerm<string>("_FH_cnt", m_efac));
+          allVars.insert(cntvar);
+          allVars.insert(bindVars.back().begin(), bindVars.back().end());
+          ssa.push_back(mk<EQ>(cntvar, mkplus(diseqs, m_efac)));
+
+          auto resSat = u.isSat(ssa);
+          if (indeterminate(resSat) || !resSat)
+          {
+            if (debug)
+              outs() << "Unable to solve the BV splitter formula for " << srcRel << " and phase guard " << phaseGuard << "\n";
+            continue;
+          }
+
+          res = true;
+
+          ExprMap allModels;
+          u.getOptModel<GT>(allVars, allModels, cntvar);
+
+          ExprSet phaseGuardVars;
+          set<int> phaseGuardVarsIndex;
+          filter(phaseGuard, bind::IsConst(), inserter(phaseGuardVars, phaseGuardVars.begin()));
+          for (auto &a : phaseGuardVars)
+          {
+            int idx = getVarIndex(a, varsMask);
+            assert(idx >= 0);
+            phaseGuardVarsIndex.insert(idx);
+          }
+
+          if (debug)
+            outs() << "\nUnroll and execute the BV splitter for " << srcRel << "\n";
+
+          map<int, ExprSet> ms;
+
+          for (int j = 0; j < versVars.size(); j++)
+          {
+            vector<double> model;
+            bool toSkip = false;
+            if (debug)
+              outs() << "  model for " << j << ": [";
+
+            SMTUtils u2(m_efac);
+            ExprSet equalities;
+
+            for (auto idx : phaseGuardVarsIndex)
+            {
+              Expr srcVar = varsMask[idx];
+              Expr bvar = versVars[j][idx];
+              if (isOpX<SELECT>(bvar))
+                bvar = bvar->left();
+              Expr m = allModels[bvar];
+              if (m == NULL)
+              {
+                toSkip = true;
+                break;
+              }
+              equalities.insert(mk<EQ>(srcVar, m));
+            }
+
+            if (toSkip)
+              continue;
+
+            equalities.insert(phaseGuard);
+
+            if (!u2.isSat(equalities))
+            {
+              if (debug)
+                outs() << "   <  skipping  >      ";
+              continue;
+            }
+
+            for (int i = 0; i < bvVarsLocal.size(); i++)
+            {
+              Expr bvar = versVars[j][i];
+              Expr value = allModels[bvar];
+              double numericValue = 0.0;
+              Expr exactExpr = toIntegerExpr(value, numericValue, max_double);
+              if (exactExpr == NULL)
+              {
+                toSkip = true;
+                break;
+              }
+
+              model.push_back(numericValue);
+              if (debug)
+                outs() << *bvar << " = " << *exactExpr << ", ";
+              if (!containsOp<ARRAY_TY>(bvar) && i < liaVarsLocal.size())
+                ms[i].insert(mk<EQ>(liaVarsLocal[i], exactExpr));
+            }
+
+            if (toSkip)
+            {
+              if (debug)
+                outs() << "\b\b   <  skipping  >      ]\n";
+              continue;
+            }
+
+            models.push_back(model);
+
+            if (debug)
+              outs() << "\b\b]\n";
+          }
+
+          for (auto &entry : ms)
+            if (!entry.second.empty())
+              concrInvs[srcRel].insert(simplifyArithm(disjoin(entry.second, m_efac)));
+        }
+      }
+
+      return res;
     }
 
     bool unrollAndExecuteGhost(
@@ -1064,6 +1375,257 @@ namespace ufo
     }
 
     // used for multiple loops to unroll inductive clauses k times and collect corresponding models
+    bool unrollAndExecuteMultipleBv(
+        Bv2LiaTranslator &translator,
+        map<Expr, ExprVector> &liaInvVars,
+        map<Expr, vector<vector<double>>> &models,
+        map<Expr, ExprVector> &arrRanges,
+        map<Expr, ExprSet> &constr,
+        map<Expr, ExprVector> &bvInvVars,
+        int k = 10)
+    {
+      string str = to_string(numeric_limits<double>::max());
+      str = str.substr(0, str.find('.'));
+      cpp_int max_double = lexical_cast<cpp_int>(str);
+
+      map<int, bool> chcsConsidered;
+      map<int, Expr> exprModels;
+      bool res = false;
+
+      for (auto &cycleEntry : ruleManager.cycles)
+      {
+        Expr invRel = cycleEntry.first;
+        for (int cyc = 0; cyc < ruleManager.cycles[invRel].size(); cyc++)
+        {
+          vector<int> mainInds;
+          auto &loop = ruleManager.cycles[invRel][cyc];
+          Expr srcRel = invRel;
+          ExprVector &srcVars = ruleManager.chcs[loop[0]].srcVars;
+
+          if (models[srcRel].size() > 0)
+            continue;
+
+          ExprVector bvVars;
+          ExprVector liaVarsLocal;
+          for (int i = 0; i < srcVars.size(); i++)
+          {
+            Expr ty = typeOf(srcVars[i]);
+
+            if (isOpX<ARRAY_TY>(ty) && ruleManager.hasArrays[srcRel])
+            {
+              Expr selectExpr = findSelect(loop[0], i);
+              if (selectExpr != NULL)
+              {
+                Expr liaSelect = translator.translateExpr(selectExpr);
+                if (liaSelect != NULL)
+                {
+                  bvVars.push_back(selectExpr);
+                  liaVarsLocal.push_back(liaSelect);
+                  mainInds.push_back(-i - 1);
+                }
+              }
+              continue;
+            }
+
+            if (isOpX<INT_TY>(ty))
+            {
+              bvVars.push_back(srcVars[i]);
+              liaVarsLocal.push_back(srcVars[i]);
+              mainInds.push_back(i);
+              continue;
+            }
+
+            if (isOpX<BVSORT>(ty))
+            {
+              Expr liaVar = translator.translateExpr(srcVars[i]);
+              if (liaVar != NULL)
+              {
+                bvVars.push_back(srcVars[i]);
+                liaVarsLocal.push_back(liaVar);
+                mainInds.push_back(i);
+              }
+            }
+          }
+
+          if (bvVars.empty())
+            continue;
+
+          liaInvVars[srcRel] = liaVarsLocal;
+          bvInvVars[srcRel] = bvVars;
+
+          auto &prefix = ruleManager.prefixes[invRel][cyc];
+          vector<int> trace;
+          Expr lastModel = mk<TRUE>(m_efac);
+
+          for (int p = 0; p < prefix.size(); p++)
+          {
+            if (chcsConsidered[prefix[p]])
+            {
+              Expr lastModelTmp = exprModels[prefix[p]];
+              if (lastModelTmp != NULL)
+                lastModel = lastModelTmp;
+              trace.clear();
+            }
+            trace.push_back(prefix[p]);
+          }
+
+          int l = trace.size() - 1;
+          if (ruleManager.hasArrays[srcRel])
+            l++;
+
+          for (int j = 0; j < k; j++)
+            for (int m = 0; m < loop.size(); m++)
+              trace.push_back(loop[m]);
+
+          int backCHC = -1;
+          for (int i = 0; i < ruleManager.chcs.size(); i++)
+          {
+            auto &r = ruleManager.chcs[i];
+            if (i != loop[0] && !r.isQuery && r.srcRelation == srcRel)
+            {
+              backCHC = i;
+              chcsConsidered[i] = true;
+              trace.push_back(i);
+              break;
+            }
+          }
+
+          ExprVector ssa;
+          getSSA(trace, ssa);
+          bindVars.pop_back();
+          int traceSz = trace.size();
+          assert(bindVars.size() == traceSz - 1);
+
+          vector<ExprVector> versVars;
+          ExprSet allVars;
+          ExprVector diseqs;
+          fillVars(srcRel, srcVars, bvVars, l, loop.size(), mainInds, versVars, allVars);
+          getOptimConstr(versVars, bvVars.size(), srcVars, constr[srcRel], NULL, diseqs);
+
+          Expr cntvar = bind::intConst(mkTerm<string>("_FH_cnt", m_efac));
+          allVars.insert(cntvar);
+          allVars.insert(bindVars.back().begin(), bindVars.back().end());
+          ssa.insert(ssa.begin(), mk<EQ>(cntvar, mkplus(diseqs, m_efac)));
+
+          for (auto &rangeExpr : arrRanges[srcRel])
+            ssa.insert(ssa.begin(), replaceAll(mk<GT>(rangeExpr, mkMPZ(k, m_efac)), srcVars, bindVars[0]));
+
+          bool toContinue = false;
+          bool noopt = false;
+          while (true)
+          {
+            if (bindVars.size() <= 1)
+            {
+              if (debug)
+                outs() << "Unable to find a suitable BV unrolling for " << *srcRel << "\n";
+              toContinue = true;
+              break;
+            }
+
+            if (u.isSat(lastModel, conjoin(ssa, m_efac)))
+            {
+              if (backCHC != -1 && trace.back() != backCHC && trace.size() != traceSz - 1)
+              {
+                trace.push_back(backCHC);
+                ssa.clear();
+                getSSA(trace, ssa);
+                bindVars.pop_back();
+                noopt = true;
+              }
+              else
+                break;
+            }
+            else
+            {
+              noopt = true;
+              if (trace.size() == traceSz)
+              {
+                trace.pop_back();
+                ssa.pop_back();
+                bindVars.pop_back();
+              }
+              else
+              {
+                trace.resize(trace.size() - loop.size());
+                ssa.resize(ssa.size() - loop.size());
+                bindVars.resize(bindVars.size() - loop.size());
+              }
+            }
+          }
+
+          if (toContinue)
+            continue;
+
+          res = true;
+          map<int, ExprSet> ms;
+
+          ExprMap allModels;
+          if (noopt)
+            u.getModel(allVars, allModels);
+          else
+            u.getOptModel<GT>(allVars, allModels, cntvar);
+
+          if (debug)
+            outs() << "\nUnroll and execute the BV cycle for " << srcRel << "\n";
+          for (int j = 0; j < versVars.size(); j++)
+          {
+            vector<double> model;
+            bool toSkip = false;
+            if (debug)
+              outs() << "  model for " << j << ": [";
+
+            for (int i = 0; i < bvVars.size(); i++)
+            {
+              Expr bvar = versVars[j][i];
+              Expr value = allModels[bvar];
+              double numericValue = 0.0;
+              Expr exactExpr = toIntegerExpr(value, numericValue, max_double);
+              if (exactExpr == NULL)
+              {
+                toSkip = true;
+                break;
+              }
+
+              model.push_back(numericValue);
+              if (debug)
+                outs() << *bvar << " = " << *exactExpr << ", ";
+              if (!containsOp<ARRAY_TY>(bvar) && i < liaVarsLocal.size())
+                ms[i].insert(mk<EQ>(liaVarsLocal[i], exactExpr));
+            }
+
+            if (toSkip)
+            {
+              if (debug)
+                outs() << "\b\b   <  skipping  >      ]\n";
+              continue;
+            }
+
+            models[srcRel].push_back(model);
+            if (debug)
+              outs() << "\b\b]\n";
+          }
+
+          for (auto &a : ms)
+            concrInvs[srcRel].insert(simplifyArithm(disjoin(a.second, m_efac)));
+
+          if (chcsConsidered[trace.back()])
+          {
+            ExprSet mdls;
+            for (auto &a : bindVars.back())
+            {
+              Expr mdl = allModels[a];
+              if (mdl != NULL)
+                mdls.insert(mk<EQ>(a, mdl));
+            }
+            exprModels[trace.back()] = replaceAll(conjoin(mdls, m_efac),
+                                                  bindVars.back(), ruleManager.chcs[trace.back()].srcVars);
+          }
+        }
+      }
+
+      return res;
+    }
+
     bool unrollAndExecuteMultiple(
         map<Expr, ExprVector> &invVars,
         map<Expr, vector<vector<double>>> &models,

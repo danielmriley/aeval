@@ -900,50 +900,38 @@ namespace ufo
       if (debug >= 2)
         outs() << "\n--- Learning Candidates From Data (BV pipeline) ---\n";
 
-      // Translate BV CHCs to LIA so DataLearner2/BndExpl can operate over integers.
-      CHCs liaChcsLocal = m_Bv2LiaTranslator.translate(m_bvChcs, false);
-      DataLearner2 dataLearner(liaChcsLocal, m_z3, debug);
+      DataLearner2 dataLearner(m_bvChcs, m_z3, debug);
 
-      const auto &bvToLiaMap = m_Bv2LiaTranslator.getBvToLiaDeclMap();
-      map<Expr, Expr> liaToBvMap;
-      for (auto &kv : bvToLiaMap)
-        liaToBvMap[kv.second] = kv.first;
-
-      map<Expr, ExprVector> liaArrRanges;
+      map<Expr, ExprVector> arrRanges;
       map<Expr, ExprSet> liaConstr;
       bool produced = false;
 
-      for (auto decl : liaChcsLocal.decls)
+      for (auto decl : m_bvChcs.decls)
       {
         if (decl == NULL)
           continue;
-        Expr liaRel = decl->left();
-        if (!liaRel || liaRel == liaChcsLocal.failDecl || isOpX<TRUE>(liaRel))
+        Expr bvRel = decl->left();
+        if (!bvRel || bvRel == m_bvChcs.failDecl || isOpX<TRUE>(bvRel))
           continue;
 
         bool runGJ = doGJ || (!doReg && !doConnect);
-        boost::tribool res = dataLearner.computeData(liaRel, liaArrRanges, liaConstr, runGJ, doReg, doConnect);
+  boost::tribool res = dataLearner.computeDataBv(bvRel, m_Bv2LiaTranslator,
+                   arrRanges, liaConstr,
+                   runGJ, doReg, doConnect);
         if (boost::logic::indeterminate(res) || !res)
           continue;
 
         ExprSet liaCands;
-        dataLearner.getDataCands(liaCands, liaRel);
+        dataLearner.getDataCands(liaCands, bvRel);
         if (liaCands.empty())
           continue;
 
-        liaConstr[liaRel].insert(liaCands.begin(), liaCands.end());
-
-        auto bvIt = liaToBvMap.find(liaRel);
-        if (bvIt == liaToBvMap.end())
-          continue;
-        Expr bvRel = bvIt->second;
-
         ExprVector liaVars;
         ExprVector bvVars;
-        if (liaChcsLocal.invVars.count(liaRel))
-          liaVars = liaChcsLocal.invVars[liaRel];
-        if (m_bvChcs.invVars.count(bvRel))
-          bvVars = m_bvChcs.invVars[bvRel];
+        dataLearner.getLiaVars(bvRel, liaVars);
+        dataLearner.getBvVars(bvRel, bvVars);
+        if (liaVars.empty() || liaVars.size() != bvVars.size())
+          continue;
 
         for (auto cand : liaCands)
         {
@@ -955,12 +943,13 @@ namespace ufo
           if (!simplified || isOpX<TRUE>(simplified))
             continue;
 
+          liaConstr[bvRel].insert(simplified);
+
           Expr bvExpr = m_Lia2BvTranslator.translateExpr(simplified, m_original_bv_width);
           if (!bvExpr)
             continue;
 
-          if (!liaVars.empty() && liaVars.size() == bvVars.size())
-            bvExpr = replaceAll(bvExpr, liaVars, bvVars);
+          bvExpr = replaceAll(bvExpr, liaVars, bvVars);
 
           if (!bvExpr || isOpX<TRUE>(bvExpr))
             continue;
@@ -992,43 +981,79 @@ namespace ufo
       }
 
       bool isSafe = false;
+      map<Expr, ExprSet> guidedMbpByRel;
 
-      learnFromData();
-      exit(0);
-
-      // Test generateMbpsBv with the first BV rule
       if (!m_bvChcs.chcs.empty())
       {
-        if (debug >= 3) outs() << "  About to call generateMbpsBv\n";
-        HornRuleExt hr;
-        for (const auto rule : m_bvChcs.chcs)
+        if (debug >= 3)
+          outs() << "  Generating BV MBP guides for inductive clauses\n";
+
+        for (auto &rule : m_bvChcs.chcs)
         {
-          if(rule.isInductive)
+          if (!rule.isInductive)
+            continue;
+
+          Expr invRel = rule.dstRelation ? rule.dstRelation : rule.srcRelation;
+          if (invRel == NULL)
+            continue;
+
+          Expr ssa = rule.body;
+          ExprVector srcVars = rule.srcVars;
+          ExprVector dstVars = rule.dstVars;
+          ExprSet guidesForRel;
+
+          generateMbpsBv(invRel, ssa, srcVars, dstVars, guidesForRel);
+
+          if (!guidesForRel.empty())
           {
-            hr = rule;
-            break;
+            ExprSet &bucket = guidedMbpByRel[invRel];
+            bucket.insert(guidesForRel.begin(), guidesForRel.end());
+            if (debug >= 3)
+            {
+              outs() << "    Relation " << *invRel << " has "
+                     << bucket.size() << " MBP guide"
+                     << (bucket.size() == 1 ? "" : "s") << "\n";
+            }
           }
         }
-  Expr invRel = hr.dstRelation ? hr.dstRelation : hr.srcRelation;
-  Expr ssa = hr.body;
-        ExprVector srcVars = hr.srcVars;
-        ExprVector dstVars = hr.dstVars;
-        ExprSet cands;
-  generateMbpsBv(invRel, ssa, srcVars, dstVars, cands);
+
         if (debug >= 2)
         {
-          outs() << "  Generated " << cands.size() << " BV MBP candidates for testing\n";
+          outs() << "  Prepared " << guidedMbpByRel.size()
+                 << " BV MBP guide set" << (guidedMbpByRel.size() == 1 ? "" : "s")
+                 << "\n";
         }
       }
 
-      for (int i = 0; i < 3; i++)
+      for (int iter = 0; iter < 4; iter++)
       {
         if (debug >= 2)
+          outs() << "  Solve iteration: " << iter << "\n";
+
+        if (iter == 2)
         {
-          outs() << "  Solve iteration: " << i << "\n";
+          bool produced = learnFromData();
+          if (!produced && debug >= 2)
+            outs() << "  Data learning did not produce new candidates.\n";
+        }
+        else if (iter == 3)
+        {
+          if (guidedMbpByRel.empty())
+          {
+            if (debug >= 2)
+              outs() << "  Guided data learning skipped (no MBP guides).\n";
+          }
+          else
+          {
+            for (auto &entry : guidedMbpByRel)
+            {
+              if (!entry.second.empty())
+                learnFromGuidedData(entry.first, entry.second);
+            }
+          }
         }
 
-        if (!translateToLia(i > 0))
+        if (!translateToLia((iter == 1)))
         {
           outs() << "Error: Failed during BV to LIA translation.\n";
           return false;
@@ -1051,7 +1076,7 @@ namespace ufo
           return false;
         }
 
-        if(translate)
+        if (translate)
         {
           m_learnedLemmas.clear();
           break;
@@ -1062,21 +1087,22 @@ namespace ufo
 
         if (isSafe)
         {
-          outs() << "Success after " << i+1 << " iteration" << (i+1>1 ? "s" : "") << "\n";
+          outs() << "Success after " << iter + 1 << " iteration"
+                 << (iter + 1 > 1 ? "s" : "") << "\n";
           printSolution();
           return true;
         }
-        else if (i >= to)
+        else if (iter >= to)
         {
           outs() << "unknown\n";
           break;
         }
 
         if(debug >= 5) {
-          outs() << "  Iteration " << i << " completed. No solution found yet.\n";
+          outs() << "  Iteration " << iter << " completed. No solution found yet.\n";
           for(auto& b: m_bvSolutionMap) {
             outs() << "    Relation: " << *b.first << "\n";
-            outs() << "    Solution: " << *b.second << "\n";
+            outs() << "    Invariant: " << *b.second << "\n";
           }
         }
 
@@ -2021,6 +2047,64 @@ namespace ufo
         stored.insert(simplifyArithm(p));
 
       if (debug >= 3) outs() << "  Final BV MBP count for " << *invRel << ": " << stored.size() << "\n";
+    }
+
+    void learnFromGuidedData(Expr srcRel, const ExprSet &mbpGuides)
+    {
+      if (srcRel == NULL || mbpGuides.empty())
+        return;
+
+      if (debug >= 2)
+        outs() << "\n--- Learning From Guided Data (BV) ---\n";
+
+      bool runGJ = doGJ || (!doReg && !doConnect);
+
+      Expr invsExpr = NULL;
+      size_t lemmaCount = 0;
+
+      auto solIt = m_bvSolutionMap.find(srcRel);
+      if (solIt != m_bvSolutionMap.end())
+      {
+        Expr solution = solIt->second;
+        if (solution != NULL && !isOpX<TRUE>(solution))
+        {
+          bool varsOk = true;
+          auto invVarsIt = m_bvChcs.invVars.find(srcRel);
+          if (invVarsIt != m_bvChcs.invVars.end())
+          {
+            varsOk = hasOnlyVars(solution, invVarsIt->second);
+          }
+          if (!varsOk)
+          {
+            if (debug >= 1)
+              outs() << "  Warning: Skipping learned lemmas for " << *srcRel
+                     << " due to unexpected variables.\n";
+          }
+          else
+          {
+            invsExpr = solution;
+            ExprSet conj;
+            getConj(solution, conj);
+            lemmaCount = conj.size();
+          }
+        }
+      }
+
+      if (debug >= 3 && invsExpr != NULL)
+        outs() << "  Passing " << lemmaCount
+               << " learned lemma" << (lemmaCount == 1 ? "" : "s")
+               << " from m_bvSolutionMap into BV splitter calls for "
+               << *srcRel << "\n";
+
+      for (Expr guide : mbpGuides)
+      {
+        DataLearner2 dl(m_bvChcs, m_z3, debug);
+        ExprVector mbpGuidesVec(1, guide);
+        Expr splitter = guide;
+        ExprSet phaseConstr;
+
+        dl.computeDataPhaseBv(srcRel, m_Bv2LiaTranslator, splitter, invsExpr, true, phaseConstr, mbpGuidesVec, runGJ, doReg, doConnect);
+      }
     }
 
     void injectMbpCandidates(map<Expr, ExprSet> &liaCandidates)

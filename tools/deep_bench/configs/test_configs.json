@@ -3,15 +3,8 @@
     {
       "name": "bv",
       "tool": "./tools/deep/freqhorn",
-      "flags": "--bv",
-      "benchmarks": "../bench_horn_bv/",
-      "timeout": 10
-    },
-    {
-      "name": "bv-sampl",
-      "tool": "./tools/deep/freqhorn",
-      "flags": "--bv --skip-translation",
-      "benchmarks": "../bench_horn_bv/",
+      "flags": "--bv --data2",
+      "benchmarks": "../bench_horn_bv_translated/",
       "timeout": 10
     }
   ]

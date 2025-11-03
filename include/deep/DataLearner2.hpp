@@ -17,6 +17,7 @@
 
 #include "Horn.hpp"
 #include "BndExpl.hpp"
+#include "simpl/Bv2Lia.hpp"
 #include "ae/ExprSimpl.hpp"
 
 using namespace std;
@@ -973,6 +974,7 @@ namespace ufo
     map<Expr, matrix> basis;
     map<Expr, vector<vector<double>>> models; // Changed to matrix_double
     map<Expr, ExprVector> invVars;
+  map<Expr, ExprVector> bvInvVars;
     map<Expr, ExprSet> dataCands;
     vector<RATIONAL> firstRow;
     int debug;
@@ -1200,6 +1202,51 @@ namespace ufo
   public:
     DataLearner2(CHCs &r, EZ3 &z3, int _debug = 0) : ruleManager(r), bnd(ruleManager, (_debug > 0)), m_efac(r.m_efac), debug(_debug) {}
 
+    boost::tribool computeDataBv(Expr srcRel, Bv2LiaTranslator &translator,
+                                 map<Expr, ExprVector> &arrRanges, map<Expr, ExprSet> &constr,
+                                 bool doGJ = true, bool doRegression = false,
+                                 bool doConnect = false, int k = 10)
+    {
+      if (debug >= 1)
+        outs() << "\n======== COMPUTE DATA (BV) ========\n";
+
+      models[srcRel].clear();
+      boost::tribool res = bnd.unrollAndExecuteMultipleBv(translator, invVars, models,
+                                                          arrRanges, constr, bvInvVars, k);
+
+      if (!res)
+      {
+        if (debug >= 1)
+          outs() << "BMC formula unsat\n";
+        return res;
+      }
+
+      if (doGJ)
+        computeData(srcRel);
+      if (doRegression)
+        computeLinearRegressionCands(srcRel);
+      if (doConnect)
+        connectCands(srcRel);
+
+      return res;
+    }
+
+    void getLiaVars(Expr rel, ExprVector &vars) const
+    {
+      vars.clear();
+      auto it = invVars.find(rel);
+      if (it != invVars.end())
+        vars.insert(vars.end(), it->second.begin(), it->second.end());
+    }
+
+    void getBvVars(Expr rel, ExprVector &vars) const
+    {
+      vars.clear();
+      auto it = bvInvVars.find(rel);
+      if (it != bvInvVars.end())
+        vars.insert(vars.end(), it->second.begin(), it->second.end());
+    }
+
     boost::tribool connectPhase(Expr src, Expr dst, int k = 1,
                     Expr srcRel = NULL, Expr block = NULL, Expr invs = NULL,
                     Expr preCond = NULL, bool doGJ = false, bool doConnect = false,
@@ -1289,6 +1336,32 @@ namespace ufo
       return rowsExpr;
     }
 
+    void addImplicationCands(Expr srcRel, Expr splitter)
+    {
+      if (splitter == NULL)
+        return;
+
+      Expr refinedSplitter = simplifyBool(splitter);
+      if (isOpX<TRUE>(refinedSplitter))
+        return;
+
+      ExprSet &baseCands = dataCands[srcRel];
+      if (baseCands.empty())
+        return;
+
+      ExprSet newCands;
+      for (auto &cand : baseCands)
+      {
+        if (cand == NULL || isOpX<TRUE>(cand))
+          continue;
+        Expr implication = simplifyBool(mk<IMPL>(refinedSplitter, cand));
+        if (implication != NULL && !isOpX<TRUE>(implication))
+          newCands.insert(implication);
+      }
+
+      baseCands.insert(newCands.begin(), newCands.end());
+    }
+
     boost::tribool computeData(Expr srcRel, map<Expr, ExprVector> &arrRanges, map<Expr, ExprSet> &constr,
                                bool doGJ = true, bool doRegression = false, bool doConnect = false)
     {
@@ -1332,6 +1405,36 @@ namespace ufo
       if(doGJ) computeData(srcRel);
       if(doRegression) computeLinearRegressionCands(srcRel); // Linear Regression method
       if(doConnect) connectCands(srcRel); // Connect phase
+      addImplicationCands(srcRel, splitter);
+      return res;
+    }
+
+    boost::tribool computeDataPhaseBv(Expr srcRel, Bv2LiaTranslator &translator, Expr splitter, Expr invs, bool fwd,
+                                      ExprSet &constr, const ExprVector &mbpGuides, bool doGJ = true,
+                                      bool doRegression = false, bool doConnect = false, int k = 10)
+    {
+      if (debug >= 1)
+        outs() << "\n======== COMPUTE DATA PHASE (BV) ========\n";
+
+      models[srcRel].clear();
+
+      boost::tribool res = bnd.unrollAndExecuteSplitterBv(translator, srcRel, invVars[srcRel], bvInvVars[srcRel],
+                                                          models[srcRel], splitter, invs, fwd, constr, mbpGuides, k);
+
+      if (!res)
+      {
+        if (debug >= 1)
+          outs() << "BMC formula unsat\n";
+        return res;
+      }
+
+      if (doGJ)
+        computeData(srcRel);
+      if (doRegression)
+        computeLinearRegressionCands(srcRel);
+      if (doConnect)
+        connectCands(srcRel);
+      addImplicationCands(srcRel, splitter);
 
       return res;
     }
