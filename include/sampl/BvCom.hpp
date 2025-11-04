@@ -1,1423 +1,1896 @@
 #ifndef BVCOM__HPP__
 #define BVCOM__HPP__
 
-#define DEFAULT_WIDTH 4
-#define PRIORNOVISIT 0
-#define PRIORSTEP 30
-#define FREQCOEF 15
-#define EPSILONFRACTION 5
+#include <algorithm>
+#include <cassert>
+#include <map>
+#include <set>
+#include <string>
+#include <vector>
 
-#include "deep/Distribution.hpp"
+#include <boost/lexical_cast.hpp>
+#include <boost/multiprecision/cpp_int.hpp>
+
 #include "ae/ExprSimpl.hpp"
-
-using namespace std;
-using namespace boost;
+#include "ae/ExprSimplBv.hpp"
+#include "deep/Distribution.hpp"
+#include "ufo/Expr.hpp"
+#include "ufo/ExprBv.hh"
 
 namespace ufo
 {
-  typedef std::vector<std::vector<int>> bvcoms;
+  using namespace expr;
+  using namespace expr::op;
+  using namespace expr::op::bv;
+  using namespace expr::op::bind;
 
-  class BVterm
+  using boost::lexical_cast;
+  using boost::multiprecision::cpp_int;
+
+  constexpr unsigned DEFAULT_WIDTH = 4;
+  constexpr unsigned MAX_BUCKET = 64;
+
+  enum class BVCoefScheme
   {
-    public:
-    std::vector<int> vcs;
-
-    unsigned width; // Bit-width of the bit-vector
-    int arity;
-    int cmpop;
-    int intconst;
-
-    BVterm(unsigned w = DEFAULT_WIDTH) : width(w) {}
-
-    int getSize()
-    {
-      return 3 + 2 * arity;
-    }
-
-    void normalizePlus()
-    {
-      int j;
-      map<int, int> varsM;
-
-      for (j = 0; j < vcs.size(); j += 2)
-      {
-        varsM[vcs[j]] = vcs[j + 1];
-      }
-
-      // fill again
-      j = 0;
-
-      for (auto &it : varsM)
-      {
-        vcs[j++] = it.first;
-        vcs[j++] = it.second;
-      }
-    }
-
-    unsigned getWidth() const { return width; }
-
-    void printBVterm()
-    {
-      outs() << "=== BVterm ===\n";
-      outs() << "Bit Width: " << width << "\n";
-      outs() << "arity: " << arity << "\n";
-      outs() << "cmpop: " << cmpop << "\n";
-      outs() << "intconst: " << intconst << "\n";
-      outs() << "===============\n";
-    }
+    PlusMinusOne,
+    PlusMinusOneTwo,
+    PowersOfTwo,
+    SeededFallback
   };
 
-  inline bool operator==(const BVterm &a, const BVterm &b)
+  enum class BVComparatorKind
   {
-    if (a.arity != b.arity) return false;
-    if (a.cmpop != b.cmpop) return false;
-    if (a.intconst != b.intconst) return false;
-    if (a.width != b.width) return false;
+    Eq,
+    Neq,
+    Ult,
+    Ule,
+    Ugt,
+    Uge,
+    Slt,
+    Sle,
+    Sgt,
+    Sge
+  };
 
-    for (int i = 0; i < a.vcs.size(); i++)
-    {
-      if (a.vcs[i] != b.vcs[i]) return false;
-    }
+  struct BVFactoryConfig
+  {
+    unsigned width = DEFAULT_WIDTH;
+    bool normalizeConstants = true;
+    BVCoefScheme coefScheme = BVCoefScheme::PlusMinusOne;
+    std::vector<cpp_int> maskCatalog;
+    std::map<int, int> shapeSeeds;
+  };
 
-    return true;
-  }
+  enum class BVTermShape : int
+  {
+    MaskEquality = 0,
+    Range = 1,
+    ModularSum = 2,
+    Unary = 3,
+    BinaryExpr = 4,
+    BinaryCmp = 5
+  };
+
+  enum class BVUnaryOp : int
+  {
+    Not = 0,
+    Neg = 1
+  };
+
+  enum class BVBinaryOp : int
+  {
+    Add = 0,
+    Sub = 1,
+    And = 2,
+    Or = 3,
+    Xor = 4
+  };
+
+  enum class BVBinaryCmp : int
+  {
+    Ult = 0,
+    Ule = 1,
+    Ugt = 2,
+    Uge = 3,
+    Slt = 4,
+    Sle = 5,
+    Sgt = 6,
+    Sge = 7
+  };
+
+  struct BVRangeInfo
+  {
+    bool signedSemantics = false;
+    int lowerConst = -1;
+    int upperConst = -1;
+  };
+
+  struct BVUnaryInfo
+  {
+    BVUnaryOp op = BVUnaryOp::Not;
+    unsigned param0 = 0;
+    unsigned param1 = 0;
+    int constIndex = -1;
+  };
+
+  struct BVVarCoef
+  {
+    int varIndex = -1;
+    int coefKind = -1;
+  };
+
+  struct BVterm
+  {
+    BVTermShape shape = BVTermShape::MaskEquality;
+    unsigned width = DEFAULT_WIDTH;
+    int varIndex = -1;
+    int maskIndex = -1;
+    int valueIndex = -1;
+    int comparator = -1;
+    int constIndex = -1;
+    std::vector<BVVarCoef> varCoefs;
+    BVRangeInfo rangeInfo;
+    BVUnaryInfo unaryInfo;
+    int binaryOp = -1;
+    int binaryCmp = -1;
+    int varIndex2 = -1;
+
+    BVterm() = default;
+    explicit BVterm(unsigned w) : width(w) {}
+  };
 
   class BVdisj
   {
-    private:
-    bvcoms id;
-
-    public:
-
+  public:
+    int arity = 0;
     std::vector<BVterm> dstate;
-    int arity;
-    int width;
 
-    BVdisj(int ar = 0, int w = DEFAULT_WIDTH) : arity(ar), width(w) { dstate.resize(arity); }
-
-    bool empty()
+    bool empty() const
     {
       return arity == 0;
     }
 
-    bvcoms& getId()
+    BVterm &newDisj(unsigned widthHint = DEFAULT_WIDTH)
     {
-      if (id.empty())
-      {
-        for (const auto &term : dstate)
-        {
-          id.push_back(term.vcs);
-        }
-      }
-      return id;
-    }
-
-    void addDisj(const BVterm &s)
-    {
-      dstate.push_back(s);
-      arity++;
-    }
-
-    BVterm &newDisj()
-    {
-      dstate.push_back(BVterm(width)); // Create a new term with default width
+      dstate.emplace_back(widthHint);
+      arity = static_cast<int>(dstate.size());
       return dstate.back();
     }
 
-    void printBVdisj()
+    void addDisj(const BVterm &term)
     {
-      outs() << "BVdisj: arity = " << arity << "\n";
-      for (const auto &s : dstate)
-      {
-        outs() << "  ** cmpop: " << s.cmpop << "\n";
-        outs() << "  ** const: " << s.intconst << "\n";
-        outs() << "  ** width: " << s.width << "\n";
-
-        for (int j = 0; j < s.vcs.size(); )
-        {
-          outs() << "  ** var: " << s.vcs[j++] << "\n";
-          outs() << "  ** coef: " << s.vcs[j++] << "\n";
-        }
-      }
-      outs() << "\n";
+      dstate.push_back(term);
+      arity = static_cast<int>(dstate.size());
     }
 
-    void normalizePlus()
-    {
-      for (auto &s : dstate)
-      {
-        s.normalizePlus();
-      }
-    }
+    void normalizePlus() {}
 
     void clear()
     {
-      arity = 0;
       dstate.clear();
-      id.clear();
+      arity = 0;
     }
   };
 
-  inline void clone(const BVterm &s, BVterm &t)
+  struct BVComparatorInfo
   {
-    t.vcs = s.vcs;
-    t.width = s.width;
-    t.arity = s.arity;
-    t.cmpop = s.cmpop;
-    t.intconst = s.intconst;
-  }
-
-  inline void clone(const BVdisj &s, BVdisj &t)
-  {
-    t.arity = s.arity;
-    t.dstate.clear();
-    for (const auto &term : s.dstate)
-    {
-      BVterm newTerm(term.getWidth());
-      clone(term, newTerm);
-      t.addDisj(newTerm);
-    }
-  }
-
-  inline void dropDisj(BVdisj &s, int ind)
-  {
-    if (ind < 0 || ind >= s.arity) return;
-
-    s.dstate.erase(s.dstate.begin() + ind);
-    s.arity--;
-  }
+    Expr templ;
+    BVComparatorKind kind;
+  };
 
   class BVfactory
   {
-    private:
-
-    ExprFactory &m_efac;
-    ExprVector vars;
-
-    std::vector<cpp_int> intConsts;
-    std::vector<cpp_int> intCoefs;
-    std::vector<int> varInds;
-
-    ExprVector intCoefsE;
-    ExprVector intConstsE;
-    ExprVector cmpOps; // Comparison operators
-
-    Expr auxVar1;
-    Expr auxVar2;
-
-    int indexGT; // Index for greater than operator
-    int indexGE; // Index for greater than or equal operator
-
-    ExprSet nonlinVarsSet;
-
-    public:
-
+  public:
     ExprMap nonlinVars;
+    ExprSet nonlinVarsSet;
+    unsigned width = DEFAULT_WIDTH;
 
-    int width = DEFAULT_WIDTH; // Bit-width of the bit-vector
-    int prVarsDistrRange;
-    std::set<int> orArities;
-    std::map<int, density> plusAritiesDensity;
-    std::map<int, density> intConstDensity;
-    std::map<int, density> cmpOpDensity;
-    std::map<int, std::vector<density>> varDensity;
-    std::map<int, std::map<int, density>> coefDensity;
-    std::vector<std::vector<std::set<int>>> varCombinations;
+    explicit BVfactory(ExprFactory &efac, bool) : m_efac(efac) {}
 
-    std::map<bvcoms, std::vector<weights>> ineqPriors;
-    std::map<bvcoms, std::set<int>> visited;
-    bool aggressivepruning;
-
-    BVfactory(ExprFactory &efac, bool aggressive = false)
-      : m_efac(efac), aggressivepruning(aggressive) {}
+    void reset()
+    {
+      vars.clear();
+      varIndexCache.clear();
+      intConsts.clear();
+      constIndexCache.clear();
+      intConstsE.clear();
+      intCoefs.clear();
+      coefIndexCache.clear();
+      intCoefsE.clear();
+      maskCatalog.clear();
+      maskIndexCache.clear();
+      maskCatalogE.clear();
+      comparatorInfo.clear();
+      shapeWeights.clear();
+      maskVarWeights.clear();
+      maskMaskWeights.clear();
+      maskValueWeights.clear();
+      rangeVarWeights.clear();
+      rangeLowerWeights.clear();
+      rangeUpperWeights.clear();
+      rangeSignWeights.clear();
+      modularVarComboWeights.clear();
+      modularCoefWeights.clear();
+      modularConstWeights.clear();
+      modularComparatorWeights.clear();
+      unaryVarWeights.clear();
+      unaryOpWeights.clear();
+      binaryOpWeights.clear();
+      binaryCmpWeights.clear();
+      varCombinations.clear();
+      cachedBuckets.clear();
+      nonlinVars.clear();
+      nonlinVarsSet.clear();
+      _initialized = false;
+    }
 
     void addVar(Expr var)
     {
+      if (varIndexCache.count(var) > 0)
+      {
+        return;
+      }
+      int index = static_cast<int>(vars.size());
       vars.push_back(var);
+      varIndexCache[var] = index;
     }
 
-    void addConst(cpp_int c)
+    void addConst(const cpp_int &c)
     {
-      if(c >= 0) intConsts.push_back(c);
+      ensureConstCached(normalizeConst(c));
     }
 
-    void addIntCoef(cpp_int coef)
+    void addIntCoef(const cpp_int &coef)
     {
-      intCoefs.push_back(coef);
+      ensureCoefCached(coef);
     }
 
-    void initialize(int bw)  // should be called after addVar, addConst, and addIntCoef
+    void configure(const BVFactoryConfig &cfg)
     {
-      assert(!intCoefs.empty());
-      assert(!intConsts.empty());
-      assert(!vars.empty());
-
-      width = bw;
-
-      prVarsDistrRange = 2 * intConsts.size();
-
-      // auxiliary variables for inequations:
-      auxVar1 = bind::intVar(mkTerm<string>("aux_deephorn_1", m_efac));
-      auxVar2 = bind::intVar(mkTerm<string>("aux_deephorn_2", m_efac));
-
-      for (int i = 0; i < vars.size(); i++) varInds.push_back(i);
-
-      // two comparison operators (> and >=), so indexGT < indexGE
-      cmpOps.push_back(mk<BUGT>(auxVar1, auxVar2));
-      indexGT = cmpOps.size() - 1;
-
-      cmpOps.push_back(mk<BUGE>(auxVar1, auxVar2));
-      indexGE = cmpOps.size() - 1;
-
-      // finally, map values to expressions
-      for (auto &a : intCoefs) intCoefsE.push_back(bvnum(lexical_cast<mpz_class>(a), width, m_efac));    // assemble expressions
-      for (auto &a : intConsts) intConstsE.push_back(bvnum(lexical_cast<mpz_class>(a), width, m_efac));  //
-
-      for (auto &a : nonlinVars) nonlinVarsSet.insert(a.second);
+      _config = cfg;
+      width = (_config.width == 0 ? width : _config.width);
     }
 
-    std::vector<cpp_int>& getConsts()
+    void initialize(unsigned widthHint = 0)
     {
-      return intConsts;
+      if (widthHint > 0)
+      {
+        _config.width = widthHint;
+      }
+      width = bitWidth();
+      rebuildConstExpressions();
+      buildCoefficientCatalog();
+      ensureConstCached(cpp_int(0));
+      buildMaskCatalog();
+      buildComparatorTemplates();
+      initVarCombinations();
+      nonlinVarsSet.clear();
+      for (auto &kv : nonlinVars)
+      {
+        nonlinVarsSet.insert(kv.second);
+      }
+      computeDefaultWeights();
+      _initialized = true;
     }
 
-    ExprVector& getVars()
+    bool initialized() const
+    {
+      return _initialized;
+    }
+
+    ExprVector &getVars()
     {
       return vars;
     }
 
-    int getVar(int ind)
+    std::vector<cpp_int> &getConsts()
     {
-      return varInds[ind];
+      return intConsts;
     }
 
-    int getIndexGT()
+    Expr buildExpr(const BVterm &term) const
     {
-      return indexGT;
-    }
-
-    int getIndexGE()
-    {
-      return indexGE;
-    }
-
-    int switchCmpOp(int ind)
-    {
-      return (ind == 0) ? 1 : 0;
-    }
-
-    cpp_int getIntCoef(int i)
-    {
-      return intCoefs[i];
-    }
-
-    int getIntCoefsSize()
-    {
-      return intCoefs.size();
-    }
-
-    int getCmpOpsSize()
-    {
-      return cmpOps.size();
-    }
-
-    Expr getAtom(Expr templ, Expr var1, Expr var2)
-    {
-      Expr res = templ;
-      res = replaceAll(res, auxVar1, var1);
-      res = replaceAll(res, auxVar2, var2);
-      return res;
-    }
-
-    Expr getAtom(Expr templ, ExprVector& var1, ExprVector& var2)
-    {
-      ExprSet res;
-
-      for(int i = 0; i < var1.size(); i++)
+      switch (term.shape)
       {
-        for(int j = 0; j < var2.size(); j++)
+        case BVTermShape::MaskEquality:
+          return buildMaskExpr(term);
+        case BVTermShape::Range:
+          return buildRangeExpr(term);
+        case BVTermShape::ModularSum:
+          return buildModularExpr(term);
+        case BVTermShape::Unary:
+          return buildUnaryExpr(term);
+        case BVTermShape::BinaryExpr:
+          return buildBinaryExpr(term);
+        case BVTermShape::BinaryCmp:
+        default:
+          return buildBinaryCmp(term);
+      }
+    }
+
+    Expr toExpr(const BVterm &term) const
+    {
+      return buildExpr(term);
+    }
+
+    Expr toExpr(const BVdisj &disj) const
+    {
+      ExprVector clauses;
+      for (const BVterm &term : disj.dstate)
+      {
+        clauses.push_back(buildExpr(term));
+      }
+      if (clauses.empty())
+      {
+        return mk<TRUE>(m_efac);
+      }
+      if (clauses.size() == 1)
+      {
+        return clauses.front();
+      }
+      return disjoin(clauses, m_efac);
+    }
+
+    void exprToBVdisj(Expr ex, BVdisj &sample)
+    {
+      if (!ex)
+      {
+        return;
+      }
+      if (isOpX<OR>(ex))
+      {
+        for (auto it = ex->args_begin(), end = ex->args_end(); it != end; ++it)
         {
-          res.insert(getAtom(templ, var1[i], var2[j]));
-          res.insert(getAtom(templ, var2[j], var1[i]));
+          exprToBVdisj(*it, sample);
+        }
+        return;
+      }
+      BVterm term(bitWidth());
+      if (decodeTerm(ex, term))
+      {
+        sample.addDisj(term);
+      }
+    }
+
+    BVterm sampleTerm(BVTermShape desiredShape)
+    {
+      switch (desiredShape)
+      {
+        case BVTermShape::MaskEquality:
+          return sampleMaskTerm();
+        case BVTermShape::Range:
+          return sampleRangeTerm();
+        case BVTermShape::Unary:
+          return sampleUnaryTerm();
+        case BVTermShape::ModularSum:
+          return sampleModularTerm();
+        case BVTermShape::BinaryExpr:
+          return sampleBinaryExprTerm();
+        case BVTermShape::BinaryCmp:
+        default:
+          return sampleBinaryCmpTerm();
+      }
+    }
+
+    BVterm sampleTerm()
+    {
+      int key = chooseByWeight(shapeWeights);
+      BVTermShape shape = static_cast<BVTermShape>(key);
+      return sampleTerm(shape);
+    }
+
+    void cacheTerm(const BVterm &term)
+    {
+      cachedBuckets[term.shape].push_back(term);
+      if (cachedBuckets[term.shape].size() > MAX_BUCKET)
+      {
+        cachedBuckets[term.shape].erase(cachedBuckets[term.shape].begin());
+      }
+    }
+
+    const std::map<BVTermShape, std::vector<BVterm>> &getBuckets() const
+    {
+      return cachedBuckets;
+    }
+
+    void clearBuckets()
+    {
+      cachedBuckets.clear();
+    }
+
+    void initDensities(const std::set<int> &)
+    {
+      computeDefaultWeights();
+    }
+
+    void calculateStatistics(const BVdisj &sample, int, bool, bool)
+    {
+      for (const BVterm &term : sample.dstate)
+      {
+        cacheTerm(term);
+      }
+    }
+
+    void stabilizeDensities(int, bool, bool)
+    {
+      computeDefaultWeights();
+    }
+
+    bool guessTerm(BVdisj &sample, int arity, bool)
+    {
+      if (!_initialized)
+      {
+        return false;
+      }
+      if (vars.empty())
+      {
+        return false;
+      }
+      sample.clear();
+      int disjCount = std::max(1, arity);
+      for (int i = 0; i < disjCount; ++i)
+      {
+        sample.addDisj(sampleTerm());
+      }
+      return !sample.empty();
+    }
+
+    void assignPrioritiesForLearned(BVdisj &learned);
+
+    void assignPrioritiesForFailed(BVdisj &failed);
+
+    void assignPrioritiesForBlocked(BVdisj &blocked);
+
+    void printCodeStatistics(int ar) const;
+
+  private:
+    ExprFactory &m_efac;
+    bool _initialized = false;
+    BVFactoryConfig _config;
+    ExprVector vars;
+    std::map<Expr, int> varIndexCache;
+    std::vector<cpp_int> intConsts;
+    std::map<cpp_int, int> constIndexCache;
+    ExprVector intConstsE;
+    std::vector<cpp_int> intCoefs;
+    std::map<cpp_int, int> coefIndexCache;
+    ExprVector intCoefsE;
+    std::vector<cpp_int> maskCatalog;
+    std::map<cpp_int, int> maskIndexCache;
+    ExprVector maskCatalogE;
+    Expr auxVarLhs;
+    Expr auxVarRhs;
+    density shapeWeights;
+    density maskVarWeights;
+    density maskMaskWeights;
+    density maskValueWeights;
+    density rangeVarWeights;
+    density rangeLowerWeights;
+    density rangeUpperWeights;
+    density rangeSignWeights;
+    density modularVarComboWeights;
+    density modularCoefWeights;
+    density modularConstWeights;
+    density modularComparatorWeights;
+    density unaryVarWeights;
+    density unaryOpWeights;
+    density binaryOpWeights;
+    density binaryCmpWeights;
+    std::vector<std::vector<std::set<int>>> varCombinations;
+    std::vector<BVComparatorInfo> comparatorInfo;
+    std::map<BVTermShape, std::vector<BVterm>> cachedBuckets;
+    static constexpr int PRIORITY_REWARD = 5;
+    static constexpr int PRIORITY_PENALTY = 1;
+
+    cpp_int sanitizeMask(const cpp_int &mask) const
+    {
+      unsigned bw = bitWidth();
+      if (bw == 0)
+      {
+        return mask;
+      }
+      cpp_int modulus = cpp_int(1) << bw;
+      cpp_int normalized = mask % modulus;
+      if (normalized < 0)
+      {
+        normalized += modulus;
+      }
+      return normalized;
+    }
+
+    void ensureConstWeights(int index)
+    {
+      ensureWeight(maskValueWeights, index);
+      ensureWeight(rangeLowerWeights, index);
+      ensureWeight(rangeUpperWeights, index);
+      ensureWeight(modularConstWeights, index);
+    }
+
+    cpp_int randomConstantUnderMask(const cpp_int &mask) const
+    {
+      cpp_int normalizedMask = sanitizeMask(mask);
+      if (normalizedMask == 0)
+      {
+        return 0;
+      }
+      cpp_int result = 0;
+      unsigned bw = bitWidth();
+      std::vector<unsigned> activeBits;
+      activeBits.reserve(bw);
+      for (unsigned bit = 0; bit < bw; ++bit)
+      {
+        if (boost::multiprecision::bit_test(normalizedMask, bit))
+        {
+          activeBits.push_back(bit);
+          if (guessUniformly(2) == 1)
+          {
+            result |= cpp_int(1) << bit;
+          }
+        }
+      }
+      if (result == 0 && !activeBits.empty())
+      {
+        unsigned idx = guessUniformly(static_cast<int>(activeBits.size()));
+        unsigned fallbackBit = activeBits[idx];
+        result |= cpp_int(1) << fallbackBit;
+      }
+      return result;
+    }
+
+    int pickMaskCompatibleValue(int maskIndex)
+    {
+      if (maskIndex < 0 || static_cast<size_t>(maskIndex) >= maskCatalog.size())
+      {
+        int fallback = chooseByWeight(maskValueWeights);
+        if (fallback < 0)
+        {
+          fallback = ensureConstIndex(cpp_int(0));
+        }
+        return fallback;
+      }
+      cpp_int mask = maskCatalog[maskIndex];
+      for (int attempt = 0; attempt < 3; ++attempt)
+      {
+        int candidate = chooseByWeight(maskValueWeights);
+        if (candidate < 0 || static_cast<size_t>(candidate) >= intConsts.size())
+        {
+          continue;
+        }
+        cpp_int value = normalizeConst(intConsts[candidate]);
+        if ((value & mask) == value)
+        {
+          return candidate;
+        }
+      }
+      cpp_int sampled = randomConstantUnderMask(mask);
+      int index = ensureConstIndex(sampled);
+      ensureConstWeights(index);
+      return index;
+    }
+
+    bool maskTermSeenRecently(const BVterm &term) const
+    {
+      auto it = cachedBuckets.find(BVTermShape::MaskEquality);
+      if (it == cachedBuckets.end())
+      {
+        return false;
+      }
+      for (const BVterm &cached : it->second)
+      {
+        if (cached.varIndex == term.varIndex &&
+            cached.maskIndex == term.maskIndex &&
+            cached.valueIndex == term.valueIndex)
+        {
+          return true;
+        }
+      }
+      return false;
+    }
+
+    void nudgeMaskWeights(const BVterm &term)
+    {
+      reduceDensity(maskMaskWeights, term.maskIndex);
+      reduceDensity(maskValueWeights, term.valueIndex);
+    }
+
+    int findVarIndex(Expr var) const
+    {
+      auto it = varIndexCache.find(var);
+      if (it != varIndexCache.end())
+      {
+        return it->second;
+      }
+      return -1;
+    }
+
+    int ensureConstIndex(const cpp_int &value)
+    {
+      cpp_int normalized = normalizeConst(value);
+      ensureConstCached(normalized);
+      return constIndexCache[normalized];
+    }
+
+    int ensureCoefIndex(const cpp_int &value)
+    {
+      ensureCoefCached(value);
+      return coefIndexCache[value];
+    }
+
+    int ensureMaskIndex(const cpp_int &value)
+    {
+      ensureMaskCached(value);
+      return maskIndexCache[value];
+    }
+
+    int comparatorIndexForKind(BVComparatorKind kind) const
+    {
+      for (unsigned i = 0; i < comparatorInfo.size(); i++)
+      {
+        if (comparatorInfo[i].kind == kind)
+        {
+          return static_cast<int>(i);
+        }
+      }
+      return -1;
+    }
+
+    int comparatorIndexFromExpr(Expr cmp) const
+    {
+      if (isOpX<EQ>(cmp)) return comparatorIndexForKind(BVComparatorKind::Eq);
+      if (isOpX<NEQ>(cmp)) return comparatorIndexForKind(BVComparatorKind::Neq);
+      if (isOpX<BULT>(cmp)) return comparatorIndexForKind(BVComparatorKind::Ult);
+      if (isOpX<BULE>(cmp)) return comparatorIndexForKind(BVComparatorKind::Ule);
+      if (isOpX<BUGT>(cmp)) return comparatorIndexForKind(BVComparatorKind::Ugt);
+      if (isOpX<BUGE>(cmp)) return comparatorIndexForKind(BVComparatorKind::Uge);
+      if (isOpX<BSLT>(cmp)) return comparatorIndexForKind(BVComparatorKind::Slt);
+      if (isOpX<BSLE>(cmp)) return comparatorIndexForKind(BVComparatorKind::Sle);
+      if (isOpX<BSGT>(cmp)) return comparatorIndexForKind(BVComparatorKind::Sgt);
+      if (isOpX<BSGE>(cmp)) return comparatorIndexForKind(BVComparatorKind::Sge);
+      return -1;
+    }
+
+    cpp_int exprToInt(Expr e) const
+    {
+      if (!is_bvnum(e))
+      {
+        return cpp_int(0);
+      }
+      return lexical_cast<cpp_int>(toMpz(e));
+    }
+
+    bool decodeMaskTerm(Expr ex, BVterm &term)
+    {
+      if (!isOpX<EQ>(ex))
+      {
+        return false;
+      }
+      Expr lhs = ex->left();
+      Expr rhs = ex->right();
+
+      auto tryDecode = [&](Expr maskSide, Expr valueSide) -> bool
+      {
+        if (!isOpX<BAND>(maskSide)) return false;
+        if (!is_bvnum(valueSide)) return false;
+        Expr var;
+        Expr maskExpr;
+        for (auto ait = maskSide->args_begin(), aend = maskSide->args_end(); ait != aend; ++ait)
+        {
+          Expr arg = *ait;
+          if (is_bvnum(arg))
+          {
+            maskExpr = arg;
+          }
+          else
+          {
+            var = arg;
+          }
+        }
+        if (!var || !maskExpr)
+        {
+          return false;
+        }
+        int varIdx = findVarIndex(var);
+        if (varIdx < 0)
+        {
+          return false;
+        }
+        cpp_int maskVal = exprToInt(maskExpr);
+        cpp_int valueVal = exprToInt(valueSide);
+        term.shape = BVTermShape::MaskEquality;
+        term.varIndex = varIdx;
+        term.maskIndex = ensureMaskIndex(maskVal);
+        term.valueIndex = ensureConstIndex(valueVal);
+        term.width = bitWidth();
+        return true;
+      };
+
+      if (tryDecode(lhs, rhs)) return true;
+      if (tryDecode(rhs, lhs)) return true;
+      return false;
+    }
+
+    bool decodeRangeTerm(Expr ex, BVterm &term)
+    {
+      if (!isOpX<AND>(ex))
+      {
+        return false;
+      }
+      Expr varExpr;
+      cpp_int lowerVal = 0;
+      cpp_int upperVal = 0;
+      bool hasLower = false;
+      bool hasUpper = false;
+      bool signedSemantics = false;
+
+      for (auto it = ex->args_begin(), end = ex->args_end(); it != end; ++it)
+      {
+        Expr arg = *it;
+        bool isSignedCmp = isOpX<BSGE>(arg) || isOpX<BSLE>(arg) || isOpX<BSGT>(arg) || isOpX<BSLT>(arg);
+        if (isSignedCmp)
+        {
+          signedSemantics = true;
+        }
+        if (!(isOpX<BUGE>(arg) || isOpX<BULE>(arg) || isOpX<BSGE>(arg) || isOpX<BSLE>(arg)))
+        {
+          return false;
+        }
+        Expr lhs = arg->left();
+        Expr rhs = arg->right();
+        bool swapped = false;
+        if (is_bvnum(lhs) && !is_bvnum(rhs))
+        {
+          std::swap(lhs, rhs);
+          swapped = true;
+        }
+        if (!is_bvnum(rhs))
+        {
+          return false;
+        }
+        if (!varExpr)
+        {
+          varExpr = lhs;
+        }
+        else if (varExpr != lhs)
+        {
+          return false;
+        }
+
+        cpp_int bound = exprToInt(rhs);
+        if (isOpX<BUGE>(arg) || isOpX<BSGE>(arg))
+        {
+          if (swapped)
+          {
+            return false;
+          }
+          lowerVal = bound;
+          hasLower = true;
+        }
+        else if (isOpX<BULE>(arg) || isOpX<BSLE>(arg))
+        {
+          if (swapped)
+          {
+            return false;
+          }
+          upperVal = bound;
+          hasUpper = true;
         }
       }
 
-      res.insert(getAtom(templ, bvadd(var1), bvadd(var2)));
-      res.insert(getAtom(templ, bvadd(var2), bvadd(var1)));
-      res.insert(getAtom(templ, bvsub(var1), bvsub(var2)));
-      res.insert(getAtom(templ, bvsub(var2), bvsub(var1)));
-      return conjoin(res, m_efac);
+      if (!hasLower || !hasUpper || !varExpr)
+      {
+        return false;
+      }
+
+      int varIdx = findVarIndex(varExpr);
+      if (varIdx < 0)
+      {
+        return false;
+      }
+
+      term.shape = BVTermShape::Range;
+      term.width = bitWidth();
+      term.varIndex = varIdx;
+      term.rangeInfo.signedSemantics = signedSemantics;
+      term.rangeInfo.lowerConst = ensureConstIndex(lowerVal);
+      term.rangeInfo.upperConst = ensureConstIndex(upperVal);
+      return true;
     }
 
-    bool assembleBvComb(BVterm &s, ExprVector& lhs, ExprVector& rhs)
+    bool decodeUnaryTerm(Expr ex, BVterm &term)
     {
-      for(int i = 0; i < s.vcs.size(); i = i + 2)
+      if (!isOpX<EQ>(ex))
       {
-        Expr var = vars[s.vcs[i]];
-        Expr coefE = intCoefsE[s.vcs[i + 1]];
-        cpp_int coef = lexical_cast<cpp_int>(toMpz(coefE));
-
-        if (coef == 0) continue; // skip zero coefficients
-        if(coef > 0)
+        return false;
+      }
+      Expr lhs = ex->left();
+      Expr rhs = ex->right();
+      auto tryDecode = [&](Expr opSide, Expr valueSide) -> bool
+      {
+        if (!is_bvnum(valueSide)) return false;
+        Expr var;
+        BVUnaryOp op = BVUnaryOp::Not;
+        unsigned param0 = 0;
+        unsigned param1 = 0;
+        if (isOpX<BNOT>(opSide))
         {
-          Expr coefExpr = bvnum(lexical_cast<mpz_class>(coef), width, m_efac);
-          lhs.push_back(mk<BMUL>(coefExpr, var));
+          op = BVUnaryOp::Not;
+          var = opSide->left();
         }
-        else if(coef < 0)
+        else if (isOpX<BNEG>(opSide))
         {
-          Expr coefExpr = bvnum(lexical_cast<mpz_class>(-coef), width, m_efac);
-          rhs.push_back(mk<BMUL>(coefExpr, var));
-        }
-        else if(coef == 0)
-        {
-          Expr coefExpr = bvnum(lexical_cast<mpz_class>(coef), width, m_efac);
-          rhs.push_back(mk<BMUL>(coefExpr, var));
+          op = BVUnaryOp::Neg;
+          var = opSide->left();
         }
         else
         {
           return false;
         }
+        int varIdx = findVarIndex(var);
+        if (varIdx < 0)
+        {
+          return false;
+        }
+        term.shape = BVTermShape::Unary;
+        term.width = bitWidth();
+        term.varIndex = varIdx;
+        term.unaryInfo.op = op;
+        term.unaryInfo.param0 = param0;
+        term.unaryInfo.param1 = param1;
+        term.unaryInfo.constIndex = ensureConstIndex(exprToInt(valueSide));
+        return true;
+      };
+
+      if (tryDecode(lhs, rhs)) return true;
+      if (tryDecode(rhs, lhs)) return true;
+      return false;
+    }
+
+    bool decodeModularTerm(Expr ex, BVterm &term)
+    {
+      int cmpIndex = comparatorIndexFromExpr(ex);
+      if (cmpIndex < 0)
+      {
+        return false;
       }
 
+      Expr lhs = ex->left();
+      Expr rhs = ex->right();
+
+      if (!is_bvnum(rhs) && is_bvnum(lhs))
+      {
+        std::swap(lhs, rhs);
+        cmpIndex = comparatorIndexForKind(comparatorInfo[cmpIndex].kind);
+      }
+
+      if (!is_bvnum(rhs))
+      {
+        return false;
+      }
+
+      cpp_int rhsVal = exprToInt(rhs);
+      cpp_int accum = 0;
+
+      ExprVector addTerms;
+      getAddTermBV(lhs, addTerms);
+      if (addTerms.empty())
+      {
+        addTerms.push_back(lhs);
+      }
+
+      for (Expr summand : addTerms)
+      {
+        if (is_bvnum(summand))
+        {
+          accum += exprToInt(summand);
+          continue;
+        }
+
+        ExprVector factors;
+        getMultOpsBV(summand, factors);
+        if (factors.empty())
+        {
+          factors.push_back(summand);
+        }
+
+        Expr varExpr;
+        cpp_int coef = 1;
+        bool hasCoef = false;
+
+        for (Expr f : factors)
+        {
+          if (is_bvnum(f))
+          {
+            coef = exprToInt(f);
+            hasCoef = true;
+          }
+          else if (!varExpr)
+          {
+            varExpr = f;
+          }
+        }
+
+        if (!varExpr)
+        {
+          accum += coef;
+          continue;
+        }
+
+        int varIdx = findVarIndex(varExpr);
+        if (varIdx < 0)
+        {
+          return false;
+        }
+
+        if (!hasCoef)
+        {
+          coef = 1;
+        }
+
+        BVVarCoef vc;
+        vc.varIndex = varIdx;
+        vc.coefKind = ensureCoefIndex(coef);
+        term.varCoefs.push_back(vc);
+      }
+
+      cpp_int adjustedConst = rhsVal - accum;
+      term.shape = BVTermShape::ModularSum;
+      term.width = bitWidth();
+      term.comparator = cmpIndex;
+      term.constIndex = ensureConstIndex(adjustedConst);
       return true;
     }
 
-    Expr toExpr(BVterm &s, bool replaceNonLin = true)
+    bool decodeTerm(Expr ex, BVterm &term)
     {
-      ExprVector lhs, rhs;
-      Expr templ = cmpOps[s.cmpop];
-      Expr ic = intConstsE[s.intconst];
-      if(lexical_cast<cpp_int>(ic->left()) < 0)
-      {
-        rhs.push_back(additiveInverseBV(ic));
-      }
-      else if (lexical_cast<cpp_int>(ic->left()) > 0)
-      {
-        lhs.push_back(ic);
-      }
-      else if (lexical_cast<cpp_int>(ic->left()) == 0)
-      {
-        rhs.push_back(ic);
-      }
-
-      assembleBvComb(s, lhs, rhs);
-
-      if (lhs.empty())
-      {
-        lhs.push_back(bvnum(0, width, m_efac));
-      }
-      if (rhs.empty())
-      {
-        rhs.push_back(bvnum(0, width, m_efac));
-      }
-
-      // if(lhs.empty()) outs() << "  ** lhs is empty\n";
-      // if(rhs.empty()) outs() << "  ** rhs is empty\n";
-
-      Expr ineq = getAtom(templ, lhs, rhs);
-
-      // We need to do some sort of normalization here
-
-      if(replaceNonLin && !nonlinVarsSet.empty())
-      {
-        while(!emptyIntersect(ineq, nonlinVarsSet))
-        {
-          // replace non-linear variables with linear ones
-          for (auto &v : nonlinVars)
-          {
-            ineq = replaceAll(ineq, v.second, v.first);
-          }
-        }
-      }
-      return ineq;
+      term = BVterm(bitWidth());
+      if (decodeMaskTerm(ex, term)) return true;
+      if (decodeRangeTerm(ex, term)) return true;
+      if (decodeUnaryTerm(ex, term)) return true;
+      if (decodeModularTerm(ex, term)) return true;
+      return false;
     }
 
-    Expr toExpr(BVdisj& curCandCode)
+    unsigned bitWidth() const
     {
-      int arity = curCandCode.arity;
-      ExprVector disjuncts;
-
-      for(int i = 0; i < arity; i++)
+      if (_config.width != 0)
       {
-        disjuncts.push_back(toExpr(curCandCode.dstate[i]));
+        return _config.width;
       }
-      return disjoin(disjuncts, m_efac);
+      if (width != 0)
+      {
+        return width;
+      }
+      return DEFAULT_WIDTH;
     }
 
-    void exprToBVdisj(Expr ex, BVdisj& sample)
+    cpp_int normalizeConst(const cpp_int &value) const
     {
-      if (isOpX<OR>(ex))
+      if (!_config.normalizeConstants) return value;
+      unsigned bw = bitWidth();
+      if (bw == 0) return value;
+      cpp_int modulus = cpp_int(1) << bw;
+      cpp_int modded = value % modulus;
+      if (modded < 0) modded += modulus;
+      cpp_int alternative = modded - modulus;
+      if (boost::multiprecision::abs(alternative) < boost::multiprecision::abs(modded))
       {
-        // outs() << "Processing expression for BV disjunction: " << ex << "\n";
-        for (auto it = ex->args_begin (), end = ex->args_end (); it != end; ++it)
-          exprToBVdisj(*it, sample);
+        return alternative;
       }
-      else if (isOpX<BUGE>(ex) || isOpX<BUGT>(ex))
+      return modded;
+    }
+
+    void ensureConstCached(const cpp_int &value)
+    {
+      if (constIndexCache.count(value) > 0)
       {
-        BVterm s;
-        ExprVector all;
-        Expr aux;
+        return;
+      }
+      int index = static_cast<int>(intConsts.size());
+      intConsts.push_back(value);
+      constIndexCache[value] = index;
+      unsigned bw = bitWidth();
+      Expr constExpr = bvnum(lexical_cast<mpz_class>(value), bw, m_efac);
+      intConstsE.push_back(constExpr);
+      ensureConstWeights(index);
+    }
 
-        // outs() << "ex: " << ex << "\n";
+    void rebuildConstExpressions()
+    {
+      intConstsE.clear();
+      if (intConsts.empty())
+      {
+        return;
+      }
+      unsigned bw = bitWidth();
+      for (const cpp_int &value : intConsts)
+      {
+        Expr constExpr = bvnum(lexical_cast<mpz_class>(value), bw, m_efac);
+        intConstsE.push_back(constExpr);
+      }
+    }
 
-        if (is_bvnum(ex->right()))
+    void ensureCoefCached(const cpp_int &value)
+    {
+      if (coefIndexCache.count(value) > 0)
+      {
+        return;
+      }
+      int index = static_cast<int>(intCoefs.size());
+      intCoefs.push_back(value);
+      coefIndexCache[value] = index;
+      unsigned bw = bitWidth();
+      Expr coefExpr = bvnum(lexical_cast<mpz_class>(value), bw, m_efac);
+      intCoefsE.push_back(coefExpr);
+    }
+
+    void ensureMaskCached(const cpp_int &mask)
+    {
+      cpp_int normalized = sanitizeMask(mask);
+      if (normalized == 0)
+      {
+        return;
+      }
+      if (maskIndexCache.count(normalized) > 0)
+      {
+        return;
+      }
+      int index = static_cast<int>(maskCatalog.size());
+      maskCatalog.push_back(normalized);
+      maskIndexCache[normalized] = index;
+      unsigned bw = bitWidth();
+      Expr maskExpr = bvnum(lexical_cast<mpz_class>(normalized), bw, m_efac);
+      maskCatalogE.push_back(maskExpr);
+      ensureWeight(maskMaskWeights, index);
+    }
+
+    void buildCoefficientCatalog()
+    {
+      coefIndexCache.clear();
+      std::vector<cpp_int> seeds = intCoefs;
+      intCoefs.clear();
+      intCoefsE.clear();
+
+      auto addCoef = [&](const cpp_int &c)
+      {
+        ensureCoefCached(c);
+      };
+
+      addCoef(cpp_int(1));
+      addCoef(cpp_int(-1));
+
+      if (_config.coefScheme == BVCoefScheme::PlusMinusOneTwo ||
+          _config.coefScheme == BVCoefScheme::SeededFallback)
+      {
+        addCoef(cpp_int(2));
+        addCoef(cpp_int(-2));
+      }
+
+      if (_config.coefScheme == BVCoefScheme::PowersOfTwo ||
+          _config.coefScheme == BVCoefScheme::SeededFallback)
+      {
+        unsigned maxPow = std::max(1u, bitWidth());
+        for (unsigned p = 1; p < maxPow; p++)
         {
-          // outs() << "Right side of comparison is a bit-vector number: " << ex->right() << "\n";
-          getAddTermBV(ex->left(), all);
-          aux = reBuildCmpBV(ex, auxVar1, auxVar2);
-  
-  
-          // REVISIT. Needs to handle without the LHS assumption.
-          // for(auto e = all.begin(); e != all.end(); )
-          // {
-          //   if(is_bvnum(*e))
-          //   {
-          //     outs() << "Removing numeric constant: " << *e << "\n";
-          //     e = all.erase(e); // remove numeric constants from the left side
-          //   }
-          //   else
-          //   {
-          //     ++e;
-          //   }
-          // }
+          cpp_int val = cpp_int(1) << p;
+          addCoef(val);
+          addCoef(-val);
         }
+      }
 
-        if (is_bvnum(ex->left()))
+      for (auto &seed : seeds)
+      {
+        addCoef(seed);
+      }
+    }
+
+    void buildMaskCatalog()
+    {
+      maskIndexCache.clear();
+      maskCatalog.clear();
+      maskCatalogE.clear();
+      if (_config.maskCatalog.empty())
+      {
+        unsigned bw = bitWidth();
+        if (bw == 0)
         {
-          // outs() << "Left side of comparison is a bit-vector number: " << ex->left() << "\n";
-          getAddTermBV(ex->right(), all);
-          aux = reBuildCmpBV(ex, auxVar1, auxVar2);
-
-          // REVISIT. Needs to handle without the LHS assumption.
-          // for (auto e = all.begin(); e != all.end();)
-          // {
-          //   if (is_bvnum(*e))
-          //   {
-          //     outs() << "Removing numeric constant: " << *e << "\n";
-          //     e = all.erase(e); // remove numeric constants from the left side
-          //   }
-          //   else
-          //   {
-          //     ++e;
-          //   }
-          // }
+          ensureMaskCached(cpp_int(1));
+          return;
         }
-
-        s.arity = all.size();
-        s.width = width;
-        s.cmpop = getVarIndex(aux, cmpOps);
-        
-        if(is_bvnum(ex->right()))
+        cpp_int fullMask = (cpp_int(1) << bw) - 1;
+        ensureMaskCached(fullMask);
+        unsigned singleLimit = std::min(bw, 8u);
+        for (unsigned bit = 0; bit < singleLimit; ++bit)
         {
-          s.intconst = getVarIndex(lexical_cast<cpp_int>(toMpz(ex->right())), intConsts);
+          ensureMaskCached(cpp_int(1) << bit);
         }
-        if (is_bvnum(ex->left()))
+        std::vector<unsigned> blockSizes = {2u, 4u, 8u};
+        for (unsigned block : blockSizes)
         {
-          s.intconst = getVarIndex(lexical_cast<cpp_int>(toMpz(ex->left())), intConsts);
-        }
-        else
-        {
-          s.intconst = getVarIndex(lexical_cast<cpp_int>(0), intConsts);
-        }
-
-        if (s.intconst == -1 || s.cmpop == -1) { return; }
-
-        for (auto &e : all)
-        {
-          Expr curVar = NULL;
-          cpp_int curCoef = 1;
-          bool hasCoef = false;
-
-          ExprVector ops;
-          getMultOpsBV (e, ops);
-          for (auto & o : ops)
+          if (block > bw)
           {
-            if (is_bvnum(o))
-            {
-              curCoef = lexical_cast<cpp_int>(toMpz(o));
-              hasCoef = true;
-            } 
-            else if (curVar != NULL)
-            {
-              // outs() << "Multiple variables in a term, skipping: " << e << "\n";
-              return;
-            } 
-            else curVar = o;
+            continue;
           }
-
-          // If no coefficient was found, ensure it's 1
-          if (!hasCoef)
+          unsigned maxOffset = (bw > block) ? std::min(bw - block + 1, 8u) : 1u;
+          for (unsigned offset = 0; offset < maxOffset; ++offset)
           {
-            curCoef = 1;
+            cpp_int blockMask = ((cpp_int(1) << block) - 1) << offset;
+            ensureMaskCached(blockMask);
           }
-
-          int varind = getVarIndex(curVar, vars);
-          int coefind = getVarIndex(curCoef, intCoefs);
-
-          // Fallback: If coefind fails (e.g., curCoef == 0), try defaulting to 1 or skip
-          if (coefind == -1)
+        }
+        if (bw > 1)
+        {
+          cpp_int evenMask = 0;
+          cpp_int oddMask = 0;
+          for (unsigned bit = 0; bit < bw; ++bit)
           {
-            if (curCoef == 0)
+            if (bit % 2 == 0)
             {
-              // outs() << "Continuing due to zero coefficient\n";
-              // Skip zero-coefficient terms to avoid invalid combinations
-              continue;
-            }
-            // Otherwise, default to 1 if possible
-            coefind = getVarIndex(1, intCoefs);
-            if (coefind == -1)
-            {
-              // Add 1 to intCoefs if missing
-              intCoefs.push_back(1);
-              intCoefsE.push_back(bvnum(lexical_cast<mpz_class>(1), width, m_efac));
-              coefind = intCoefs.size() - 1;
-            }
-          }
-
-          if (varind == -1 || coefind == -1)
-          {
-            if(varind != -1)
-            {
-              coefind = (getVarIndex(lexical_cast<cpp_int>(1), intCoefs));
-              if(coefind == -1)
-              {
-                intCoefs.push_back(1);
-                intCoefsE.push_back(bvnum(lexical_cast<mpz_class>(1), width, m_efac));
-                coefind = intCoefs.size() - 1;
-              }
+              evenMask |= cpp_int(1) << bit;
             }
             else
             {
-              // outs() << "RETURNING4\n";
-              return;
+              oddMask |= cpp_int(1) << bit;
             }
-          } 
-
-          s.vcs.push_back(varind);
-          s.vcs.push_back(coefind);
-
+          }
+          ensureMaskCached(evenMask);
+          ensureMaskCached(oddMask);
         }
-
-        for(int v : s.vcs) if (v < 0) { /* outs() << "RETURNING1\n"; */ return; } 
-        if (s.vcs.size() != 2*(s.arity)) { /* outs() << "RETURNING2\n"; */ return; }
-
-        // outs() << "Going to addDisjFilter\n";
-        addDisjFilter(s, sample);
+        return;
+      }
+      for (auto &mask : _config.maskCatalog)
+      {
+        ensureMaskCached(mask);
       }
     }
 
-    cpp_int equalCoefs(BVterm& s)
+    void buildComparatorTemplates()
     {
-      cpp_int res = 0;
-      for (int i = 0; i < s.vcs.size(); i += 2)
+      comparatorInfo.clear();
+      unsigned bw = bitWidth();
+      auxVarLhs = bind::mkConst(mkTerm<std::string>("__deephorn_bv_lhs", m_efac),
+                                bv::bvsort(bw, m_efac));
+      auxVarRhs = bind::mkConst(mkTerm<std::string>("__deephorn_bv_rhs", m_efac),
+                                bv::bvsort(bw, m_efac));
+
+      auto addCmp = [&](Expr templ, BVComparatorKind kind)
       {
-        res += s.vcs[i + 1];
+        comparatorInfo.push_back({templ, kind});
+      };
+
+      addCmp(mk<EQ>(auxVarLhs, auxVarRhs), BVComparatorKind::Eq);
+      addCmp(mk<NEQ>(auxVarLhs, auxVarRhs), BVComparatorKind::Neq);
+      addCmp(mk<BULT>(auxVarLhs, auxVarRhs), BVComparatorKind::Ult);
+      addCmp(mk<BULE>(auxVarLhs, auxVarRhs), BVComparatorKind::Ule);
+      addCmp(mk<BUGT>(auxVarLhs, auxVarRhs), BVComparatorKind::Ugt);
+      addCmp(mk<BUGE>(auxVarLhs, auxVarRhs), BVComparatorKind::Uge);
+      addCmp(mk<BSLT>(auxVarLhs, auxVarRhs), BVComparatorKind::Slt);
+      addCmp(mk<BSLE>(auxVarLhs, auxVarRhs), BVComparatorKind::Sle);
+      addCmp(mk<BSGT>(auxVarLhs, auxVarRhs), BVComparatorKind::Sgt);
+      addCmp(mk<BSGE>(auxVarLhs, auxVarRhs), BVComparatorKind::Sge);
+    }
+
+    void initVarCombinations()
+    {
+      varCombinations.clear();
+      varCombinations.push_back(std::vector<std::set<int>>());
+      if (vars.empty()) return;
+      std::vector<int> indexes;
+      for (unsigned i = 0; i < vars.size(); i++)
+      {
+        indexes.push_back(static_cast<int>(i));
       }
+      for (unsigned size = 1; size <= vars.size(); size++)
+      {
+        std::vector<std::set<int>> combs;
+        getCombinations(indexes, 0, size, combs);
+        varCombinations.push_back(combs);
+      }
+    }
+
+    Expr mkComparator(const BVterm &term, Expr lhs, Expr rhs) const
+    {
+      assert(term.comparator >= 0);
+      assert(static_cast<size_t>(term.comparator) < comparatorInfo.size());
+      Expr templ = comparatorInfo[term.comparator].templ;
+      Expr res = templ;
+      res = replaceAll(res, auxVarLhs, lhs);
+      res = replaceAll(res, auxVarRhs, rhs);
       return res;
     }
 
-    void invertTerm(BVterm& s, BVterm& t)
+    Expr buildModularExpr(const BVterm &term) const
     {
-      t.vcs.clear();
-      t.width = s.width;
-      t.arity = s.arity;
-      t.cmpop = s.cmpop;
-      t.intconst = s.intconst;
-
-      for (int i = 0; i < s.vcs.size(); i += 2)
+      ExprVector summands;
+      for (auto &vc : term.varCoefs)
       {
-        t.vcs.push_back(s.vcs[i]);
-        t.vcs.push_back(-s.vcs[i + 1]); // invert coefficient
+        assert(vc.varIndex >= 0 && static_cast<size_t>(vc.varIndex) < vars.size());
+        assert(vc.coefKind >= 0 && static_cast<size_t>(vc.coefKind) < intCoefsE.size());
+        Expr coefExpr = intCoefsE[vc.coefKind];
+        Expr varExpr = vars[vc.varIndex];
+        summands.push_back(mk<BMUL>(coefExpr, varExpr));
       }
+      Expr zero = bvnum(mpz_class(0), bitWidth(), m_efac);
+      Expr lhs = summands.empty() ? zero : mkb<BADD>(summands, zero);
+      Expr rhs = zero;
+      if (term.constIndex >= 0 && static_cast<size_t>(term.constIndex) < intConstsE.size())
+      {
+        rhs = intConstsE[term.constIndex];
+      }
+      return mkComparator(term, lhs, rhs);
     }
 
-    void invertDisj(BVdisj& s, BVdisj& t, int ind)
+    Expr buildMaskExpr(const BVterm &term) const
     {
-      t.clear();
-      t.arity = s.arity - 1; // one less disjunct
+      assert(term.varIndex >= 0 && static_cast<size_t>(term.varIndex) < vars.size());
+      assert(term.maskIndex >= 0 && static_cast<size_t>(term.maskIndex) < maskCatalogE.size());
+      assert(term.valueIndex >= 0 && static_cast<size_t>(term.valueIndex) < intConstsE.size());
+      Expr varExpr = vars[term.varIndex];
+      Expr maskExpr = maskCatalogE[term.maskIndex];
+      Expr valueExpr = intConstsE[term.valueIndex];
+      Expr masked = mk<BAND>(varExpr, maskExpr);
+      return mk<EQ>(masked, valueExpr);
+    }
 
-      for (int i = 0; i < s.arity; i++)
+    Expr buildRangeExpr(const BVterm &term) const
+    {
+      assert(term.varIndex >= 0 && static_cast<size_t>(term.varIndex) < vars.size());
+      Expr varExpr = vars[term.varIndex];
+      Expr lower = term.rangeInfo.lowerConst >= 0 && static_cast<size_t>(term.rangeInfo.lowerConst) < intConstsE.size()
+                     ? intConstsE[term.rangeInfo.lowerConst]
+                     : bvnum(mpz_class(0), bitWidth(), m_efac);
+      Expr upper = term.rangeInfo.upperConst >= 0 && static_cast<size_t>(term.rangeInfo.upperConst) < intConstsE.size()
+                     ? intConstsE[term.rangeInfo.upperConst]
+                     : bvnum(mpz_class(0), bitWidth(), m_efac);
+      Expr lowerCmp;
+      Expr upperCmp;
+      if (term.rangeInfo.signedSemantics)
       {
-        if (i != ind)
+        lowerCmp = mk<BSGE>(varExpr, lower);
+        upperCmp = mk<BSLE>(varExpr, upper);
+      }
+      else
+      {
+        lowerCmp = mk<BUGE>(varExpr, lower);
+        upperCmp = mk<BULE>(varExpr, upper);
+      }
+      return mk<AND>(lowerCmp, upperCmp);
+    }
+
+    Expr buildUnaryExpr(const BVterm &term) const
+    {
+      assert(term.varIndex >= 0 && static_cast<size_t>(term.varIndex) < vars.size());
+      Expr base = vars[term.varIndex];
+      Expr transformed = base;
+      switch (term.unaryInfo.op)
+      {
+        case BVUnaryOp::Not:
+          transformed = bv::bvnot(base);
+          break;
+        case BVUnaryOp::Neg:
+          transformed = mk<BNEG>(base);
+          break;
+        default:
+          break;
+      }
+      Expr value = term.unaryInfo.constIndex >= 0 && static_cast<size_t>(term.unaryInfo.constIndex) < intConstsE.size()
+                     ? intConstsE[term.unaryInfo.constIndex]
+                     : bvnum(mpz_class(0), bitWidth(), m_efac);
+      return mk<EQ>(transformed, value);
+    }
+
+    Expr buildBinaryExpr(const BVterm &term) const
+    {
+      assert(term.varIndex >= 0 && static_cast<size_t>(term.varIndex) < vars.size());
+      assert(term.varIndex2 >= 0 && static_cast<size_t>(term.varIndex2) < vars.size());
+      assert(term.binaryOp >= 0);
+      assert(term.valueIndex >= 0 && static_cast<size_t>(term.valueIndex) < intConstsE.size());
+      Expr var1 = vars[term.varIndex];
+      Expr var2 = vars[term.varIndex2];
+      Expr opExpr;
+      switch (static_cast<BVBinaryOp>(term.binaryOp))
+      {
+        case BVBinaryOp::Add:
+          opExpr = mk<BADD>(var1, var2);
+          break;
+        case BVBinaryOp::Sub:
+          opExpr = mk<BSUB>(var1, var2);
+          break;
+        case BVBinaryOp::And:
+          opExpr = mk<BAND>(var1, var2);
+          break;
+        case BVBinaryOp::Or:
+          opExpr = mk<BOR>(var1, var2);
+          break;
+        case BVBinaryOp::Xor:
+          opExpr = mk<BXOR>(var1, var2);
+          break;
+      }
+      Expr value = intConstsE[term.valueIndex];
+      return mk<EQ>(opExpr, value);
+    }
+
+    Expr buildBinaryCmp(const BVterm &term) const
+    {
+      assert(term.varIndex >= 0 && static_cast<size_t>(term.varIndex) < vars.size());
+      assert(term.varIndex2 >= 0 && static_cast<size_t>(term.varIndex2) < vars.size());
+      assert(term.binaryCmp >= 0);
+      Expr var1 = vars[term.varIndex];
+      Expr var2 = vars[term.varIndex2];
+      switch (static_cast<BVBinaryCmp>(term.binaryCmp))
+      {
+        case BVBinaryCmp::Ult:
+          return mk<BULT>(var1, var2);
+        case BVBinaryCmp::Ule:
+          return mk<BULE>(var1, var2);
+        case BVBinaryCmp::Ugt:
+          return mk<BUGT>(var1, var2);
+        case BVBinaryCmp::Uge:
+          return mk<BUGE>(var1, var2);
+        case BVBinaryCmp::Slt:
+          return mk<BSLT>(var1, var2);
+        case BVBinaryCmp::Sle:
+          return mk<BSLE>(var1, var2);
+        case BVBinaryCmp::Sgt:
+          return mk<BSGT>(var1, var2);
+        case BVBinaryCmp::Sge:
+          return mk<BSGE>(var1, var2);
+      }
+      return mk<TRUE>(m_efac);
+    }
+
+    BVterm sampleMaskTerm()
+    {
+      BVterm term(bitWidth());
+      term.shape = BVTermShape::MaskEquality;
+      for (int attempt = 0; attempt < 4; ++attempt)
+      {
+        term.varIndex = chooseByWeight(maskVarWeights);
+        term.maskIndex = chooseByWeight(maskMaskWeights);
+        term.valueIndex = pickMaskCompatibleValue(term.maskIndex);
+        if (!maskTermSeenRecently(term))
         {
-          t.addDisj(s.dstate[i]);
-        }
-        else
-        {
-          BVterm newTerm;
-          invertTerm(s.dstate[i], newTerm);
-          t.addDisj(newTerm);
-        }
-      }
-    }
-
-    bool mergeDisj(BVdisj& s1, BVdisj& s2, BVdisj& t)
-    {
-      t.clear();
-      t.arity = s1.arity + s2.arity;
-
-      for (int i = 0; i < s1.arity; i++)
-      {
-        t.addDisj(s1.dstate[i]);
-      }
-
-      for (int i = 0; i < s2.arity; i++)
-      {
-        t.addDisj(s2.dstate[i]);
-      }
-
-      return true; // Assuming merge is always successful
-    }
-
-    bool equivBvCom(BVterm& s1, BVterm& s2)
-    {
-      if (s1.arity != s2.arity) return false;
-
-      // check equivalence of vars
-      for (int i = 0; i < s1.vcs.size(); i += 2)
-      {
-        if (s1.vcs[i] != s2.vcs[i]) return false;
-      }
-
-      if (s1.vcs.size() == 2) return (s1.vcs[1] == s2.vcs[1]);
-
-      // finally, coefficients
-      if(s2.vcs[1] == 0) return false; // division by zero
-      cpp_int c1 = (cpp_int)s1.vcs[1] / (cpp_int)s2.vcs[1];
-      if (c1 < 0) return false;
-      for (int i = 3; i < s1.vcs.size(); i += 2)
-      {
-        if(s2.vcs[i] == 0) return false; // division by zero
-        cpp_int c2 = (cpp_int)s1.vcs[i] / (cpp_int)s2.vcs[i];
-        if (c2 < 0) return false;
-
-        if(c1 != c2) return false; // Ensure coefficients are equal
-      }
-
-      return true;
-    }
-
-    bool approxRedund(BVterm& s1, BVterm& s2)
-    {
-      if (s1.arity != s2.arity) return false;
-
-      // check equivalence of vars
-      for (int i = 0; i < s1.vcs.size(); i += 2)
-      {
-        if (s1.vcs[i] != s2.vcs[i]) return false;
-      }
-
-      // coefficients must be equal or one must be zero
-      cpp_int c1 = s1.vcs[1];
-      cpp_int c2 = s2.vcs[1];
-
-      if (c1 == 0 || c2 == 0) return true; // One term is zero
-
-      return (c1 == c2);
-    }
-
-    bool stronger(BVterm& s, BVterm& t)
-    {
-      if (s.vcs.size() != t.vcs.size()) return false;
-
-      for (int i = 0; i < s.vcs.size(); i++)
-      {
-        if (s.vcs[i] != t.vcs[i]) return false;
-      }
-
-      // Ax > b stronger than Ax >= b
-      if (s.intconst == t.intconst)
-        return (s.cmpop <= t.cmpop); // the smaller index the stronger formula
-
-      // Ax > / >= b stronger than Ax > / >= c iff b > c
-      return (s.intconst > t.intconst);
-    }
-
-    bool weaker(BVterm& s, BVterm& t)
-    {
-      if (s.vcs.size() != t.vcs.size()) return false;
-
-      for (int i = 0; i < s.vcs.size(); i++)
-      {
-        if (s.vcs[i] != t.vcs[i]) return false;
-      }
-
-      if (s.intconst == t.intconst)
-        return (s.cmpop >= t.cmpop);
-
-      return (s.intconst < t.intconst);
-    }
-
-    void getEquivalentFormulas(BVdisj& sample, std::vector<BVdisj>& equivs)
-    {
-      equivs.push_back(sample);
-      bvcoms& id = sample.getId();
-
-      for(int i = 0; i < sample.arity; i++)
-      {
-        BVterm& s = sample.dstate[i];
-        cpp_int intconst = intConsts[s.intconst];
-        cpp_int coef = equalCoefs(s);
-
-        if (coef != 0 && coef == intconst)
-        {
-          for (int j = 0; j < intCoefs.size(); j++)
-          {
-            auto thisConst = intCoefs[j];
-            if (thisConst == coef) continue;
-            if ((thisConst < 0) != (coef < 0)) continue;
-
-            int indProg = getVarIndex(thisConst, intConsts);  // GF?
-            if (indProg == -1) continue;
-
-            BVdisj c;
-            clone(sample, c);
-            c.dstate[i].intconst = indProg;
-            for (int k = 0; k < c.dstate[i].vcs.size(); k++)
-            {
-              if (k % 2 == 1) c.dstate[i].vcs[k] = j;
-            }
-            equivs.push_back(c);
-          }
-        }
-        else if (coef != 0 && 0 == intconst)
-        {
-          for (int j = 0; j < intCoefs.size(); j++)
-          {
-            auto thisConst = intCoefs[j];
-            if (thisConst == coef) continue;
-            if ((thisConst < 0) != (coef < 0)) continue;
-
-            BVdisj c;
-            clone(sample, c);
-            for (int k = 0; k < c.dstate[i].vcs.size(); k++)
-            {
-              if (k % 2 == 1) c.dstate[i].vcs[k] = j;
-            }
-            equivs.push_back(c);
-          }
-        }
-      }
-    }
-
-    bool addDisjFilter(BVterm& s, BVdisj& d)
-    {
-      d.addDisj(s); // add first, then check for redundancy
-      return true;
-
-      int skip = false;
-      for (int j = 0; j < d.arity; j++)
-      {
-        BVterm& t = d.dstate[j];
-        if (stronger(s, t))
-        {          // disjunction of s and t is equal to t, so s can be ignored
-          skip = true;
-          // outs() << "s is stronger than t\n";
           break;
         }
-        else if(weaker(s, t))
-        {
-          // disjunction of s and t is equal to s, so t can be ignored
-          t.cmpop = s.cmpop;
-          t.intconst = s.intconst;
+        nudgeMaskWeights(term);
+      }
+      shapeWeights[static_cast<int>(BVTermShape::MaskEquality)]++;
+      return term;
+    }
 
-          skip = true;
-          // outs() << "s is weaker than t\n";
+    BVterm sampleRangeTerm()
+    {
+      BVterm term(bitWidth());
+      term.shape = BVTermShape::Range;
+      term.varIndex = chooseByWeight(rangeVarWeights);
+      term.rangeInfo.signedSemantics = chooseByWeight(rangeSignWeights) == 1;
+      term.rangeInfo.lowerConst = chooseByWeight(rangeLowerWeights);
+      term.rangeInfo.upperConst = chooseByWeight(rangeUpperWeights);
+      shapeWeights[static_cast<int>(BVTermShape::Range)]++;
+      return term;
+    }
+
+    BVterm sampleModularTerm()
+    {
+      BVterm term(bitWidth());
+      term.shape = BVTermShape::ModularSum;
+      if (vars.empty())
+      {
+        return term;
+      }
+      int comboSize = chooseByWeight(modularVarComboWeights);
+      if (comboSize < 1 || static_cast<size_t>(comboSize) >= varCombinations.size())
+      {
+        comboSize = 1;
+      }
+      auto &combSet = varCombinations[comboSize];
+      if (combSet.empty())
+      {
+        BVVarCoef vc;
+        vc.varIndex = chooseByWeight(rangeVarWeights);
+        vc.coefKind = chooseByWeight(modularCoefWeights);
+        term.varCoefs.push_back(vc);
+      }
+      else
+      {
+        int combIndex = guessUniformly(static_cast<int>(combSet.size()));
+        const std::set<int> &varsChosen = combSet[combIndex];
+        for (int v : varsChosen)
+        {
+          BVVarCoef vc;
+          vc.varIndex = v;
+          vc.coefKind = chooseByWeight(modularCoefWeights);
+          term.varCoefs.push_back(vc);
+        }
+      }
+      term.constIndex = chooseByWeight(modularConstWeights);
+      term.comparator = chooseByWeight(modularComparatorWeights);
+      shapeWeights[static_cast<int>(BVTermShape::ModularSum)]++;
+      return term;
+    }
+
+    BVterm sampleUnaryTerm()
+    {
+      BVterm term(bitWidth());
+      term.shape = BVTermShape::Unary;
+      term.varIndex = chooseByWeight(unaryVarWeights);
+      int opKey = chooseByWeight(unaryOpWeights);
+      term.unaryInfo.op = (opKey == 0) ? BVUnaryOp::Not : BVUnaryOp::Neg;
+      term.unaryInfo.constIndex = chooseByWeight(maskValueWeights);
+      shapeWeights[static_cast<int>(BVTermShape::Unary)]++;
+      return term;
+    }
+
+    BVterm sampleBinaryExprTerm()
+    {
+      BVterm term(bitWidth());
+      term.shape = BVTermShape::BinaryExpr;
+      term.varIndex = chooseByWeight(rangeVarWeights);
+      do
+      {
+        term.varIndex2 = chooseByWeight(rangeVarWeights);
+      } while (term.varIndex2 == term.varIndex && vars.size() > 1);
+      term.binaryOp = chooseByWeight(binaryOpWeights);
+      term.valueIndex = chooseByWeight(maskValueWeights);
+      shapeWeights[static_cast<int>(BVTermShape::BinaryExpr)]++;
+      return term;
+    }
+
+    BVterm sampleBinaryCmpTerm()
+    {
+      BVterm term(bitWidth());
+      term.shape = BVTermShape::BinaryCmp;
+      term.varIndex = chooseByWeight(rangeVarWeights);
+      do
+      {
+        term.varIndex2 = chooseByWeight(rangeVarWeights);
+      } while (term.varIndex2 == term.varIndex && vars.size() > 1);
+      term.binaryCmp = chooseByWeight(binaryCmpWeights);
+      shapeWeights[static_cast<int>(BVTermShape::BinaryCmp)]++;
+      return term;
+    }
+
+    void ensureWeight(density &den, int key)
+    {
+      if (den.count(key) == 0 || den[key] <= 0)
+      {
+        den[key] = 1;
+      }
+    }
+
+    void computeDefaultWeights()
+    {
+      if (shapeWeights.empty())
+      {
+        shapeWeights[static_cast<int>(BVTermShape::MaskEquality)] = 0;
+        shapeWeights[static_cast<int>(BVTermShape::Range)] = 1;
+        shapeWeights[static_cast<int>(BVTermShape::ModularSum)] = 1;
+        shapeWeights[static_cast<int>(BVTermShape::Unary)] = 1;
+        shapeWeights[static_cast<int>(BVTermShape::BinaryExpr)] = 3;
+        shapeWeights[static_cast<int>(BVTermShape::BinaryCmp)] = 3;
+      }
+      if (!_config.shapeSeeds.empty())
+      {
+        for (auto &kv : _config.shapeSeeds)
+        {
+          shapeWeights[kv.first] += kv.second;
+        }
+      }
+      for (unsigned i = 0; i < vars.size(); i++)
+      {
+        ensureWeight(maskVarWeights, static_cast<int>(i));
+        ensureWeight(rangeVarWeights, static_cast<int>(i));
+        ensureWeight(unaryVarWeights, static_cast<int>(i));
+      }
+      for (unsigned i = 0; i < maskCatalog.size(); i++)
+      {
+        ensureWeight(maskMaskWeights, static_cast<int>(i));
+      }
+      for (unsigned i = 0; i < intConsts.size(); i++)
+      {
+        ensureWeight(maskValueWeights, static_cast<int>(i));
+        ensureWeight(rangeLowerWeights, static_cast<int>(i));
+        ensureWeight(rangeUpperWeights, static_cast<int>(i));
+        ensureWeight(modularConstWeights, static_cast<int>(i));
+      }
+      for (unsigned i = 0; i < intCoefs.size(); i++)
+      {
+        ensureWeight(modularCoefWeights, static_cast<int>(i));
+      }
+      ensureWeight(rangeSignWeights, 0);
+      ensureWeight(rangeSignWeights, 1);
+      for (unsigned i = 0; i < comparatorInfo.size(); i++)
+      {
+        ensureWeight(modularComparatorWeights, static_cast<int>(i));
+      }
+      for (unsigned size = 1; size < varCombinations.size(); size++)
+      {
+        ensureWeight(modularVarComboWeights, static_cast<int>(size));
+      }
+  ensureWeight(unaryOpWeights, 0);
+  ensureWeight(unaryOpWeights, 1);
+  for (int i = 0; i < 5; i++)
+  {
+    ensureWeight(binaryOpWeights, i);
+  }
+  for (int i = 0; i < 8; i++)
+  {
+    ensureWeight(binaryCmpWeights, i);
+  }
+    }
+
+  void adjustDensity(density &den, int key, int delta, int baseline = 1)
+    {
+      ensureWeight(den, key);
+      int &value = den[key];
+      value = std::max(baseline, value + delta);
+    }
+
+    void rewardTerm(const BVterm &term)
+    {
+      adjustDensity(shapeWeights, static_cast<int>(term.shape), PRIORITY_REWARD);
+      switch (term.shape)
+      {
+        case BVTermShape::MaskEquality:
+          rewardMaskTerm(term);
           break;
-        }
-        else 
-        {
-          BVterm u;
-          invertTerm(u, s);
-          if (stronger(u, s))
-          {
-            // outs() << "s is redundant due to its inverse\n";
-            return false;
-          }
-        }
+        case BVTermShape::Range:
+          rewardRangeTerm(term);
+          break;
+        case BVTermShape::ModularSum:
+          rewardModularTerm(term);
+          break;
+        case BVTermShape::Unary:
+          rewardUnaryTerm(term);
+          break;
+        case BVTermShape::BinaryExpr:
+          rewardBinaryExprTerm(term);
+          break;
+        case BVTermShape::BinaryCmp:
+        default:
+          rewardBinaryCmpTerm(term);
+          break;
       }
-      if(!skip)
-      {
-        // outs() << "\n** Adding a disjunct\n";
-        d.addDisj(s);
-      }
-      else
-      {
-        // outs() << "Skipping addition of a disjunct\n";
-      }
-      return true;
     }
 
-    bool guessTerm (BVdisj& curTerm, int arity, int bvArity)
+    void penalizeTerm(const BVterm &term)
     {
-      if(isEmpty(plusAritiesDensity[arity]))
+      adjustDensity(shapeWeights, static_cast<int>(term.shape), -PRIORITY_PENALTY);
+      switch (term.shape)
       {
-        // outs() << "** PLUSARITIES EMPTY **\n";
-        return false;
-      } 
-
-      std::vector<std::set<int>> varcombs;
-      std::vector<BVterm> terms;
-
-      // first, guess var combinations:
-      // outs() << "=== guessTerm ===\n";
-      // outs() << "arity: " << arity << "\n";
-      // outs() << "bvArity: " << bvArity << "\n";
-
-      for(int i = 0; i < bvArity; i++)
-      {
-        terms.push_back(BVterm(width));
-        BVterm& bv = terms.back();
-        bv.arity = chooseByWeight(plusAritiesDensity[arity]);
-        // outs() << "bv.arity after choosebyWeight 666: " << bv.arity << std::endl;
-
-        std::vector<std::set<int>>& varCombination = varCombinations[bv.arity];
-        int comb = chooseByWeight(varDensity[arity][bv.arity]);
-        varcombs.push_back(varCombination[comb]);
+        case BVTermShape::MaskEquality:
+          penalizeMaskTerm(term);
+          break;
+        case BVTermShape::Range:
+          penalizeRangeTerm(term);
+          break;
+        case BVTermShape::ModularSum:
+          penalizeModularTerm(term);
+          break;
+        case BVTermShape::Unary:
+          penalizeUnaryTerm(term);
+          break;
+        case BVTermShape::BinaryExpr:
+          penalizeBinaryExprTerm(term);
+          break;
+        case BVTermShape::BinaryCmp:
+        default:
+          penalizeBinaryCmpTerm(term);
+          break;
       }
-
-      // then, guess coefficients to complete the bv. combination
-
-      for(int i = 0; i < bvArity; i++)
-      {
-        BVterm& bv = terms[i];
-        for(int v : varcombs[i])
-        {
-          bv.vcs.push_back(v);
-          int coef = chooseByWeight(coefDensity[arity][v]);
-          bv.vcs.push_back(coef);
-        }
-
-        if(i != 0)
-        {
-          for(int j = 0; j < i; j++)
-          {
-            if(!aggressivepruning && equivBvCom(terms[i], terms[j]))
-            {
-              // disjunction of i and j is equal to j, so i can be ignored
-              return false;
-            }
-            else if (aggressivepruning&& approxRedund(bv, curTerm.dstate[j]))
-            {
-              return false;
-            }
-          }
-        }
-
-        curTerm.addDisj(bv);
-      }
-
-      // finally, guess comparison operator and int constant
-
-      if(aggressivepruning && isSampleVisitedWeak(curTerm)) return false;
-      if(aggressivepruning && isSampleVisitedStrong(curTerm)) return false;
-
-      bvcoms& id = curTerm.getId();
-
-      for(int i = 0; i < bvArity; i++)
-      {
-        BVterm& bv = curTerm.dstate[i];
-        guessNewInequality(id, i, bv, arity);
-      }
-
-      return true;
     }
 
-    void guessNewInequality(bvcoms& id, int disj, BVterm& curBVterm, int ar)
+    void dampTerm(const BVterm &term)
     {
-      std::vector<weights>& distrs = ineqPriors[id];
-      initDistrs(distrs, id.size(), prVarsDistrRange);
-
-      if(!aggressivepruning)
+      reduceDensity(shapeWeights, static_cast<int>(term.shape));
+      switch (term.shape)
       {
-        reInitialize(id, disj); 
-      }
-
-      if(isDefault(distrs[disj]))
-      {
-        curBVterm.cmpop = chooseByWeight(cmpOpDensity[ar]);
-        curBVterm.intconst = chooseByWeight(intConstDensity[ar]);
-
-      }
-      else
-      {
-        int ch = chooseByWeight(distrs[disj]);
-        double chd = (double)ch / 2;
-        curBVterm.intconst = (int)chd;
-        curBVterm.cmpop = (ch % 2 == 0) ? getIndexGE() : getIndexGT(); // even -> GE, odd -> GT
+        case BVTermShape::MaskEquality:
+          dampMaskTerm(term);
+          break;
+        case BVTermShape::Range:
+          dampRangeTerm(term);
+          break;
+        case BVTermShape::ModularSum:
+          dampModularTerm(term);
+          break;
+        case BVTermShape::Unary:
+          dampUnaryTerm(term);
+          break;
+        case BVTermShape::BinaryExpr:
+          dampBinaryExprTerm(term);
+          break;
+        case BVTermShape::BinaryCmp:
+        default:
+          dampBinaryCmpTerm(term);
+          break;
       }
     }
 
-    // revisit
-    bool isSampleVisitedWeak(BVdisj& disj)
+    void rewardMaskTerm(const BVterm &term)
     {
-      bvcoms &id = disj.getId();
-
-      if (visited[id].size() > 0)
-      {
-        return true;
-      }
-      return false;
+      applyDeltaIfValid(maskVarWeights, term.varIndex, PRIORITY_REWARD);
+      applyDeltaIfValid(maskMaskWeights, term.maskIndex, PRIORITY_REWARD);
+      applyDeltaIfValid(maskValueWeights, term.valueIndex, PRIORITY_REWARD);
     }
 
-    // revisit
-    bool isSampleVisitedStrong(BVdisj &disj)
+    void rewardRangeTerm(const BVterm &term)
     {
-      bvcoms &id = disj.getId();
-
-      if (visited[id].size() == disj.arity)
-      {
-        return true;
-      }
-      return false;
+      applyDeltaIfValid(rangeVarWeights, term.varIndex, PRIORITY_REWARD);
+      applyDeltaIfValid(rangeLowerWeights, term.rangeInfo.lowerConst, PRIORITY_REWARD);
+      applyDeltaIfValid(rangeUpperWeights, term.rangeInfo.upperConst, PRIORITY_REWARD);
+      int signKey = term.rangeInfo.signedSemantics ? 1 : 0;
+      applyDeltaIfValid(rangeSignWeights, signKey, PRIORITY_REWARD);
     }
 
-    // revisit
-    bool isVisited(bvcoms& id, int disj)
+    void rewardModularTerm(const BVterm &term)
     {
-      set<int> &s = visited[id];
-
-      if (std::find(std::begin(s), std::end(s), disj) != std::end(s))
+      if (!term.varCoefs.empty())
       {
-        // outs() << "visiteed\n";
-        return true;
+        applyDeltaIfValid(modularVarComboWeights, static_cast<int>(term.varCoefs.size()), PRIORITY_REWARD);
       }
-
-      weights &d = ineqPriors[id][disj];
-
-      if (ineqPriors[id].size() == 0)
+      for (const BVVarCoef &vc : term.varCoefs)
       {
-        // outs() << "WARNING: Priorities are not set up here\n";
-        return false;
+        applyDeltaIfValid(rangeVarWeights, vc.varIndex, PRIORITY_REWARD);
+        applyDeltaIfValid(modularCoefWeights, vc.coefKind, PRIORITY_REWARD);
       }
-
-      for (int i = 0; i < d.size(); i++)
-      {
-        if (d[i] != PRIORNOVISIT)
-        {
-          // outs() << "WARNING: Priorities are not set up heree\n";
-          return false;
-        }
-      }
-      s.insert(disj);
-      // outs() << "visited\n";
-      return true;
+      applyDeltaIfValid(modularConstWeights, term.constIndex, PRIORITY_REWARD);
+      applyDeltaIfValid(modularComparatorWeights, term.comparator, PRIORITY_REWARD);
     }
 
-    // revisit
-    void reInitialize(bvcoms& id, int disj, int def = 1000)
+    void rewardUnaryTerm(const BVterm &term)
     {
-      set<int>& s = visited[id];
-
-      if (s.find(disj) == s.end()) return;
-
-      weights& d = ineqPriors[id][disj];
-
-      for (int i = 0; i < d.size(); i++) d[i] = def;
-
+      applyDeltaIfValid(unaryVarWeights, term.varIndex, PRIORITY_REWARD);
+      applyDeltaIfValid(unaryOpWeights, static_cast<int>(term.unaryInfo.op), PRIORITY_REWARD);
+      applyDeltaIfValid(maskValueWeights, term.unaryInfo.constIndex, PRIORITY_REWARD);
     }
 
-    // revisit
-    void prioritiesBlocked(BVdisj &failed)
+    void penalizeMaskTerm(const BVterm &term)
     {
-      bvcoms& id = failed.getId();
-      std::vector<weights>& distrs = ineqPriors[id];
-
-      initDistrs(distrs, failed.arity, prVarsDistrRange);
-
-      for (int i = 0; i < failed.arity; i++)
-      {
-        BVterm& s = failed.dstate[i];
-        distrs[i][s.intconst * 2 + (getIndexGT() == s.cmpop ? 1 : 0)] = PRIORNOVISIT;
-        isVisited(id, i);
-      }
+      applyDeltaIfValid(maskVarWeights, term.varIndex, -PRIORITY_PENALTY);
+      applyDeltaIfValid(maskMaskWeights, term.maskIndex, -PRIORITY_PENALTY);
+      applyDeltaIfValid(maskValueWeights, term.valueIndex, -PRIORITY_PENALTY);
     }
 
-    // revisit
-    void prioritiesFailed(BVdisj &failed)
+    void penalizeRangeTerm(const BVterm &term)
     {
-      bvcoms& id = failed.getId();
-      std::vector<weights> &distrs = ineqPriors[id];
-
-      initDistrs(distrs, failed.arity, prVarsDistrRange);
-
-      for (int i = 0; i < failed.arity; i++)
-      {
-        BVterm &s = failed.dstate[i];
-
-        int lim = s.intconst * 2 + (getIndexGT() == s.cmpop ? 1 : 0);
-        for (int j = 0; j < prVarsDistrRange; j++)
-        {
-          if (j >= lim)
-          {
-            // block all constants which are greater or equal than intconst
-            distrs[i][j] = PRIORNOVISIT;
-          }
-          else
-          {
-            // the farther constant from s.intconst the higher priority to visit it later
-            distrs[i][j] = min(distrs[i][j], (lim - j) * PRIORSTEP);
-          }
-        }
-
-        isVisited(id, i);
-      }
+      applyDeltaIfValid(rangeVarWeights, term.varIndex, -PRIORITY_PENALTY);
+      applyDeltaIfValid(rangeLowerWeights, term.rangeInfo.lowerConst, -PRIORITY_PENALTY);
+      applyDeltaIfValid(rangeUpperWeights, term.rangeInfo.upperConst, -PRIORITY_PENALTY);
+      int signKey = term.rangeInfo.signedSemantics ? 1 : 0;
+      applyDeltaIfValid(rangeSignWeights, signKey, -PRIORITY_PENALTY);
     }
 
-    // 
-    void prioritiesLearned(BVdisj &learned)
+    void penalizeModularTerm(const BVterm &term)
     {
-      bvcoms& id = learned.getId();
-      std::vector<weights>& distrs = ineqPriors[id];
-
-      initDistrs(distrs, learned.arity, prVarsDistrRange);
-
-      for (int i = 0; i < learned.arity; i++)
+      if (!term.varCoefs.empty())
       {
-        BVterm& s = learned.dstate[i];
-
-        int lim = s.intconst * 2 + (getIndexGT() == s.cmpop ? 1 : 0);
-        for (int j = 0; j < prVarsDistrRange; j++)
-        {
-          if (j < lim)
-          {
-            // block all constants which are less or equal than intconst
-            distrs[i][j] = PRIORNOVISIT;
-          }
-          else
-          {
-            // the farther constant from intconst the higher priority to visit it later
-            distrs[i][j] = std::min(distrs[i][j], (j - lim) * PRIORSTEP);
-          }
-        }
-
-        isVisited(id, i);
+        applyDeltaIfValid(modularVarComboWeights, static_cast<int>(term.varCoefs.size()), -PRIORITY_PENALTY);
       }
+      for (const BVVarCoef &vc : term.varCoefs)
+      {
+        applyDeltaIfValid(rangeVarWeights, vc.varIndex, -PRIORITY_PENALTY);
+        applyDeltaIfValid(modularCoefWeights, vc.coefKind, -PRIORITY_PENALTY);
+      }
+      applyDeltaIfValid(modularConstWeights, term.constIndex, -PRIORITY_PENALTY);
+      applyDeltaIfValid(modularComparatorWeights, term.comparator, -PRIORITY_PENALTY);
     }
 
-    // 
-    void assignPrioritiesForLearned(BVdisj &learned)
+    void penalizeUnaryTerm(const BVterm &term)
     {
-      if (!aggressivepruning) return;
-
-      std::vector<BVdisj> eqs;
-      getEquivalentFormulas(learned, eqs);
-      for (auto &a : eqs) prioritiesLearned(a);
-
-      if (learned.arity == 1)
-      {
-        BVdisj t;
-        invertDisj(learned, t, 0);  // this is guaranteed to fail
-        assignPrioritiesForFailed(t);
-      }
+      applyDeltaIfValid(unaryVarWeights, term.varIndex, -PRIORITY_PENALTY);
+      applyDeltaIfValid(unaryOpWeights, static_cast<int>(term.unaryInfo.op), -PRIORITY_PENALTY);
+      applyDeltaIfValid(maskValueWeights, term.unaryInfo.constIndex, -PRIORITY_PENALTY);
     }
 
-    void assignPrioritiesForFailed(BVdisj &failed)
+    void dampMaskTerm(const BVterm &term)
     {
-      if (!aggressivepruning) return;
-
-      std::vector<BVdisj> eqs;
-      getEquivalentFormulas(failed, eqs);
-      for (auto &a : eqs) prioritiesFailed(a);
+      reduceDensity(maskVarWeights, term.varIndex);
+      reduceDensity(maskMaskWeights, term.maskIndex);
+      reduceDensity(maskValueWeights, term.valueIndex);
     }
 
-    void assignPrioritiesForBlocked(BVdisj &failed)
+    void dampRangeTerm(const BVterm &term)
     {
-      if (!aggressivepruning) return;
-
-      std::vector<BVdisj> eqs;
-      getEquivalentFormulas(failed, eqs);
-      for (auto &a : eqs) prioritiesBlocked(a);
+      reduceDensity(rangeVarWeights, term.varIndex);
+      reduceDensity(rangeLowerWeights, term.rangeInfo.lowerConst);
+      reduceDensity(rangeUpperWeights, term.rangeInfo.upperConst);
+      int signKey = term.rangeInfo.signedSemantics ? 1 : 0;
+      reduceDensity(rangeSignWeights, signKey);
     }
 
-    void initDensities(set<int>& arities)
+    void dampModularTerm(const BVterm &term)
     {
-      varCombinations.push_back(std::vector<std::set<int>>());
-
-      for(int i = 1; i <= vars.size(); i++)
+      if (!term.varCoefs.empty())
       {
-        varCombinations.push_back(std::vector<std::set<int>>());
-        getCombinations(varInds, 0, i, varCombinations.back());
+        reduceDensity(modularVarComboWeights, static_cast<int>(term.varCoefs.size()));
       }
-
-      for (auto ar : arities) initDensities(ar);
+      for (const BVVarCoef &vc : term.varCoefs)
+      {
+        reduceDensity(rangeVarWeights, vc.varIndex);
+        reduceDensity(modularCoefWeights, vc.coefKind);
+      }
+      reduceDensity(modularConstWeights, term.constIndex);
+      reduceDensity(modularComparatorWeights, term.comparator);
     }
 
-    void initDensities(int ar)
+    void dampUnaryTerm(const BVterm &term)
     {
-      for (int i = 1; i < vars.size() + 1; i++)
-      {
-        plusAritiesDensity[ar][i] = 0;
-
-        for (int j = 0; j < intCoefs.size(); j++)
-        {
-          coefDensity[ar][i - 1][j] = 0;
-        }
-      }
-
-      // Initialize densities for int constants and comparison operators
-      for (int i = 0; i < intConsts.size(); i++)
-      {
-        intConstDensity[ar][i] = 0;
-      }
-
-      for (int i = 0; i < cmpOps.size(); i++)
-      {
-        cmpOpDensity[ar][i] = 0;
-      }
-
-      // preparing var densities;
-      varDensity[ar].push_back(density());
-      for (int i = 1; i <= vars.size(); i++)
-      {
-        varDensity[ar].push_back(density());
-        for(int j = 0; j < varCombinations[i].size(); j++)
-        {
-          varDensity[ar][i][j] = 0;
-        }
-      }
+      reduceDensity(unaryVarWeights, term.varIndex);
+      reduceDensity(unaryOpWeights, static_cast<int>(term.unaryInfo.op));
+      reduceDensity(maskValueWeights, term.unaryInfo.constIndex);
     }
 
-    // revisit
-    int getEpsilon(int min_freq, int num_zeros)
+    void rewardBinaryExprTerm(const BVterm &term)
     {
-      if (num_zeros == 0) return 1;
-
-      return 1 + ((min_freq == INT_MAX) ? 0 : (guessUniformly(min_freq) / num_zeros / EPSILONFRACTION));
+      applyDeltaIfValid(rangeVarWeights, term.varIndex, PRIORITY_REWARD);
+      applyDeltaIfValid(rangeVarWeights, term.varIndex2, PRIORITY_REWARD);
+      applyDeltaIfValid(binaryOpWeights, term.binaryOp, PRIORITY_REWARD);
+      applyDeltaIfValid(maskValueWeights, term.valueIndex, PRIORITY_REWARD);
     }
 
-    // revisit
-    void stabilizeDensities(int ar, bool addEpsilon, bool freqs)
+    void rewardBinaryCmpTerm(const BVterm &term)
     {
-      int freqCoef = freqs ? FREQCOEF : 1;
-      int min_freq = INT_MAX;
-      int num_zeros = 0;
-      int eps = 0;
-
-      for (auto & pl : plusAritiesDensity[ar])
-      {
-        if (pl.second == 0) num_zeros++;
-        else
-        {
-          pl.second *= freqCoef;
-          min_freq = min(min_freq, pl.second);
-        }
-      }
-
-      if (addEpsilon) eps = getEpsilon(min_freq, num_zeros);
-        else if (num_zeros == plusAritiesDensity[ar].size()) eps = 1;
-          else eps = 0;
-
-      for (auto & pl : plusAritiesDensity[ar])
-      {
-        if (pl.second == 0) pl.second = eps;
-      }
-
-      for (int i = 0; i < vars.size(); i++)
-      {
-        min_freq = INT_MAX;
-        num_zeros = 0;
-        for (auto & c : coefDensity[ar][i])
-        {
-          if (c.second == 0) num_zeros++;
-          else
-          {
-            c.second *= freqCoef;
-            min_freq = min(min_freq, c.second);
-          }
-        }
-
-        if (addEpsilon) eps = getEpsilon(min_freq, num_zeros);
-          else if (num_zeros == coefDensity[ar][i].size()) eps = 1;
-            else eps = 0;
-
-        for (auto & c : coefDensity[ar][i])
-        {
-          if (c.second == 0) c.second = eps;
-        }
-      }
-
-      min_freq = INT_MAX;
-      num_zeros = 0;
-      for (auto & c : intConstDensity[ar])
-      {
-        if (c.second == 0) num_zeros++;
-        else
-        {
-          c.second *= freqCoef;
-          min_freq = min(min_freq, c.second);
-        }
-      }
-
-      if (addEpsilon) eps = getEpsilon(min_freq, num_zeros);
-        else if (num_zeros == intConstDensity[ar].size()) eps = 1;
-          else eps = 0;
-
-      for (auto & c : intConstDensity[ar])
-      {
-        if (c.second == 0) c.second = eps;
-      }
-
-      min_freq = INT_MAX;
-      num_zeros = 0;
-      for (auto & c : cmpOpDensity[ar])
-      {
-        if (c.second == 0) num_zeros++;
-        else
-        {
-          c.second *= freqCoef;
-          min_freq = min(min_freq, c.second);
-        }
-      }
-
-      if (addEpsilon) eps = getEpsilon(min_freq, num_zeros);
-        else if (num_zeros == cmpOpDensity[ar].size()) eps = 1;
-          else eps = 0;
-
-      for (auto & c : cmpOpDensity[ar])
-      {
-        if (c.second == 0) c.second = eps;
-      }
-
-      for (int i = 0; i < varDensity[ar].size(); i++)
-      {
-        min_freq = INT_MAX;
-        num_zeros = 0;
-        for (auto &b : varDensity[ar][i])
-        {
-          if (b.second == 0) num_zeros++;
-          else
-          {
-            b.second *= freqCoef;
-            min_freq = min(min_freq, b.second);
-          }
-        }
-
-        if (addEpsilon) eps = getEpsilon(min_freq, num_zeros);
-          else if (num_zeros == varDensity[ar][i].size()) eps = 1;
-            else eps = 0;
-
-        for (auto &b : varDensity[ar][i])
-        {
-          if (b.second == 0) b.second = eps;
-        }
-      }
+      applyDeltaIfValid(rangeVarWeights, term.varIndex, PRIORITY_REWARD);
+      applyDeltaIfValid(rangeVarWeights, term.varIndex2, PRIORITY_REWARD);
+      applyDeltaIfValid(binaryCmpWeights, term.binaryCmp, PRIORITY_REWARD);
     }
 
-    void calculateStatistics(BVdisj& bvcs, int ar, bool freqs, bool addepsilon)
+    void penalizeBinaryExprTerm(const BVterm &term)
     {
-      if (freqs)
-      {
-        bvcs.printBVdisj();
-        for (auto & bv : bvcs.dstate)
-        {
-          plusAritiesDensity[ar][bv.arity] ++;
-          intConstDensity[ar][bv.intconst] ++;
-          cmpOpDensity[ar][bv.cmpop] ++;
-
-          set<int> varsSet;
-          int vars_id = -1;
-          for (int i = 0; i < bv.vcs.size(); i += 2)
-          {
-            varsSet.insert(bv.vcs[i]);
-          }
-          for(int j = 0; j < varCombinations[bv.arity].size(); j++)
-          {
-            if (varCombinations[bv.arity][j] == varsSet)
-            {
-              vars_id = j;
-              break;
-            }
-          }
-          assert(vars_id >= 0);
-
-          varDensity[ar][bv.arity][vars_id] += 1;
-          for(int j = 1; j < bv.vcs.size(); j += 2)
-          {
-            coefDensity[ar][bv.vcs[j - 1]][bv.vcs[j]] += 1;
-          }
-        }
-      }
-      else
-      {
-        for (auto & bv : bvcs.dstate)
-        {
-          plusAritiesDensity[ar][bv.arity] = 1;
-          intConstDensity[ar][bv.intconst] = 1;
-          cmpOpDensity[ar][bv.cmpop] = 1;
-
-          set<int> varsSet;
-          int vars_id = -1;
-          for (int j = 0; j < bv.vcs.size(); j = j + 2)
-          {
-            varsSet.insert(bv.vcs[j]);
-          }
-          // bv.printBVterm();
-          for(int j = 0; j < varCombinations[bv.arity].size(); j++)
-          {
-            if (varCombinations[bv.arity][j] == varsSet)
-            {
-              vars_id = j;
-              break;
-            }
-          }
-          assert(vars_id >= 0);
-
-          varDensity[ar][bv.arity][vars_id] += 1;
-
-          for(int j = 1; j < bv.vcs.size(); j += 2)
-          {
-            coefDensity[ar][bv.vcs[j - 1]][bv.vcs[j]] += 1;
-          }
-        }
-      }
+      applyDeltaIfValid(rangeVarWeights, term.varIndex, -PRIORITY_PENALTY);
+      applyDeltaIfValid(rangeVarWeights, term.varIndex2, -PRIORITY_PENALTY);
+      applyDeltaIfValid(binaryOpWeights, term.binaryOp, -PRIORITY_PENALTY);
+      applyDeltaIfValid(maskValueWeights, term.valueIndex, -PRIORITY_PENALTY);
     }
 
-    void printCodeStatistics(int ar)
+    void penalizeBinaryCmpTerm(const BVterm &term)
     {
-      outs() << "(OR arity = " << ar << "):\n";
-
-      for (auto &a : plusAritiesDensity[ar])
-      {
-        outs() << " Plus arity density: " << a.first << " |--> " << a.second << "\n";
-      }
-
-      for (auto &a : intConstDensity[ar])
-      {
-        outs() << " IntConst density: " << *intConstsE[a.first] << " |--> " << a.second << "\n";
-      }
-
-      for (auto &a : cmpOpDensity[ar])
-      {
-        outs() << " Operator density: " << (a.first == indexGT ? "BUGT" : "BUGE") << " |--> " << a.second << "\n";
-      }
-
-      for (int i = 0; i < varDensity[ar].size(); i++)
-      {
-        for (auto &b : varDensity[ar][i])
-        {
-          outs() << " Var Combination density: ";
-
-          for (int j : varCombinations[i][b.first])
-          {
-            outs() << *vars[j] << ", ";
-          }
-
-          outs() << "\b\b |--> " << b.second << "\n";
-        }
-      }
-
-      for (int i = 0; i < vars.size(); i++)
-      {
-        for (int j = 0; j < getIntCoefsSize(); j++)
-        {
-          outs() << " Var Coefficient density: [" << *intCoefsE[j] << " * "
-                 << *vars[i] << "] : " << coefDensity[ar][i][j] << "\n";
-        }
-      }
+      applyDeltaIfValid(rangeVarWeights, term.varIndex, -PRIORITY_PENALTY);
+      applyDeltaIfValid(rangeVarWeights, term.varIndex2, -PRIORITY_PENALTY);
+      applyDeltaIfValid(binaryCmpWeights, term.binaryCmp, -PRIORITY_PENALTY);
     }
-  }; // end of BVfactory
 
-} // namespace ufo
+    void dampBinaryExprTerm(const BVterm &term)
+    {
+      reduceDensity(rangeVarWeights, term.varIndex);
+      reduceDensity(rangeVarWeights, term.varIndex2);
+      reduceDensity(binaryOpWeights, term.binaryOp);
+      reduceDensity(maskValueWeights, term.valueIndex);
+    }
+
+    void dampBinaryCmpTerm(const BVterm &term)
+    {
+      reduceDensity(rangeVarWeights, term.varIndex);
+      reduceDensity(rangeVarWeights, term.varIndex2);
+      reduceDensity(binaryCmpWeights, term.binaryCmp);
+    }
+
+    void applyDeltaIfValid(density &den, int key, int delta)
+    {
+      if (key < 0)
+      {
+        return;
+      }
+      adjustDensity(den, key, delta);
+    }
+
+    void reduceDensity(density &den, int key, int baseline = 1)
+    {
+      if (key < 0)
+      {
+        return;
+      }
+      ensureWeight(den, key);
+      int &value = den[key];
+      value = std::max(baseline, value / 2);
+    }
+
+    void printDensityStatistics(const density &den, const std::string &label) const
+    {
+      if (den.empty())
+      {
+        return;
+      }
+      outs() << label << ": ";
+      for (auto it = den.begin(); it != den.end(); ++it)
+      {
+        outs() << "[" << it->first << " -> " << it->second << "] ";
+      }
+      outs() << "\n";
+    }
+
+    void printShapeStatistics() const
+    {
+      if (shapeWeights.empty())
+      {
+        return;
+      }
+      outs() << "  Shape weights: ";
+      for (auto it = shapeWeights.begin(); it != shapeWeights.end(); ++it)
+      {
+        outs() << "[" << shapeName(static_cast<BVTermShape>(it->first))
+               << " -> " << it->second << "] ";
+      }
+      outs() << "\n";
+    }
+
+    const char *shapeName(BVTermShape shape) const
+    {
+      switch (shape)
+      {
+        case BVTermShape::MaskEquality:
+          return "mask";
+        case BVTermShape::Range:
+          return "range";
+        case BVTermShape::ModularSum:
+          return "modular";
+        case BVTermShape::Unary:
+          return "unary";
+        case BVTermShape::BinaryExpr:
+          return "binary_expr";
+        case BVTermShape::BinaryCmp:
+          return "binary_cmp";
+      }
+      return "unknown";
+    }
+  };
+
+  inline void BVfactory::assignPrioritiesForLearned(BVdisj &learned)
+  {
+    if (!_initialized)
+    {
+      return;
+    }
+    for (const BVterm &term : learned.dstate)
+    {
+      rewardTerm(term);
+    }
+  }
+
+  inline void BVfactory::assignPrioritiesForFailed(BVdisj &failed)
+  {
+    if (!_initialized)
+    {
+      return;
+    }
+    for (const BVterm &term : failed.dstate)
+    {
+      penalizeTerm(term);
+    }
+  }
+
+  inline void BVfactory::assignPrioritiesForBlocked(BVdisj &blocked)
+  {
+    if (!_initialized)
+    {
+      return;
+    }
+    for (const BVterm &term : blocked.dstate)
+    {
+      dampTerm(term);
+    }
+  }
+
+  inline void BVfactory::printCodeStatistics(int ar) const
+  {
+    outs() << "BV sampler statistics (arity " << ar << ")\n";
+    printShapeStatistics();
+    printDensityStatistics(maskVarWeights, "  Mask variable weights");
+    printDensityStatistics(maskMaskWeights, "  Mask catalogue weights");
+    printDensityStatistics(maskValueWeights, "  Mask value weights");
+    printDensityStatistics(rangeVarWeights, "  Range variable weights");
+    printDensityStatistics(rangeLowerWeights, "  Range lower bound weights");
+    printDensityStatistics(rangeUpperWeights, "  Range upper bound weights");
+    printDensityStatistics(rangeSignWeights, "  Range sign weights");
+    printDensityStatistics(modularVarComboWeights, "  Modular combination size weights");
+    printDensityStatistics(modularCoefWeights, "  Modular coefficient weights");
+    printDensityStatistics(modularConstWeights, "  Modular constant weights");
+    printDensityStatistics(modularComparatorWeights, "  Modular comparator weights");
+    printDensityStatistics(unaryVarWeights, "  Unary variable weights");
+    printDensityStatistics(unaryOpWeights, "  Unary operator weights");
+    printDensityStatistics(binaryOpWeights, "  Binary operation weights");
+    printDensityStatistics(binaryCmpWeights, "  Binary comparison weights");
+  }
+}
 
 #endif // BVCOM__HPP__
