@@ -45,11 +45,7 @@ namespace ufo
     Ult,
     Ule,
     Ugt,
-    Uge,
-    Slt,
-    Sle,
-    Sgt,
-    Sge
+    Uge
   };
 
   struct BVFactoryConfig
@@ -68,7 +64,8 @@ namespace ufo
     ModularSum = 2,
     Unary = 3,
     BinaryExpr = 4,
-    BinaryCmp = 5
+    BinaryCmp = 5,
+    NaryExpr = 6
   };
 
   enum class BVUnaryOp : int
@@ -86,16 +83,11 @@ namespace ufo
     Xor = 4
   };
 
-  enum class BVBinaryCmp : int
+  enum class BVNaryOp : int
   {
-    Ult = 0,
-    Ule = 1,
-    Ugt = 2,
-    Uge = 3,
-    Slt = 4,
-    Sle = 5,
-    Sgt = 6,
-    Sge = 7
+    And = 0,
+    Or = 1,
+    Xor = 2
   };
 
   struct BVRangeInfo
@@ -134,6 +126,8 @@ namespace ufo
     int binaryOp = -1;
     int binaryCmp = -1;
     int varIndex2 = -1;
+    int naryOp = -1;
+    std::vector<int> varIndices;
 
     BVterm() = default;
     explicit BVterm(unsigned w) : width(w) {}
@@ -303,8 +297,10 @@ namespace ufo
         case BVTermShape::BinaryExpr:
           return buildBinaryExpr(term);
         case BVTermShape::BinaryCmp:
-        default:
           return buildBinaryCmp(term);
+        case BVTermShape::NaryExpr:
+        default:
+          return buildNaryExpr(term);
       }
     }
 
@@ -367,8 +363,10 @@ namespace ufo
         case BVTermShape::BinaryExpr:
           return sampleBinaryExprTerm();
         case BVTermShape::BinaryCmp:
-        default:
           return sampleBinaryCmpTerm();
+        case BVTermShape::NaryExpr:
+        default:
+          return sampleNaryExprTerm();
       }
     }
 
@@ -476,6 +474,7 @@ namespace ufo
     density unaryOpWeights;
     density binaryOpWeights;
     density binaryCmpWeights;
+    density naryOpWeights;
     std::vector<std::vector<std::set<int>>> varCombinations;
     std::vector<BVComparatorInfo> comparatorInfo;
     std::map<BVTermShape, std::vector<BVterm>> cachedBuckets;
@@ -642,10 +641,6 @@ namespace ufo
       if (isOpX<BULE>(cmp)) return comparatorIndexForKind(BVComparatorKind::Ule);
       if (isOpX<BUGT>(cmp)) return comparatorIndexForKind(BVComparatorKind::Ugt);
       if (isOpX<BUGE>(cmp)) return comparatorIndexForKind(BVComparatorKind::Uge);
-      if (isOpX<BSLT>(cmp)) return comparatorIndexForKind(BVComparatorKind::Slt);
-      if (isOpX<BSLE>(cmp)) return comparatorIndexForKind(BVComparatorKind::Sle);
-      if (isOpX<BSGT>(cmp)) return comparatorIndexForKind(BVComparatorKind::Sgt);
-      if (isOpX<BSGE>(cmp)) return comparatorIndexForKind(BVComparatorKind::Sge);
       return -1;
     }
 
@@ -1163,10 +1158,6 @@ namespace ufo
       addCmp(mk<BULE>(auxVarLhs, auxVarRhs), BVComparatorKind::Ule);
       addCmp(mk<BUGT>(auxVarLhs, auxVarRhs), BVComparatorKind::Ugt);
       addCmp(mk<BUGE>(auxVarLhs, auxVarRhs), BVComparatorKind::Uge);
-      addCmp(mk<BSLT>(auxVarLhs, auxVarRhs), BVComparatorKind::Slt);
-      addCmp(mk<BSLE>(auxVarLhs, auxVarRhs), BVComparatorKind::Sle);
-      addCmp(mk<BSGT>(auxVarLhs, auxVarRhs), BVComparatorKind::Sgt);
-      addCmp(mk<BSGE>(auxVarLhs, auxVarRhs), BVComparatorKind::Sge);
     }
 
     void initVarCombinations()
@@ -1316,26 +1307,46 @@ namespace ufo
       assert(term.binaryCmp >= 0);
       Expr var1 = vars[term.varIndex];
       Expr var2 = vars[term.varIndex2];
-      switch (static_cast<BVBinaryCmp>(term.binaryCmp))
+      switch (term.binaryCmp)
       {
-        case BVBinaryCmp::Ult:
+        case 0:
           return mk<BULT>(var1, var2);
-        case BVBinaryCmp::Ule:
+        case 1:
           return mk<BULE>(var1, var2);
-        case BVBinaryCmp::Ugt:
+        case 2:
           return mk<BUGT>(var1, var2);
-        case BVBinaryCmp::Uge:
+        case 3:
           return mk<BUGE>(var1, var2);
-        case BVBinaryCmp::Slt:
-          return mk<BSLT>(var1, var2);
-        case BVBinaryCmp::Sle:
-          return mk<BSLE>(var1, var2);
-        case BVBinaryCmp::Sgt:
-          return mk<BSGT>(var1, var2);
-        case BVBinaryCmp::Sge:
-          return mk<BSGE>(var1, var2);
       }
       return mk<TRUE>(m_efac);
+    }
+
+    Expr buildNaryExpr(const BVterm &term) const
+    {
+      assert(term.naryOp >= 0);
+      assert(!term.varIndices.empty());
+      ExprVector operands;
+      for (int idx : term.varIndices)
+      {
+        assert(idx >= 0 && static_cast<size_t>(idx) < vars.size());
+        operands.push_back(vars[idx]);
+      }
+      Expr opExpr;
+      switch (static_cast<BVNaryOp>(term.naryOp))
+      {
+        case BVNaryOp::And:
+          opExpr = mkb<BAND>(operands, bvnum(mpz_class(0), bitWidth(), m_efac));
+          break;
+        case BVNaryOp::Or:
+          opExpr = mkb<BOR>(operands, bvnum(mpz_class(0), bitWidth(), m_efac));
+          break;
+        case BVNaryOp::Xor:
+          opExpr = mkb<BXOR>(operands, bvnum(mpz_class(0), bitWidth(), m_efac));
+          break;
+      }
+      assert(term.valueIndex >= 0 && static_cast<size_t>(term.valueIndex) < intConstsE.size());
+      Expr value = intConstsE[term.valueIndex];
+      return mk<EQ>(opExpr, value);
     }
 
     BVterm sampleMaskTerm()
@@ -1449,6 +1460,28 @@ namespace ufo
       return term;
     }
 
+    BVterm sampleNaryExprTerm()
+    {
+      BVterm term(bitWidth());
+      term.shape = BVTermShape::NaryExpr;
+      int numVars = guessUniformly(3) + 3; // 3 to 5 vars
+      numVars = std::min(numVars, static_cast<int>(vars.size()));
+      std::set<int> chosen;
+      while (static_cast<int>(chosen.size()) < numVars)
+      {
+        int idx = chooseByWeight(rangeVarWeights);
+        chosen.insert(idx);
+      }
+      for (int idx : chosen)
+      {
+        term.varIndices.push_back(idx);
+      }
+      term.naryOp = chooseByWeight(naryOpWeights);
+      term.valueIndex = chooseByWeight(maskValueWeights);
+      shapeWeights[static_cast<int>(BVTermShape::NaryExpr)]++;
+      return term;
+    }
+
     void ensureWeight(density &den, int key)
     {
       if (den.count(key) == 0 || den[key] <= 0)
@@ -1465,8 +1498,9 @@ namespace ufo
         shapeWeights[static_cast<int>(BVTermShape::Range)] = 1;
         shapeWeights[static_cast<int>(BVTermShape::ModularSum)] = 1;
         shapeWeights[static_cast<int>(BVTermShape::Unary)] = 1;
-        shapeWeights[static_cast<int>(BVTermShape::BinaryExpr)] = 3;
-        shapeWeights[static_cast<int>(BVTermShape::BinaryCmp)] = 3;
+        shapeWeights[static_cast<int>(BVTermShape::BinaryExpr)] = 4;
+        shapeWeights[static_cast<int>(BVTermShape::BinaryCmp)] = 4;
+        shapeWeights[static_cast<int>(BVTermShape::NaryExpr)] = 4;
       }
       if (!_config.shapeSeeds.empty())
       {
@@ -1512,9 +1546,15 @@ namespace ufo
   {
     ensureWeight(binaryOpWeights, i);
   }
-  for (int i = 0; i < 8; i++)
+  binaryOpWeights[0] = 5; // Boost Add
+  binaryOpWeights[1] = 5; // Boost Sub
+  for (int i = 0; i < 4; i++)
   {
     ensureWeight(binaryCmpWeights, i);
+  }
+  for (int i = 0; i < 3; i++)
+  {
+    ensureWeight(naryOpWeights, i);
   }
     }
 
@@ -1546,8 +1586,11 @@ namespace ufo
           rewardBinaryExprTerm(term);
           break;
         case BVTermShape::BinaryCmp:
-        default:
           rewardBinaryCmpTerm(term);
+          break;
+        case BVTermShape::NaryExpr:
+        default:
+          rewardNaryExprTerm(term);
           break;
       }
     }
@@ -1573,8 +1616,11 @@ namespace ufo
           penalizeBinaryExprTerm(term);
           break;
         case BVTermShape::BinaryCmp:
-        default:
           penalizeBinaryCmpTerm(term);
+          break;
+        case BVTermShape::NaryExpr:
+        default:
+          penalizeNaryExprTerm(term);
           break;
       }
     }
@@ -1765,6 +1811,36 @@ namespace ufo
       reduceDensity(binaryCmpWeights, term.binaryCmp);
     }
 
+    void rewardNaryExprTerm(const BVterm &term)
+    {
+      for (int idx : term.varIndices)
+      {
+        applyDeltaIfValid(rangeVarWeights, idx, PRIORITY_REWARD);
+      }
+      applyDeltaIfValid(naryOpWeights, term.naryOp, PRIORITY_REWARD);
+      applyDeltaIfValid(maskValueWeights, term.valueIndex, PRIORITY_REWARD);
+    }
+
+    void penalizeNaryExprTerm(const BVterm &term)
+    {
+      for (int idx : term.varIndices)
+      {
+        applyDeltaIfValid(rangeVarWeights, idx, -PRIORITY_PENALTY);
+      }
+      applyDeltaIfValid(naryOpWeights, term.naryOp, -PRIORITY_PENALTY);
+      applyDeltaIfValid(maskValueWeights, term.valueIndex, -PRIORITY_PENALTY);
+    }
+
+    void dampNaryExprTerm(const BVterm &term)
+    {
+      for (int idx : term.varIndices)
+      {
+        reduceDensity(rangeVarWeights, idx);
+      }
+      reduceDensity(naryOpWeights, term.naryOp);
+      reduceDensity(maskValueWeights, term.valueIndex);
+    }
+
     void applyDeltaIfValid(density &den, int key, int delta)
     {
       if (key < 0)
@@ -1830,6 +1906,8 @@ namespace ufo
           return "binary_expr";
         case BVTermShape::BinaryCmp:
           return "binary_cmp";
+        case BVTermShape::NaryExpr:
+          return "nary_expr";
       }
       return "unknown";
     }
@@ -1890,6 +1968,7 @@ namespace ufo
     printDensityStatistics(unaryOpWeights, "  Unary operator weights");
     printDensityStatistics(binaryOpWeights, "  Binary operation weights");
     printDensityStatistics(binaryCmpWeights, "  Binary comparison weights");
+    printDensityStatistics(naryOpWeights, "  Nary operation weights");
   }
 }
 
