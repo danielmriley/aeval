@@ -2,6 +2,7 @@
 #define SAMPL__HPP__
 
 #include "deep/Distribution.hpp"
+#include "deep/Horn.hpp"
 #include "ae/ExprSimpl.hpp"
 #include "LinCom.hpp"
 #include "BoolCom.hpp"
@@ -56,8 +57,8 @@ namespace ufo
 
     int initialized = 0;  
 
-    SamplFactory(ExprFactory &_efac, bool aggp) :
-      m_efac(_efac), lf(_efac, aggp), bf(_efac), af(_efac, aggp), bvf(_efac, aggp) {}
+    SamplFactory(ExprFactory &_efac, bool aggp, const std::vector<HornRuleExt> &chcs = std::vector<HornRuleExt>()) :
+      m_efac(_efac), lf(_efac, aggp), bf(_efac), af(_efac, aggp), bvf(_efac, aggp, chcs) {}
 
     Expr getAllLemmas()
     {

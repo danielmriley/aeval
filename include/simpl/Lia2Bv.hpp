@@ -23,8 +23,8 @@ namespace ufo
       unsigned int m_original_bv_width = 0; // Store original BV width if applicable
       
       // Maps for tracking translations
-      std::map<Expr, Expr> m_var_map;      // Maps LIA vars to BV vars  
-      std::map<Expr, Expr> m_decl_map;     // Maps LIA decls (full Expr) to BV decls (full Expr)
+      ::std::map<Expr, Expr> m_var_map;      // Maps LIA vars to BV vars  
+      ::std::map<Expr, Expr> m_decl_map;     // Maps LIA decls (full Expr) to BV decls (full Expr)
       
       // Translation helpers
       Expr translateVar(Expr var)
@@ -145,12 +145,12 @@ namespace ufo
         return width + 1; 
       }
 
-      unsigned int findMinBitWidth(const std::vector<HornRuleExt>& rules)
+      unsigned int findMinBitWidth(const ::std::vector<HornRuleExt>& rules)
       {
         unsigned int maxWidth = m_width; // Start with default or provided width
 
         // Helper to process an expression and update maxWidth
-        std::function<void(Expr)> processExpr = [&](Expr e) {
+        ::std::function<void(Expr)> processExpr = [&](Expr e) {
           if (!e) return;
           
           // Check for integer constants (MPZ)
@@ -187,7 +187,7 @@ namespace ufo
         }
 
         // Ensure minimum width (e.g., 4 bits)
-        maxWidth = std::max(maxWidth, (unsigned int)4);
+        maxWidth = ::std::max(maxWidth, (unsigned int)4);
 
         // --- Modification: Round up to power of 2 if > 4 ---
         unsigned int adjustedWidth = adjustWidth(maxWidth);
@@ -205,7 +205,7 @@ namespace ufo
       {
           unsigned int exprMaxWidth = 1; // Minimum width is 1
 
-          std::function<void(Expr)> processExpr = [&](Expr node) {
+          ::std::function<void(Expr)> processExpr = [&](Expr node) {
               if (!node) return;
 
               if (isOpX<MPZ>(node)) {
@@ -230,7 +230,7 @@ namespace ufo
           processExpr(e);
           
           // Ensure minimum width (e.g., 4 bits) before rounding
-          exprMaxWidth = std::max(exprMaxWidth, (unsigned int)4);
+          exprMaxWidth = ::std::max(exprMaxWidth, (unsigned int)4);
 
           // --- Modification: Round up to power of 2 if > 4 ---
           unsigned int adjustedWidth = adjustWidth(exprMaxWidth);
@@ -291,7 +291,7 @@ namespace ufo
         // This now incorporates the power-of-2 rounding logic.
         unsigned const_width = findMinBitWidth(input.chcs);
         // --- Modification: Use max of const_width and original_bv_width ---
-        m_width = std::max({const_width, m_original_bv_width, (unsigned)4}); // Ensure at least 4
+        m_width = ::std::max({const_width, m_original_bv_width, (unsigned)4}); // Ensure at least 4
         
         if (debug >= 2) {
           outs() << "Lia2Bv::translate(CHCs): Width from constants (adjusted): " << const_width 
@@ -370,7 +370,7 @@ namespace ufo
         result.dwtoCHCs.clear();
 
         // Map original rule pointers to their index in the input.chcs vector
-        std::map<const HornRuleExt*, size_t> inputRuleIndex;
+        ::std::map<const HornRuleExt*, size_t> inputRuleIndex;
         for(size_t i = 0; i < input.chcs.size(); ++i) {
             inputRuleIndex[&input.chcs[i]] = i;
         }
@@ -474,7 +474,7 @@ namespace ufo
                  outs() << "Lia2Bv::translateExpr: Rounded requested width " << target_width 
                         << " up to power of 2: " << adjusted_requested_width << "\n";
              }
-             unsigned enforced_width = std::max({adjusted_requested_width, m_original_bv_width, (unsigned)4}); // Ensure at least 4
+             unsigned enforced_width = ::std::max({adjusted_requested_width, m_original_bv_width, (unsigned)4}); // Ensure at least 4
              if (debug >= 2) {
                  outs() << "Lia2Bv::translateExpr: Width provided: " << width 
                         << " (adjusted requested: " << adjusted_requested_width << ")"
@@ -595,7 +595,7 @@ namespace ufo
       }
 
       // Update signature to accept input and result CHCs
-      std::vector<HornRuleExt> translateClauses(const std::vector<HornRuleExt> &rules, const CHCs& input, CHCs& result)
+      ::std::vector<HornRuleExt> translateClauses(const ::std::vector<HornRuleExt> &rules, const CHCs& input, CHCs& result)
       {
         std::vector<HornRuleExt> translatedRules;
         for (const auto &rule : rules)

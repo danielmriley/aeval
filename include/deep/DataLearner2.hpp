@@ -442,7 +442,7 @@ namespace ufo
           size_t colsB = B[0].size();
 
           if (colsA != rowsB) {
-              throw std::runtime_error("Matrix dimensions mismatch for naive multiplication");
+              throw ::std::runtime_error("Matrix dimensions mismatch for naive multiplication");
           }
 
           matrix C(rowsA, vector<RATIONAL>(colsB, 0));
@@ -639,12 +639,12 @@ namespace ufo
            size_t colsB = B[0].size();
 
            if (colsA != rowsB) {
-               throw std::runtime_error("Matrix dimensions mismatch for multiplication");
+               throw ::std::runtime_error("Matrix dimensions mismatch for multiplication");
            }
 
            // For Strassen, we ideally work with square matrices.
            // Find max dimension and pad to next power of 2.
-           int max_dim = std::max({rowsA, colsA, rowsB, colsB});
+           int max_dim = ::std::max({rowsA, colsA, rowsB, colsB});
            int padded_size = nextPowerOf2(max_dim);
 
            matrix APadded = pad(A, padded_size);
@@ -661,7 +661,7 @@ namespace ufo
       matrix invert(matrix A) { // Input/Output is matrix (RATIONAL)
           size_t n = A.size();
           if (n == 0 || A[0].size() != n) {
-              throw std::runtime_error("Matrix must be square for inversion");
+              throw ::std::runtime_error("Matrix must be square for inversion");
           }
 
           matrix I(n, vector<RATIONAL>(n, 0)); // Use RATIONAL
@@ -676,8 +676,8 @@ namespace ufo
                       pivot = j;
                   }
               }
-              std::swap(A[i], A[pivot]);
-              std::swap(I[i], I[pivot]);
+              ::std::swap(A[i], A[pivot]);
+              ::std::swap(I[i], I[pivot]);
 
               // Check for singularity (pivot is zero)
               if (A[i][i] == 0) {

@@ -14,6 +14,7 @@
 #include "ae/ExprSimpl.hpp"
 #include "ae/ExprSimplBv.hpp"
 #include "deep/Distribution.hpp"
+#include "deep/Horn.hpp"
 #include "ufo/Expr.hpp"
 #include "ufo/ExprBv.hh"
 
@@ -178,8 +179,15 @@ namespace ufo
     ExprMap nonlinVars;
     ExprSet nonlinVarsSet;
     unsigned width = DEFAULT_WIDTH;
+    const std::vector<HornRuleExt> *m_chcs = nullptr;
 
-    explicit BVfactory(ExprFactory &efac, bool) : m_efac(efac) {}
+    std::map<int, int> chcBinaryOpFreq;
+    std::map<int, int> chcBinaryCmpFreq;
+    std::map<int, int> chcNaryOpFreq;
+    std::set<cpp_int> chcConsts;
+    std::map<int, int> chcArities;
+
+    explicit BVfactory(ExprFactory &efac, bool, const std::vector<HornRuleExt> &chcs) : m_efac(efac), m_chcs(&chcs) {}
 
     void reset()
     {
@@ -229,11 +237,6 @@ namespace ufo
       varIndexCache[var] = index;
     }
 
-    void addConst(const cpp_int &c)
-    {
-      ensureConstCached(normalizeConst(c));
-    }
-
     void addIntCoef(const cpp_int &coef)
     {
       ensureCoefCached(coef);
@@ -264,6 +267,7 @@ namespace ufo
         nonlinVarsSet.insert(kv.second);
       }
       computeDefaultWeights();
+      analyzeCHC();
       _initialized = true;
     }
 
@@ -433,13 +437,287 @@ namespace ufo
       return !sample.empty();
     }
 
-    void assignPrioritiesForLearned(BVdisj &learned);
+    void rewardMaskEquality(const BVterm &term)
+    {
+      adjustDensity(maskVarWeights, term.varIndex, PRIORITY_REWARD);
+      adjustDensity(maskMaskWeights, term.maskIndex, PRIORITY_REWARD);
+      adjustDensity(maskValueWeights, term.valueIndex, PRIORITY_REWARD);
+    }
 
-    void assignPrioritiesForFailed(BVdisj &failed);
+    void penalizeMaskEquality(const BVterm &term)
+    {
+      adjustDensity(maskVarWeights, term.varIndex, -PRIORITY_PENALTY);
+      adjustDensity(maskMaskWeights, term.maskIndex, -PRIORITY_PENALTY);
+      adjustDensity(maskValueWeights, term.valueIndex, -PRIORITY_PENALTY);
+    }
 
-    void assignPrioritiesForBlocked(BVdisj &blocked);
+    void dampMaskEquality(const BVterm &term)
+    {
+      reduceDensity(maskVarWeights, term.varIndex);
+      reduceDensity(maskMaskWeights, term.maskIndex);
+      reduceDensity(maskValueWeights, term.valueIndex);
+    }
 
-    void printCodeStatistics(int ar) const;
+    void rewardRange(const BVterm &term)
+    {
+      adjustDensity(rangeVarWeights, term.varIndex, PRIORITY_REWARD);
+      adjustDensity(rangeLowerWeights, term.rangeInfo.lowerConst, PRIORITY_REWARD);
+      adjustDensity(rangeUpperWeights, term.rangeInfo.upperConst, PRIORITY_REWARD);
+      adjustDensity(rangeSignWeights, term.rangeInfo.signedSemantics ? 1 : 0, PRIORITY_REWARD);
+    }
+
+    void penalizeRange(const BVterm &term)
+    {
+      adjustDensity(rangeVarWeights, term.varIndex, -PRIORITY_PENALTY);
+      adjustDensity(rangeLowerWeights, term.rangeInfo.lowerConst, -PRIORITY_PENALTY);
+      adjustDensity(rangeUpperWeights, term.rangeInfo.upperConst, -PRIORITY_PENALTY);
+      adjustDensity(rangeSignWeights, term.rangeInfo.signedSemantics ? 1 : 0, -PRIORITY_PENALTY);
+    }
+
+    void dampRange(const BVterm &term)
+    {
+      reduceDensity(rangeVarWeights, term.varIndex);
+      reduceDensity(rangeLowerWeights, term.rangeInfo.lowerConst);
+      reduceDensity(rangeUpperWeights, term.rangeInfo.upperConst);
+      reduceDensity(rangeSignWeights, term.rangeInfo.signedSemantics ? 1 : 0);
+    }
+
+    void rewardModularSum(const BVterm &term)
+    {
+      for (auto &vc : term.varCoefs)
+      {
+        adjustDensity(rangeVarWeights, vc.varIndex, PRIORITY_REWARD);
+        adjustDensity(modularCoefWeights, vc.coefKind, PRIORITY_REWARD);
+      }
+      adjustDensity(modularConstWeights, term.constIndex, PRIORITY_REWARD);
+      adjustDensity(modularComparatorWeights, term.comparator, PRIORITY_REWARD);
+    }
+
+    void penalizeModularSum(const BVterm &term)
+    {
+      for (auto &vc : term.varCoefs)
+      {
+        adjustDensity(rangeVarWeights, vc.varIndex, -PRIORITY_PENALTY);
+        adjustDensity(modularCoefWeights, vc.coefKind, -PRIORITY_PENALTY);
+      }
+      adjustDensity(modularConstWeights, term.constIndex, -PRIORITY_PENALTY);
+      adjustDensity(modularComparatorWeights, term.comparator, -PRIORITY_PENALTY);
+    }
+
+    void dampModularSum(const BVterm &term)
+    {
+      for (auto &vc : term.varCoefs)
+      {
+        reduceDensity(rangeVarWeights, vc.varIndex);
+        reduceDensity(modularCoefWeights, vc.coefKind);
+      }
+      reduceDensity(modularConstWeights, term.constIndex);
+      reduceDensity(modularComparatorWeights, term.comparator);
+    }
+
+    void rewardUnary(const BVterm &term)
+    {
+      adjustDensity(unaryVarWeights, term.varIndex, PRIORITY_REWARD);
+      adjustDensity(unaryOpWeights, static_cast<int>(term.unaryInfo.op), PRIORITY_REWARD);
+      adjustDensity(maskValueWeights, term.unaryInfo.constIndex, PRIORITY_REWARD);
+    }
+
+    void penalizeUnary(const BVterm &term)
+    {
+      adjustDensity(unaryVarWeights, term.varIndex, -PRIORITY_PENALTY);
+      adjustDensity(unaryOpWeights, static_cast<int>(term.unaryInfo.op), -PRIORITY_PENALTY);
+      adjustDensity(maskValueWeights, term.unaryInfo.constIndex, -PRIORITY_PENALTY);
+    }
+
+    void dampUnary(const BVterm &term)
+    {
+      reduceDensity(unaryVarWeights, term.varIndex);
+      reduceDensity(unaryOpWeights, static_cast<int>(term.unaryInfo.op));
+      reduceDensity(maskValueWeights, term.unaryInfo.constIndex);
+    }
+
+    void rewardBinaryExpr(const BVterm &term)
+    {
+      adjustDensity(rangeVarWeights, term.varIndex, PRIORITY_REWARD);
+      adjustDensity(rangeVarWeights, term.varIndex2, PRIORITY_REWARD);
+      adjustDensity(binaryOpWeights, term.binaryOp, PRIORITY_REWARD);
+      adjustDensity(maskValueWeights, term.valueIndex, PRIORITY_REWARD);
+    }
+
+    void penalizeBinaryExpr(const BVterm &term)
+    {
+      adjustDensity(rangeVarWeights, term.varIndex, -PRIORITY_PENALTY);
+      adjustDensity(rangeVarWeights, term.varIndex2, -PRIORITY_PENALTY);
+      adjustDensity(binaryOpWeights, term.binaryOp, -PRIORITY_PENALTY);
+      adjustDensity(maskValueWeights, term.valueIndex, -PRIORITY_PENALTY);
+    }
+
+    void dampBinaryExpr(const BVterm &term)
+    {
+      reduceDensity(rangeVarWeights, term.varIndex);
+      reduceDensity(rangeVarWeights, term.varIndex2);
+      reduceDensity(binaryOpWeights, term.binaryOp);
+      reduceDensity(maskValueWeights, term.valueIndex);
+    }
+
+    void rewardBinaryCmp(const BVterm &term)
+    {
+      adjustDensity(rangeVarWeights, term.varIndex, PRIORITY_REWARD);
+      adjustDensity(rangeVarWeights, term.varIndex2, PRIORITY_REWARD);
+      adjustDensity(binaryCmpWeights, term.binaryCmp, PRIORITY_REWARD);
+    }
+
+    void penalizeBinaryCmp(const BVterm &term)
+    {
+      adjustDensity(rangeVarWeights, term.varIndex, -PRIORITY_PENALTY);
+      adjustDensity(rangeVarWeights, term.varIndex2, -PRIORITY_PENALTY);
+      adjustDensity(binaryCmpWeights, term.binaryCmp, -PRIORITY_PENALTY);
+    }
+
+    void dampBinaryCmp(const BVterm &term)
+    {
+      reduceDensity(rangeVarWeights, term.varIndex);
+      reduceDensity(rangeVarWeights, term.varIndex2);
+      reduceDensity(binaryCmpWeights, term.binaryCmp);
+    }
+
+    void rewardNaryExpr(const BVterm &term)
+    {
+      adjustDensity(naryOpWeights, term.naryOp, PRIORITY_REWARD);
+      for (int idx : term.varIndices)
+      {
+        adjustDensity(rangeVarWeights, idx, PRIORITY_REWARD);
+      }
+      adjustDensity(maskValueWeights, term.valueIndex, PRIORITY_REWARD);
+    }
+
+    void penalizeNaryExpr(const BVterm &term)
+    {
+      adjustDensity(naryOpWeights, term.naryOp, -PRIORITY_PENALTY);
+      for (int idx : term.varIndices)
+      {
+        adjustDensity(rangeVarWeights, idx, -PRIORITY_PENALTY);
+      }
+      adjustDensity(maskValueWeights, term.valueIndex, -PRIORITY_PENALTY);
+    }
+
+    void dampNaryExpr(const BVterm &term)
+    {
+      reduceDensity(naryOpWeights, term.naryOp);
+      for (int idx : term.varIndices)
+      {
+        reduceDensity(rangeVarWeights, idx);
+      }
+      reduceDensity(maskValueWeights, term.valueIndex);
+    }
+
+    void addConst(const cpp_int &c)
+    {
+      ensureConstIndex(c);
+    }
+
+    void assignPrioritiesForLearned(BVdisj &learned)
+    {
+      for (auto &term : learned.dstate)
+      {
+        switch (term.shape)
+        {
+          case BVTermShape::MaskEquality:
+            rewardMaskEquality(term);
+            break;
+          case BVTermShape::Range:
+            rewardRange(term);
+            break;
+          case BVTermShape::ModularSum:
+            rewardModularSum(term);
+            break;
+          case BVTermShape::Unary:
+            rewardUnary(term);
+            break;
+          case BVTermShape::BinaryExpr:
+            rewardBinaryExpr(term);
+            break;
+          case BVTermShape::BinaryCmp:
+            rewardBinaryCmp(term);
+            break;
+          case BVTermShape::NaryExpr:
+            rewardNaryExpr(term);
+            break;
+        }
+      }
+    }
+
+    void assignPrioritiesForFailed(BVdisj &failed)
+    {
+      for (auto &term : failed.dstate)
+      {
+        switch (term.shape)
+        {
+          case BVTermShape::MaskEquality:
+            penalizeMaskEquality(term);
+            break;
+          case BVTermShape::Range:
+            penalizeRange(term);
+            break;
+          case BVTermShape::ModularSum:
+            penalizeModularSum(term);
+            break;
+          case BVTermShape::Unary:
+            penalizeUnary(term);
+            break;
+          case BVTermShape::BinaryExpr:
+            penalizeBinaryExpr(term);
+            break;
+          case BVTermShape::BinaryCmp:
+            penalizeBinaryCmp(term);
+            break;
+          case BVTermShape::NaryExpr:
+            penalizeNaryExpr(term);
+            break;
+        }
+      }
+    }
+
+    void assignPrioritiesForBlocked(BVdisj &blocked)
+    {
+      for (auto &term : blocked.dstate)
+      {
+        switch (term.shape)
+        {
+          case BVTermShape::MaskEquality:
+            dampMaskEquality(term);
+            break;
+          case BVTermShape::Range:
+            dampRange(term);
+            break;
+          case BVTermShape::ModularSum:
+            dampModularSum(term);
+            break;
+          case BVTermShape::Unary:
+            dampUnary(term);
+            break;
+          case BVTermShape::BinaryExpr:
+            dampBinaryExpr(term);
+            break;
+          case BVTermShape::BinaryCmp:
+            dampBinaryCmp(term);
+            break;
+          case BVTermShape::NaryExpr:
+            dampNaryExpr(term);
+            break;
+        }
+      }
+    }
+
+    void printCodeStatistics(int ar) const
+    {
+      outs() << "BV Sampler Statistics (arity " << ar << "):" << ::std::endl;
+      outs() << "Shape weights:" << ::std::endl;
+      for (auto &kv : shapeWeights)
+      {
+        outs() << "  Shape " << kv.first << ": " << kv.second << ::std::endl;
+      }
+    }
 
   private:
     ExprFactory &m_efac;
@@ -480,6 +758,18 @@ namespace ufo
     std::map<BVTermShape, std::vector<BVterm>> cachedBuckets;
     static constexpr int PRIORITY_REWARD = 5;
     static constexpr int PRIORITY_PENALTY = 1;
+
+    void adjustDensity(density &den, int key, int delta, int baseline = 1)
+    {
+      if (den.count(key) == 0) den[key] = baseline;
+      den[key] += delta;
+      if (den[key] <= 0) den[key] = baseline;
+    }
+
+    void reduceDensity(density &den, int key)
+    {
+      adjustDensity(den, key, -1);
+    }
 
     cpp_int sanitizeMask(const cpp_int &mask) const
     {
@@ -1490,6 +1780,54 @@ namespace ufo
       }
     }
 
+    void visitExpr(Expr e)
+    {
+      if (!e) return;
+      if (isOpX<BULT>(e)) {
+        chcBinaryCmpFreq[0]++;
+      } else if (isOpX<BULE>(e)) {
+        chcBinaryCmpFreq[1]++;
+      } else if (isOpX<BUGT>(e)) {
+        chcBinaryCmpFreq[2]++;
+      } else if (isOpX<BUGE>(e)) {
+        chcBinaryCmpFreq[3]++;
+      } else if (isOpX<BADD>(e)) {
+        chcBinaryOpFreq[0]++;
+        chcArities[e->arity()]++;
+      } else if (isOpX<BSUB>(e)) {
+        chcBinaryOpFreq[1]++;
+        chcArities[e->arity()]++;
+      } else if (isOpX<BAND>(e)) {
+        chcBinaryOpFreq[2]++;
+        chcArities[e->arity()]++;
+      } else if (isOpX<BOR>(e)) {
+        chcBinaryOpFreq[3]++;
+        chcArities[e->arity()]++;
+      } else if (isOpX<BXOR>(e)) {
+        chcBinaryOpFreq[4]++;
+        chcArities[e->arity()]++;
+      } else if (isOpX<AND>(e) || isOpX<OR>(e) || isOpX<XOR>(e)) {
+        if (isOpX<AND>(e)) chcNaryOpFreq[0]++;
+        else if (isOpX<OR>(e)) chcNaryOpFreq[1]++;
+        else if (isOpX<XOR>(e)) chcNaryOpFreq[2]++;
+        chcArities[e->arity()]++;
+      }
+      if (is_bvnum(e)) {
+        chcConsts.insert(exprToInt(e));
+      }
+      for (auto it = e->args_begin(), end = e->args_end(); it != end; ++it) {
+        visitExpr(*it);
+      }
+    }
+
+    void analyzeCHC()
+    {
+      if (!m_chcs) return;
+      for (auto &rule : *m_chcs) {
+        visitExpr(rule.body);
+      }
+    }
+
     void computeDefaultWeights()
     {
       if (shapeWeights.empty())
@@ -1556,420 +1894,38 @@ namespace ufo
   {
     ensureWeight(naryOpWeights, i);
   }
-    }
 
-  void adjustDensity(density &den, int key, int delta, int baseline = 1)
-    {
-      ensureWeight(den, key);
-      int &value = den[key];
-      value = std::max(baseline, value + delta);
+    // Boost based on CHC analysis
+    for (auto &kv : chcBinaryOpFreq) {
+      ensureWeight(binaryOpWeights, kv.first);
+      binaryOpWeights[kv.first] += kv.second * 2;
     }
-
-    void rewardTerm(const BVterm &term)
-    {
-      adjustDensity(shapeWeights, static_cast<int>(term.shape), PRIORITY_REWARD);
-      switch (term.shape)
-      {
-        case BVTermShape::MaskEquality:
-          rewardMaskTerm(term);
-          break;
-        case BVTermShape::Range:
-          rewardRangeTerm(term);
-          break;
-        case BVTermShape::ModularSum:
-          rewardModularTerm(term);
-          break;
-        case BVTermShape::Unary:
-          rewardUnaryTerm(term);
-          break;
-        case BVTermShape::BinaryExpr:
-          rewardBinaryExprTerm(term);
-          break;
-        case BVTermShape::BinaryCmp:
-          rewardBinaryCmpTerm(term);
-          break;
-        case BVTermShape::NaryExpr:
-        default:
-          rewardNaryExprTerm(term);
-          break;
+    for (auto &kv : chcBinaryCmpFreq) {
+      ensureWeight(binaryCmpWeights, kv.first);
+      binaryCmpWeights[kv.first] += kv.second * 2;
+    }
+    for (auto &kv : chcNaryOpFreq) {
+      ensureWeight(naryOpWeights, kv.first);
+      naryOpWeights[kv.first] += kv.second * 2;
+    }
+    // For arities, boost shapes
+    if (chcArities.count(2) > 0) {
+      shapeWeights[static_cast<int>(BVTermShape::BinaryExpr)] += chcArities[2] * 2;
+      shapeWeights[static_cast<int>(BVTermShape::BinaryCmp)] += chcArities[2] * 2;
+    }
+    for (auto &kv : chcArities) {
+      if (kv.first > 2) {
+        shapeWeights[static_cast<int>(BVTermShape::NaryExpr)] += kv.second * 2;
       }
     }
-
-    void penalizeTerm(const BVterm &term)
-    {
-      adjustDensity(shapeWeights, static_cast<int>(term.shape), -PRIORITY_PENALTY);
-      switch (term.shape)
-      {
-        case BVTermShape::MaskEquality:
-          penalizeMaskTerm(term);
-          break;
-        case BVTermShape::Range:
-          penalizeRangeTerm(term);
-          break;
-        case BVTermShape::ModularSum:
-          penalizeModularTerm(term);
-          break;
-        case BVTermShape::Unary:
-          penalizeUnaryTerm(term);
-          break;
-        case BVTermShape::BinaryExpr:
-          penalizeBinaryExprTerm(term);
-          break;
-        case BVTermShape::BinaryCmp:
-          penalizeBinaryCmpTerm(term);
-          break;
-        case BVTermShape::NaryExpr:
-        default:
-          penalizeNaryExprTerm(term);
-          break;
-      }
+    // For constants, add them if not present
+    for (auto &c : chcConsts) {
+      addConst(c);
+    }
     }
 
-    void dampTerm(const BVterm &term)
-    {
-      reduceDensity(shapeWeights, static_cast<int>(term.shape));
-      switch (term.shape)
-      {
-        case BVTermShape::MaskEquality:
-          dampMaskTerm(term);
-          break;
-        case BVTermShape::Range:
-          dampRangeTerm(term);
-          break;
-        case BVTermShape::ModularSum:
-          dampModularTerm(term);
-          break;
-        case BVTermShape::Unary:
-          dampUnaryTerm(term);
-          break;
-        case BVTermShape::BinaryExpr:
-          dampBinaryExprTerm(term);
-          break;
-        case BVTermShape::BinaryCmp:
-        default:
-          dampBinaryCmpTerm(term);
-          break;
-      }
-    }
-
-    void rewardMaskTerm(const BVterm &term)
-    {
-      applyDeltaIfValid(maskVarWeights, term.varIndex, PRIORITY_REWARD);
-      applyDeltaIfValid(maskMaskWeights, term.maskIndex, PRIORITY_REWARD);
-      applyDeltaIfValid(maskValueWeights, term.valueIndex, PRIORITY_REWARD);
-    }
-
-    void rewardRangeTerm(const BVterm &term)
-    {
-      applyDeltaIfValid(rangeVarWeights, term.varIndex, PRIORITY_REWARD);
-      applyDeltaIfValid(rangeLowerWeights, term.rangeInfo.lowerConst, PRIORITY_REWARD);
-      applyDeltaIfValid(rangeUpperWeights, term.rangeInfo.upperConst, PRIORITY_REWARD);
-      int signKey = term.rangeInfo.signedSemantics ? 1 : 0;
-      applyDeltaIfValid(rangeSignWeights, signKey, PRIORITY_REWARD);
-    }
-
-    void rewardModularTerm(const BVterm &term)
-    {
-      if (!term.varCoefs.empty())
-      {
-        applyDeltaIfValid(modularVarComboWeights, static_cast<int>(term.varCoefs.size()), PRIORITY_REWARD);
-      }
-      for (const BVVarCoef &vc : term.varCoefs)
-      {
-        applyDeltaIfValid(rangeVarWeights, vc.varIndex, PRIORITY_REWARD);
-        applyDeltaIfValid(modularCoefWeights, vc.coefKind, PRIORITY_REWARD);
-      }
-      applyDeltaIfValid(modularConstWeights, term.constIndex, PRIORITY_REWARD);
-      applyDeltaIfValid(modularComparatorWeights, term.comparator, PRIORITY_REWARD);
-    }
-
-    void rewardUnaryTerm(const BVterm &term)
-    {
-      applyDeltaIfValid(unaryVarWeights, term.varIndex, PRIORITY_REWARD);
-      applyDeltaIfValid(unaryOpWeights, static_cast<int>(term.unaryInfo.op), PRIORITY_REWARD);
-      applyDeltaIfValid(maskValueWeights, term.unaryInfo.constIndex, PRIORITY_REWARD);
-    }
-
-    void penalizeMaskTerm(const BVterm &term)
-    {
-      applyDeltaIfValid(maskVarWeights, term.varIndex, -PRIORITY_PENALTY);
-      applyDeltaIfValid(maskMaskWeights, term.maskIndex, -PRIORITY_PENALTY);
-      applyDeltaIfValid(maskValueWeights, term.valueIndex, -PRIORITY_PENALTY);
-    }
-
-    void penalizeRangeTerm(const BVterm &term)
-    {
-      applyDeltaIfValid(rangeVarWeights, term.varIndex, -PRIORITY_PENALTY);
-      applyDeltaIfValid(rangeLowerWeights, term.rangeInfo.lowerConst, -PRIORITY_PENALTY);
-      applyDeltaIfValid(rangeUpperWeights, term.rangeInfo.upperConst, -PRIORITY_PENALTY);
-      int signKey = term.rangeInfo.signedSemantics ? 1 : 0;
-      applyDeltaIfValid(rangeSignWeights, signKey, -PRIORITY_PENALTY);
-    }
-
-    void penalizeModularTerm(const BVterm &term)
-    {
-      if (!term.varCoefs.empty())
-      {
-        applyDeltaIfValid(modularVarComboWeights, static_cast<int>(term.varCoefs.size()), -PRIORITY_PENALTY);
-      }
-      for (const BVVarCoef &vc : term.varCoefs)
-      {
-        applyDeltaIfValid(rangeVarWeights, vc.varIndex, -PRIORITY_PENALTY);
-        applyDeltaIfValid(modularCoefWeights, vc.coefKind, -PRIORITY_PENALTY);
-      }
-      applyDeltaIfValid(modularConstWeights, term.constIndex, -PRIORITY_PENALTY);
-      applyDeltaIfValid(modularComparatorWeights, term.comparator, -PRIORITY_PENALTY);
-    }
-
-    void penalizeUnaryTerm(const BVterm &term)
-    {
-      applyDeltaIfValid(unaryVarWeights, term.varIndex, -PRIORITY_PENALTY);
-      applyDeltaIfValid(unaryOpWeights, static_cast<int>(term.unaryInfo.op), -PRIORITY_PENALTY);
-      applyDeltaIfValid(maskValueWeights, term.unaryInfo.constIndex, -PRIORITY_PENALTY);
-    }
-
-    void dampMaskTerm(const BVterm &term)
-    {
-      reduceDensity(maskVarWeights, term.varIndex);
-      reduceDensity(maskMaskWeights, term.maskIndex);
-      reduceDensity(maskValueWeights, term.valueIndex);
-    }
-
-    void dampRangeTerm(const BVterm &term)
-    {
-      reduceDensity(rangeVarWeights, term.varIndex);
-      reduceDensity(rangeLowerWeights, term.rangeInfo.lowerConst);
-      reduceDensity(rangeUpperWeights, term.rangeInfo.upperConst);
-      int signKey = term.rangeInfo.signedSemantics ? 1 : 0;
-      reduceDensity(rangeSignWeights, signKey);
-    }
-
-    void dampModularTerm(const BVterm &term)
-    {
-      if (!term.varCoefs.empty())
-      {
-        reduceDensity(modularVarComboWeights, static_cast<int>(term.varCoefs.size()));
-      }
-      for (const BVVarCoef &vc : term.varCoefs)
-      {
-        reduceDensity(rangeVarWeights, vc.varIndex);
-        reduceDensity(modularCoefWeights, vc.coefKind);
-      }
-      reduceDensity(modularConstWeights, term.constIndex);
-      reduceDensity(modularComparatorWeights, term.comparator);
-    }
-
-    void dampUnaryTerm(const BVterm &term)
-    {
-      reduceDensity(unaryVarWeights, term.varIndex);
-      reduceDensity(unaryOpWeights, static_cast<int>(term.unaryInfo.op));
-      reduceDensity(maskValueWeights, term.unaryInfo.constIndex);
-    }
-
-    void rewardBinaryExprTerm(const BVterm &term)
-    {
-      applyDeltaIfValid(rangeVarWeights, term.varIndex, PRIORITY_REWARD);
-      applyDeltaIfValid(rangeVarWeights, term.varIndex2, PRIORITY_REWARD);
-      applyDeltaIfValid(binaryOpWeights, term.binaryOp, PRIORITY_REWARD);
-      applyDeltaIfValid(maskValueWeights, term.valueIndex, PRIORITY_REWARD);
-    }
-
-    void rewardBinaryCmpTerm(const BVterm &term)
-    {
-      applyDeltaIfValid(rangeVarWeights, term.varIndex, PRIORITY_REWARD);
-      applyDeltaIfValid(rangeVarWeights, term.varIndex2, PRIORITY_REWARD);
-      applyDeltaIfValid(binaryCmpWeights, term.binaryCmp, PRIORITY_REWARD);
-    }
-
-    void penalizeBinaryExprTerm(const BVterm &term)
-    {
-      applyDeltaIfValid(rangeVarWeights, term.varIndex, -PRIORITY_PENALTY);
-      applyDeltaIfValid(rangeVarWeights, term.varIndex2, -PRIORITY_PENALTY);
-      applyDeltaIfValid(binaryOpWeights, term.binaryOp, -PRIORITY_PENALTY);
-      applyDeltaIfValid(maskValueWeights, term.valueIndex, -PRIORITY_PENALTY);
-    }
-
-    void penalizeBinaryCmpTerm(const BVterm &term)
-    {
-      applyDeltaIfValid(rangeVarWeights, term.varIndex, -PRIORITY_PENALTY);
-      applyDeltaIfValid(rangeVarWeights, term.varIndex2, -PRIORITY_PENALTY);
-      applyDeltaIfValid(binaryCmpWeights, term.binaryCmp, -PRIORITY_PENALTY);
-    }
-
-    void dampBinaryExprTerm(const BVterm &term)
-    {
-      reduceDensity(rangeVarWeights, term.varIndex);
-      reduceDensity(rangeVarWeights, term.varIndex2);
-      reduceDensity(binaryOpWeights, term.binaryOp);
-      reduceDensity(maskValueWeights, term.valueIndex);
-    }
-
-    void dampBinaryCmpTerm(const BVterm &term)
-    {
-      reduceDensity(rangeVarWeights, term.varIndex);
-      reduceDensity(rangeVarWeights, term.varIndex2);
-      reduceDensity(binaryCmpWeights, term.binaryCmp);
-    }
-
-    void rewardNaryExprTerm(const BVterm &term)
-    {
-      for (int idx : term.varIndices)
-      {
-        applyDeltaIfValid(rangeVarWeights, idx, PRIORITY_REWARD);
-      }
-      applyDeltaIfValid(naryOpWeights, term.naryOp, PRIORITY_REWARD);
-      applyDeltaIfValid(maskValueWeights, term.valueIndex, PRIORITY_REWARD);
-    }
-
-    void penalizeNaryExprTerm(const BVterm &term)
-    {
-      for (int idx : term.varIndices)
-      {
-        applyDeltaIfValid(rangeVarWeights, idx, -PRIORITY_PENALTY);
-      }
-      applyDeltaIfValid(naryOpWeights, term.naryOp, -PRIORITY_PENALTY);
-      applyDeltaIfValid(maskValueWeights, term.valueIndex, -PRIORITY_PENALTY);
-    }
-
-    void dampNaryExprTerm(const BVterm &term)
-    {
-      for (int idx : term.varIndices)
-      {
-        reduceDensity(rangeVarWeights, idx);
-      }
-      reduceDensity(naryOpWeights, term.naryOp);
-      reduceDensity(maskValueWeights, term.valueIndex);
-    }
-
-    void applyDeltaIfValid(density &den, int key, int delta)
-    {
-      if (key < 0)
-      {
-        return;
-      }
-      adjustDensity(den, key, delta);
-    }
-
-    void reduceDensity(density &den, int key, int baseline = 1)
-    {
-      if (key < 0)
-      {
-        return;
-      }
-      ensureWeight(den, key);
-      int &value = den[key];
-      value = std::max(baseline, value / 2);
-    }
-
-    void printDensityStatistics(const density &den, const std::string &label) const
-    {
-      if (den.empty())
-      {
-        return;
-      }
-      outs() << label << ": ";
-      for (auto it = den.begin(); it != den.end(); ++it)
-      {
-        outs() << "[" << it->first << " -> " << it->second << "] ";
-      }
-      outs() << "\n";
-    }
-
-    void printShapeStatistics() const
-    {
-      if (shapeWeights.empty())
-      {
-        return;
-      }
-      outs() << "  Shape weights: ";
-      for (auto it = shapeWeights.begin(); it != shapeWeights.end(); ++it)
-      {
-        outs() << "[" << shapeName(static_cast<BVTermShape>(it->first))
-               << " -> " << it->second << "] ";
-      }
-      outs() << "\n";
-    }
-
-    const char *shapeName(BVTermShape shape) const
-    {
-      switch (shape)
-      {
-        case BVTermShape::MaskEquality:
-          return "mask";
-        case BVTermShape::Range:
-          return "range";
-        case BVTermShape::ModularSum:
-          return "modular";
-        case BVTermShape::Unary:
-          return "unary";
-        case BVTermShape::BinaryExpr:
-          return "binary_expr";
-        case BVTermShape::BinaryCmp:
-          return "binary_cmp";
-        case BVTermShape::NaryExpr:
-          return "nary_expr";
-      }
-      return "unknown";
-    }
   };
 
-  inline void BVfactory::assignPrioritiesForLearned(BVdisj &learned)
-  {
-    if (!_initialized)
-    {
-      return;
-    }
-    for (const BVterm &term : learned.dstate)
-    {
-      rewardTerm(term);
-    }
-  }
-
-  inline void BVfactory::assignPrioritiesForFailed(BVdisj &failed)
-  {
-    if (!_initialized)
-    {
-      return;
-    }
-    for (const BVterm &term : failed.dstate)
-    {
-      penalizeTerm(term);
-    }
-  }
-
-  inline void BVfactory::assignPrioritiesForBlocked(BVdisj &blocked)
-  {
-    if (!_initialized)
-    {
-      return;
-    }
-    for (const BVterm &term : blocked.dstate)
-    {
-      dampTerm(term);
-    }
-  }
-
-  inline void BVfactory::printCodeStatistics(int ar) const
-  {
-    outs() << "BV sampler statistics (arity " << ar << ")\n";
-    printShapeStatistics();
-    printDensityStatistics(maskVarWeights, "  Mask variable weights");
-    printDensityStatistics(maskMaskWeights, "  Mask catalogue weights");
-    printDensityStatistics(maskValueWeights, "  Mask value weights");
-    printDensityStatistics(rangeVarWeights, "  Range variable weights");
-    printDensityStatistics(rangeLowerWeights, "  Range lower bound weights");
-    printDensityStatistics(rangeUpperWeights, "  Range upper bound weights");
-    printDensityStatistics(rangeSignWeights, "  Range sign weights");
-    printDensityStatistics(modularVarComboWeights, "  Modular combination size weights");
-    printDensityStatistics(modularCoefWeights, "  Modular coefficient weights");
-    printDensityStatistics(modularConstWeights, "  Modular constant weights");
-    printDensityStatistics(modularComparatorWeights, "  Modular comparator weights");
-    printDensityStatistics(unaryVarWeights, "  Unary variable weights");
-    printDensityStatistics(unaryOpWeights, "  Unary operator weights");
-    printDensityStatistics(binaryOpWeights, "  Binary operation weights");
-    printDensityStatistics(binaryCmpWeights, "  Binary comparison weights");
-    printDensityStatistics(naryOpWeights, "  Nary operation weights");
-  }
 }
 
 #endif // BVCOM__HPP__

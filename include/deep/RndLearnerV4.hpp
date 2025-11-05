@@ -664,7 +664,7 @@ namespace ufo
         if (hasArray)
         {
           getConj(replaceAll(p, dstVars, srcVars), cands);
-          p = ufo::eliminateQuantifiers(p, dstVars);
+          p = ::ufo::eliminateQuantifiers(p, dstVars);
           p = weakenForVars(p, dstVars);
         }
         else
@@ -772,7 +772,7 @@ namespace ufo
           for (auto & e : s.second)
           {
             Expr mbp = mbpDt[invNum].tree_cont[e];
-            Expr abd = simplifyArithm(mkNeg(ufo::keepQuantifiers(
+            Expr abd = simplifyArithm(mkNeg(::ufo::keepQuantifiers(
                           mkNeg(mk<IMPL>(conjoin(constr, m_efac), mbp)), abdVars)));
             if (!isOpX<FALSE>(abd) &&
               u.implies(mk<AND>(abd, ssas[invNum]), replaceAll(abd, srcVars, dstVars)))
@@ -1153,7 +1153,7 @@ namespace ufo
 
     ds.calculateStatistics();
     ds.deferredPriorities();
-    std::srand(std::time(0));
+    ::std::srand(::std::time(0));
     if(ds.synthesize(maxAttempts))
     {
       outs() << "Success\n";

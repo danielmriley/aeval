@@ -38,7 +38,7 @@ namespace ufo
     int maxAttempts;
     int debug;
 
-    std::vector<ExprSet> m_learnedLemmas; // Stores learned lemmas per iteration
+    ::std::vector<ExprSet> m_learnedLemmas; // Stores learned lemmas per iteration
     unsigned m_original_bv_width = 0;
     map<Expr, ExprSet> m_liaSolutionMap; // Maps LIA relation -> LIA solution ExprSet
     map<Expr, Expr> m_bvSolutionMap;     // Maps BV relation -> combined BV solution Expr
@@ -678,7 +678,7 @@ namespace ufo
       return m_bvChcs;
     }
 
-    std::vector<std::map<int, Expr>> invarVars;
+    ::std::vector<::std::map<int, Expr>> invarVars;
 
     void initializeSampl(SamplFactory& sf, Expr invRel, ExprSet& cands, set<cpp_int>& progConsts, set<cpp_int>& intCoefs)
     {
@@ -798,7 +798,7 @@ namespace ufo
       for (auto &a : disjs)
       {
         ExprSet avars;
-        expr::filter(a, bind::IsConst(), std::inserter(avars, avars.begin()));
+        expr::filter(a, bind::IsConst(), ::std::inserter(avars, avars.begin()));
         if (avars.size() == 0)
           continue;
         varComb[avars].insert(mkNeg(a));
@@ -821,7 +821,7 @@ namespace ufo
 
     void synthesize()
     {
-      SamplFactory sf(m_efac, false);
+      SamplFactory sf(m_efac, false, m_bvChcs.chcs);
 
       Expr invDecl = (*m_bvChcs.decls.begin())->left();
       prepareSeeds(sf, invDecl);
@@ -1133,7 +1133,7 @@ namespace ufo
       if(!skipSampling)
       {
         // outs() << "Attempting to synthesize invariants through sampling...\n";
-        std::srand(std::time(0));
+        ::std::srand(::std::time(0));
         synthesize(); // sampling candidates from grammar.
       }
 
@@ -1179,7 +1179,7 @@ namespace ufo
       bool dGen = true;
       unsigned int maxAttempts = 100;
 
-      std::unique_ptr<RndLearnerV4> solver(new RndLearnerV4(m_efac, m_z3,
+      ::std::unique_ptr<RndLearnerV4> solver(new RndLearnerV4(m_efac, m_z3,
         *m_liaChcs, maxAttempts, freqs, aggp, mut, da,
         doDisj, mbpEqs, dAllMbp, dAddProp, dAddDat, dStrenMbp,
         dFwd, dRec, dGen, d2, doGJ, doReg, doConnect, debug));
@@ -1299,7 +1299,7 @@ namespace ufo
 
       solver->calculateStatistics();
       solver->deferredPriorities();
-      std::srand(std::time(0));
+      ::std::srand(::std::time(0));
 
       if (solver->synthesize(to))
       {
