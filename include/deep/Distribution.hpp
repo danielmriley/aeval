@@ -62,6 +62,7 @@ namespace ufo
     map<int, int> indeces;
     for (auto &a : den) // assume the smallest "a.first" comes first
     {
+      if (a.second <= 0) continue;
       w += a.second;
       indeces[d.distr.size()] = a.first;
       d.distr.push_back(w);

@@ -129,6 +129,7 @@ namespace ufo
     int varIndex2 = -1;
     int naryOp = -1;
     std::vector<int> varIndices;
+    int eqVarIndex = -1;
 
     BVterm() = default;
     explicit BVterm(unsigned w) : width(w) {}
@@ -546,7 +547,11 @@ namespace ufo
         adjustDensity(maskValueWeights, constIdx, PRIORITY_REWARD);
       }
       adjustDensity(binaryOpWeights, term.binaryOp, PRIORITY_REWARD);
-      adjustDensity(maskValueWeights, term.valueIndex, PRIORITY_REWARD);
+      if (term.eqVarIndex >= 0) {
+        adjustDensity(rangeVarWeights, term.eqVarIndex, PRIORITY_REWARD);
+      } else {
+        adjustDensity(maskValueWeights, term.valueIndex, PRIORITY_REWARD);
+      }
     }
 
     void penalizeBinaryExpr(const BVterm &term)
@@ -559,7 +564,11 @@ namespace ufo
         adjustDensity(maskValueWeights, constIdx, -PRIORITY_PENALTY);
       }
       adjustDensity(binaryOpWeights, term.binaryOp, -PRIORITY_PENALTY);
-      adjustDensity(maskValueWeights, term.valueIndex, -PRIORITY_PENALTY);
+      if (term.eqVarIndex >= 0) {
+        adjustDensity(rangeVarWeights, term.eqVarIndex, -PRIORITY_PENALTY);
+      } else {
+        adjustDensity(maskValueWeights, term.valueIndex, -PRIORITY_PENALTY);
+      }
     }
 
     void dampBinaryExpr(const BVterm &term)
@@ -572,7 +581,11 @@ namespace ufo
         reduceDensity(maskValueWeights, constIdx);
       }
       reduceDensity(binaryOpWeights, term.binaryOp);
-      reduceDensity(maskValueWeights, term.valueIndex);
+      if (term.eqVarIndex >= 0) {
+        reduceDensity(rangeVarWeights, term.eqVarIndex);
+      } else {
+        reduceDensity(maskValueWeights, term.valueIndex);
+      }
     }
 
     void rewardBinaryCmp(const BVterm &term)
@@ -1578,7 +1591,6 @@ namespace ufo
     {
       assert(term.varIndex >= 0 && static_cast<size_t>(term.varIndex) < vars.size());
       assert(term.binaryOp >= 0);
-      assert(term.valueIndex >= 0 && static_cast<size_t>(term.valueIndex) < intConstsE.size());
       Expr var1 = vars[term.varIndex];
       Expr var2;
       if (term.varIndex2 >= 0) {
@@ -1608,8 +1620,15 @@ namespace ufo
           opExpr = mk<BXOR>(var1, var2);
           break;
       }
-      Expr value = intConstsE[term.valueIndex];
-      return mk<EQ>(opExpr, value);
+      Expr rhs;
+      if (term.eqVarIndex >= 0) {
+        assert(static_cast<size_t>(term.eqVarIndex) < vars.size());
+        rhs = vars[term.eqVarIndex];
+      } else {
+        assert(term.valueIndex >= 0 && static_cast<size_t>(term.valueIndex) < intConstsE.size());
+        rhs = intConstsE[term.valueIndex];
+      }
+      return mk<EQ>(opExpr, rhs);
     }
 
     Expr buildBinaryCmp(const BVterm &term) const
@@ -1757,7 +1776,16 @@ namespace ufo
         term.varIndex2 = - (chooseByWeight(maskValueWeights) + 1);
       }
       term.binaryOp = chooseByWeight(binaryOpWeights);
-      term.valueIndex = chooseByWeight(maskValueWeights);
+      int eqChoice = guessUniformly(2);
+      if (eqChoice == 0) {
+        term.valueIndex = chooseByWeight(maskValueWeights);
+        term.eqVarIndex = -1;
+      } else {
+        term.eqVarIndex = chooseByWeight(rangeVarWeights);
+        if (term.eqVarIndex == term.varIndex && vars.size() > 1) {
+          term.eqVarIndex = chooseByWeight(rangeVarWeights);
+        }
+      }
       shapeWeights[static_cast<int>(BVTermShape::BinaryExpr)]++;
       return term;
     }
