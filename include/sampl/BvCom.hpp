@@ -539,7 +539,12 @@ namespace ufo
     void rewardBinaryExpr(const BVterm &term)
     {
       adjustDensity(rangeVarWeights, term.varIndex, PRIORITY_REWARD);
-      adjustDensity(rangeVarWeights, term.varIndex2, PRIORITY_REWARD);
+      if (term.varIndex2 >= 0) {
+        adjustDensity(rangeVarWeights, term.varIndex2, PRIORITY_REWARD);
+      } else {
+        int constIdx = -term.varIndex2 - 1;
+        adjustDensity(maskValueWeights, constIdx, PRIORITY_REWARD);
+      }
       adjustDensity(binaryOpWeights, term.binaryOp, PRIORITY_REWARD);
       adjustDensity(maskValueWeights, term.valueIndex, PRIORITY_REWARD);
     }
@@ -547,7 +552,12 @@ namespace ufo
     void penalizeBinaryExpr(const BVterm &term)
     {
       adjustDensity(rangeVarWeights, term.varIndex, -PRIORITY_PENALTY);
-      adjustDensity(rangeVarWeights, term.varIndex2, -PRIORITY_PENALTY);
+      if (term.varIndex2 >= 0) {
+        adjustDensity(rangeVarWeights, term.varIndex2, -PRIORITY_PENALTY);
+      } else {
+        int constIdx = -term.varIndex2 - 1;
+        adjustDensity(maskValueWeights, constIdx, -PRIORITY_PENALTY);
+      }
       adjustDensity(binaryOpWeights, term.binaryOp, -PRIORITY_PENALTY);
       adjustDensity(maskValueWeights, term.valueIndex, -PRIORITY_PENALTY);
     }
@@ -555,7 +565,12 @@ namespace ufo
     void dampBinaryExpr(const BVterm &term)
     {
       reduceDensity(rangeVarWeights, term.varIndex);
-      reduceDensity(rangeVarWeights, term.varIndex2);
+      if (term.varIndex2 >= 0) {
+        reduceDensity(rangeVarWeights, term.varIndex2);
+      } else {
+        int constIdx = -term.varIndex2 - 1;
+        reduceDensity(maskValueWeights, constIdx);
+      }
       reduceDensity(binaryOpWeights, term.binaryOp);
       reduceDensity(maskValueWeights, term.valueIndex);
     }
@@ -1562,11 +1577,18 @@ namespace ufo
     Expr buildBinaryExpr(const BVterm &term) const
     {
       assert(term.varIndex >= 0 && static_cast<size_t>(term.varIndex) < vars.size());
-      assert(term.varIndex2 >= 0 && static_cast<size_t>(term.varIndex2) < vars.size());
       assert(term.binaryOp >= 0);
       assert(term.valueIndex >= 0 && static_cast<size_t>(term.valueIndex) < intConstsE.size());
       Expr var1 = vars[term.varIndex];
-      Expr var2 = vars[term.varIndex2];
+      Expr var2;
+      if (term.varIndex2 >= 0) {
+        assert(static_cast<size_t>(term.varIndex2) < vars.size());
+        var2 = vars[term.varIndex2];
+      } else {
+        int constIdx = -term.varIndex2 - 1;
+        assert(constIdx >= 0 && static_cast<size_t>(constIdx) < intConstsE.size());
+        var2 = intConstsE[constIdx];
+      }
       Expr opExpr;
       switch (static_cast<BVBinaryOp>(term.binaryOp))
       {
@@ -1726,10 +1748,14 @@ namespace ufo
       BVterm term(bitWidth());
       term.shape = BVTermShape::BinaryExpr;
       term.varIndex = chooseByWeight(rangeVarWeights);
-      do
-      {
-        term.varIndex2 = chooseByWeight(rangeVarWeights);
-      } while (term.varIndex2 == term.varIndex && vars.size() > 1);
+      int choice = guessUniformly(2); // 0 for var, 1 for const
+      if (choice == 0) {
+        do {
+          term.varIndex2 = chooseByWeight(rangeVarWeights);
+        } while (term.varIndex2 == term.varIndex && vars.size() > 1);
+      } else {
+        term.varIndex2 = - (chooseByWeight(maskValueWeights) + 1);
+      }
       term.binaryOp = chooseByWeight(binaryOpWeights);
       term.valueIndex = chooseByWeight(maskValueWeights);
       shapeWeights[static_cast<int>(BVTermShape::BinaryExpr)]++;
@@ -1832,13 +1858,13 @@ namespace ufo
     {
       if (shapeWeights.empty())
       {
-        shapeWeights[static_cast<int>(BVTermShape::MaskEquality)] = 0;
-        shapeWeights[static_cast<int>(BVTermShape::Range)] = 1;
-        shapeWeights[static_cast<int>(BVTermShape::ModularSum)] = 1;
-        shapeWeights[static_cast<int>(BVTermShape::Unary)] = 1;
-        shapeWeights[static_cast<int>(BVTermShape::BinaryExpr)] = 4;
-        shapeWeights[static_cast<int>(BVTermShape::BinaryCmp)] = 4;
-        shapeWeights[static_cast<int>(BVTermShape::NaryExpr)] = 4;
+        shapeWeights[static_cast<int>(BVTermShape::MaskEquality)] = 0.0001;
+        shapeWeights[static_cast<int>(BVTermShape::Range)] = 10;
+        shapeWeights[static_cast<int>(BVTermShape::ModularSum)] = 10;
+        shapeWeights[static_cast<int>(BVTermShape::Unary)] = 10;
+        shapeWeights[static_cast<int>(BVTermShape::BinaryExpr)] = 100;
+        shapeWeights[static_cast<int>(BVTermShape::BinaryCmp)] = 100;
+        shapeWeights[static_cast<int>(BVTermShape::NaryExpr)] = 100;
       }
       if (!_config.shapeSeeds.empty())
       {
@@ -1884,8 +1910,8 @@ namespace ufo
   {
     ensureWeight(binaryOpWeights, i);
   }
-  binaryOpWeights[0] = 5; // Boost Add
-  binaryOpWeights[1] = 5; // Boost Sub
+  binaryOpWeights[0] = 10; // Boost Add
+  binaryOpWeights[1] = 10; // Boost Sub
   for (int i = 0; i < 4; i++)
   {
     ensureWeight(binaryCmpWeights, i);
@@ -1921,6 +1947,16 @@ namespace ufo
     // For constants, add them if not present
     for (auto &c : chcConsts) {
       addConst(c);
+    }
+    // Boost constants from CHC
+    for (auto &c : chcConsts) {
+      if (constIndexCache.count(c)) {
+        int idx = constIndexCache[c];
+        maskValueWeights[idx] += 2;
+        rangeLowerWeights[idx] += 2;
+        rangeUpperWeights[idx] += 2;
+        modularConstWeights[idx] += 2;
+      }
     }
     }
 
