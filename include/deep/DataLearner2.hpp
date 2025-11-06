@@ -1416,10 +1416,42 @@ namespace ufo
       if (debug >= 1)
         outs() << "\n======== COMPUTE DATA PHASE (BV) ========\n";
 
+      if (debug >= 2)
+      {
+        outs() << "  srcRel: " << *srcRel << "\n";
+        outs() << "  splitter: " << *splitter << "\n";
+        outs() << "  invs: ";
+        if (invs) outs() << *invs; else outs() << "NULL";
+        outs() << "\n";
+        outs() << "  fwd: " << fwd << "\n";
+        outs() << "  mbpGuides:\n";
+        for (auto &g : mbpGuides)
+          outs() << "    " << *g << "\n";
+      }
+
       models[srcRel].clear();
 
       boost::tribool res = bnd.unrollAndExecuteSplitterBv(translator, srcRel, invVars[srcRel], bvInvVars[srcRel],
                                                           models[srcRel], splitter, invs, fwd, constr, mbpGuides, k);
+
+      if (debug >= 2)
+      {
+        outs() << "  Generated " << models[srcRel].size() << " models\n";
+        if (debug >= 3 && !models[srcRel].empty())
+        {
+          outs() << "  Models:\n";
+          for (size_t i = 0; i < models[srcRel].size(); ++i)
+          {
+            outs() << "    Model " << i << ": [";
+            for (size_t j = 0; j < models[srcRel][i].size(); ++j)
+            {
+              if (j > 0) outs() << ", ";
+              outs() << models[srcRel][i][j];
+            }
+            outs() << "]\n";
+          }
+        }
+      }
 
       if (!res)
       {

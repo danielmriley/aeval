@@ -2055,7 +2055,12 @@ namespace ufo
         return;
 
       if (debug >= 2)
+      {
         outs() << "\n--- Learning From Guided Data (BV) ---\n";
+        outs() << "  MBP Guides for " << *srcRel << ":\n";
+        for (auto &g : mbpGuides)
+          outs() << "    " << *g << "\n";
+      }
 
       bool runGJ = doGJ || (!doReg && !doConnect);
 
@@ -2098,6 +2103,9 @@ namespace ufo
 
       for (Expr guide : mbpGuides)
       {
+        if (debug >= 3)
+          outs() << "  Processing guide: " << *guide << "\n";
+
         DataLearner2 dl(m_bvChcs, m_z3, debug);
         ExprVector mbpGuidesVec(1, guide);
         Expr splitter = guide;

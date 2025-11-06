@@ -732,6 +732,20 @@ namespace ufo
     {
       assert(phaseGuard != NULL);
 
+      if (debug >= 2)
+      {
+        outs() << "\n--- unrollAndExecuteSplitterBv ---\n";
+        outs() << "  srcRel: " << *srcRel << "\n";
+        outs() << "  phaseGuard: " << *phaseGuard << "\n";
+        outs() << "  invs: ";
+        if (invs) outs() << *invs; else outs() << "NULL";
+        outs() << "\n";
+        outs() << "  fwd: " << fwd << "\n";
+        outs() << "  mbpGuides:\n";
+        for (auto &g : mbpGuides)
+          outs() << "    " << *g << "\n";
+      }
+
       string str = to_string(numeric_limits<double>::max());
       str = str.substr(0, str.find('.'));
       cpp_int max_double = lexical_cast<cpp_int>(str);
@@ -822,7 +836,7 @@ namespace ufo
             for (size_t idx = 0; idx < limit; idx++)
             {
               Expr inst = replaceAll(mbpGuides[idx], srcVars, bindVars[idx]);
-              if (inst != NULL && !isOpX<TRUE>(inst))
+              if (inst != NULL && !isOpX<TRUE>(inst) && mbpGuides[idx] != phaseGuard)
               {
                 if (debug)
                   outs() << "Applying MBP guide (prefix " << idx << "): " << *mbpGuides[idx] << "\n";
@@ -832,7 +846,7 @@ namespace ufo
             for (size_t idx = limit; idx < mbpGuides.size(); idx++)
             {
               Expr inst = replaceAll(mbpGuides[idx], srcVars, bindVars.back());
-              if (inst != NULL && !isOpX<TRUE>(inst))
+              if (inst != NULL && !isOpX<TRUE>(inst) && mbpGuides[idx] != phaseGuard)
               {
                 if (debug)
                   outs() << "Applying MBP guide (tail " << idx << "): " << *mbpGuides[idx] << "\n";
@@ -988,6 +1002,9 @@ namespace ufo
               concrInvs[srcRel].insert(simplifyArithm(disjoin(entry.second, m_efac)));
         }
       }
+
+      if (debug >= 2)
+        outs() << "  Total models collected: " << models.size() << "\n";
 
       return res;
     }
