@@ -18,16 +18,15 @@ namespace ufo
     ZSolver<EZ3> smt;
     bool can_get_model;
     ZSolver<EZ3>::Model* m;
-
-  public:
+    
+    public:
     int debug = 0;  // Add debug member
 
-    SMTUtils (ExprFactory& _efac) :
-      efac(_efac), z3(efac), smt (z3), can_get_model(0), m(NULL) {}
+    SMTUtils (ExprFactory& _efac, int _debug = 0) :
+      efac(_efac), z3(efac), smt (z3), can_get_model(0), m(NULL), debug(_debug) {}
 
-    SMTUtils (ExprFactory& _efac, unsigned _to) :
-      efac(_efac), z3(efac), smt (z3, _to), can_get_model(0), m(NULL) {}
-
+    SMTUtils (ExprFactory& _efac, unsigned _to, int _debug = 0) :
+      efac(_efac), z3(efac), smt (z3, _to), can_get_model(0), m(NULL), debug(_debug) {}
     boost::tribool eval(Expr v, ZSolver<EZ3>::Model* m1)
     {
       Expr ev = m1->eval(v);
@@ -340,6 +339,113 @@ namespace ufo
       }
       if (sz == ites.size()) return ex;
       else return simplifyBool(simplifyArithm(removeITE(ex)));
+    }
+
+    /**
+     * Unroll a compact trace representation by evaluating array selections
+     * at each index from start to end.
+     *
+     * @param traceArray - The array expression (e.g., trace variable)
+     * @param start - Starting index
+     * @param end - Ending index (inclusive)
+     * @param out - Output stream (default: outs())
+     * @return ExprVector containing the concrete values at each index
+     */
+    ExprVector unrollTrace(Expr traceArray, int start, int end)
+    {
+      ExprVector values;
+
+      if (!can_get_model)
+      {
+        outs() << "Error: No model available. Call isSat() first.\n";
+        return values;
+      }
+
+      
+      for (int i = start; i <= end; i++)
+      {
+        getModelPtr();
+        if (m == NULL)
+        {
+          outs() << "Error: Could not get model.\n";
+          return values;
+        }
+        // Build (select traceArray i)
+        Expr idx = mkTerm<mpz_class>(i, efac);
+        Expr selectExpr = mk<SELECT>(traceArray, idx);
+
+        // Evaluate in the model
+        Expr value = m->eval(selectExpr, true); // true = completion
+        values.push_back(value);
+
+        if (debug > 0)
+        {
+          outs() << "trace[" << i << "] = " << *value << "\n";
+        }
+      }
+
+      return values;
+    }
+
+    /**
+     * Unroll trace and return as a map from index to value
+     */
+    void unrollTraceToMap(Expr traceArray, int start, int end,
+                          std::map<int, Expr> &traceMap)
+    {
+      if (!can_get_model)
+        return;
+
+      getModelPtr();
+      if (m == NULL)
+        return;
+
+      for (int i = start; i <= end; i++)
+      {
+        Expr idx = mkTerm<mpz_class>(i, efac);
+        Expr selectExpr = mk<SELECT>(traceArray, idx);
+        Expr value = m->eval(selectExpr, true);
+        traceMap[i] = value;
+      }
+    }
+
+    /**
+     * Unroll multiple variables across a trace
+     * Given a map of variable name -> array expression, evaluates each at every step
+     */
+    void unrollMultipleTraces(std::map<std::string, Expr> &traceArrays,
+                              int start, int end,
+                              std::map<int, ExprMap> &result)
+    {
+      if (!can_get_model)
+        return;
+
+      getModelPtr();
+      if (m == NULL)
+        return;
+
+      for (int i = start; i <= end; i++)
+      {
+        Expr idx = mkTerm<mpz_class>(i, efac);
+        ExprMap stepValues;
+
+        if (debug > 0)
+          outs() << "Step " << i << ":\n";
+
+        for (auto &[name, traceArray] : traceArrays)
+        {
+          Expr selectExpr = mk<SELECT>(traceArray, idx);
+          Expr value = m->eval(selectExpr, true);
+
+          // Store using the array expr as key
+          stepValues[traceArray] = value;
+
+          if (debug > 0)
+            outs() << "  " << name << " = " << *value << "\n";
+        }
+
+        result[i] = stepValues;
+      }
     }
 
     /**

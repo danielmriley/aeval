@@ -2333,7 +2333,7 @@ namespace ufo
     }
   }; // End BitHorn class
 
-  inline bool learnInvariants5(string smt, unsigned maxAttempts, unsigned to,
+  inline bool learnInvariants5(string smt, string ccex, unsigned maxAttempts, unsigned to,
                                bool freqs, bool aggp, int dat, int mut, bool doElim, bool doArithm,
                                bool doDisj, int doProp, int mbpEqs, bool dAllMbp, bool dAddProp,
                                bool dAddDat, bool dStrenMbp, int dFwd, bool dRec, bool dGenerous,
@@ -2356,7 +2356,14 @@ namespace ufo
       return 1;
     }
 
-    BitHorn bh(efac, z3, ruleManager, maxAttempts, d2, doGJ, doReg, doCon, translateBv2Lia, skipSampling, debug);
+    ZSolver<EZ3> solver(z3);
+    ExprVector ccexExprs = solver.loadFromFile(ccex);
+
+    BndExpl bnd(ruleManager, to, debug);
+    bnd.validateCEX(ccexExprs, mk<TRUE>(efac), ruleManager.failDecl, 17);
+    exit(1);
+
+    BitHorn bh(efac, z3, ruleManager, d2, doGJ, doReg, doCon, debug);
 
     if (ser)
     {

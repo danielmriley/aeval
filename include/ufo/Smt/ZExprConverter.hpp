@@ -302,6 +302,11 @@ namespace ufo
           z3::ast arg = marshal (e->left(), ctx, cache, seen);
           return z3::ast (ctx, Z3_mk_bvredor(ctx, arg));
         }
+        if (isOpX<BV2INT>(e))
+        {
+          z3::ast arg = marshal(e->left(), ctx, cache, seen);
+          return z3::ast(ctx, Z3_mk_bv2int(ctx, arg, false)); // false = unsigned
+        }
 
         return M::marshal (e, ctx, cache, seen);
       }
@@ -435,7 +440,14 @@ namespace ufo
           res = Z3_mk_bvlshr (ctx, t1, t2);
         else if (isOpX<BASHR> (e))
           res = Z3_mk_bvashr (ctx, t1, t2);
-      
+        else if (isOpX<INT2BV>(e))
+        {
+          // e->left() is the width (as a BVSORT), e->right() is the int expression
+          unsigned width = bv::width(e->left());
+          z3::ast arg = marshal(e->right(), ctx, cache, seen);
+          res = Z3_mk_int2bv(ctx, width, arg);
+        }
+
         else
           return M::marshal (e, ctx, cache, seen);
       }
@@ -753,7 +765,7 @@ namespace ufo
 	  return res;
 	}
 
-      switch (dkind)
+  switch (dkind)
 	{
 	case Z3_OP_ITE:
 	  e = mknary<ITE> (args.begin (), args.end ());
@@ -905,6 +917,18 @@ namespace ufo
         case Z3_OP_BASHR:
           e = mknary<BASHR> (args.begin (), args.end ());
           break;
+        case Z3_OP_BV2INT:
+          e = mk<BV2INT>(args[0]);
+          break;
+        case Z3_OP_INT2BV:
+        {
+          // Get the target BV width from the sort
+          Z3_sort sort = Z3_get_sort(ctx, z);
+          unsigned width = Z3_get_bv_sort_size(ctx, sort);
+          Expr bvsort_expr = bv::bvsort(width, efac);
+          e = mk<INT2BV>(bvsort_expr, args[0]);
+        }
+        break;
         case Z3_OP_CONCAT:
           e = mknary<BCONCAT> (args.begin (), args.end ());
           break;

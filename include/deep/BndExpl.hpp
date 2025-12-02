@@ -71,6 +71,118 @@ namespace ufo
 
     vector<ExprVector> getBindVars() { return bindVars; }
 
+    tribool validateCEX(ExprVector ccex, Expr src, Expr dst, int len)
+    {
+      SMTUtils u(m_efac, debug ? 1 : 0);
+      Expr cex;
+      // TODO: Need to handle all of the possible expressions in ccex.
+      for(auto &e: ccex)
+      {
+       cex = e;
+      }
+      outs() << "CEX formula: " << cex << "\n";
+      u.isSat(cex);
+
+      Expr array = getFirstArray(cex);
+      outs() << "Trace array: " << *array << "\n";
+      // Expr mdl = u.getModel(cex);
+      // outs() << "Model from CEX: " << *mdl << "\n";
+      ExprVector traceVec = u.unrollTrace(array, 0, len);
+      outs() << "Unrolled trace:\n";
+      for(auto &t: traceVec)
+      {
+        outs() << *t << "\n";
+      }
+
+      vector<vector<int>> traces;
+      getAllTraces(src, dst, len, vector<int>(), traces);
+      outs() << "Found " << traces.size() << " traces to the error state.\n";
+      ExprVector ssa;
+      tribool res = false;
+      for(auto &trace : traces)
+      {
+        getSSA(trace, ssa);
+        for (auto &e : ssa)
+        {
+          outs() << *e << "\n";
+        }
+        SMTUtils u(m_efac);
+        res = u.isSat(ssa);
+        if (res == true)
+        {
+          outs() << "Trace is SAT\n";
+        }
+        else if (res == false)
+        {
+          outs() << "Trace is UNSAT\n";
+        }
+        else
+        {
+          outs() << "Trace is INDET\n";
+        }
+      }
+
+      for(auto b: bindVars)
+      {
+        outs() << "Bind vars:\n";
+        for(auto bv: b)
+        {
+          outs() << *bv << "\n";
+        }
+      }
+
+      // Now validate CEX by constraining the unrolled traces with the concrete values
+      // The CEX array is a compact representation of the trace - traceVec[i] is the 
+      // value of the tracked variable at step i. We match these against bindVars[i][0]
+      // (the first variable at each step in the unrolled SSA).
+      outs() << "\n=== Validating CEX against traces ===\n";
+      
+      // Index of the variable in bindVars that corresponds to the trace
+      // For now, assume it's the first variable (index 0)
+      int traceVarIdx = 0;
+      
+      for(auto &trace : traces)
+      {
+        ssa.clear();
+        getSSA(trace, ssa);
+        
+        // Add equalities between bindVars and traceVec values
+        // bindVars[i] contains variables at step i+1 (after first transition)
+        // traceVec[i] contains the value at index i
+        for (size_t i = 0; i < bindVars.size() && i < traceVec.size(); i++)
+        {
+          if (bindVars[i].size() > traceVarIdx)
+          {
+            Expr eq = mk<EQ>(bindVars[i][traceVarIdx], traceVec[i]);
+            ssa.push_back(eq);
+            if (debug)
+            {
+              outs() << "Adding constraint: " << *eq << "\n";
+            }
+          }
+        }
+        
+        SMTUtils u2(m_efac);
+        tribool constrained_res = u2.isSat(ssa);
+        if (constrained_res == true)
+        {
+          outs() << "CEX VALID: Trace with CEX constraints is SAT\n";
+          res = true;
+        }
+        else if (constrained_res == false)
+        {
+          outs() << "CEX INVALID: Trace with CEX constraints is UNSAT\n";
+        }
+        else
+        {
+          outs() << "CEX UNKNOWN: Trace with CEX constraints is INDETERMINATE\n";
+        }
+      }
+
+      return res;
+      // bnd.exploreTraces(1500, 1000, true);
+    }
+
     void guessRandomTrace(vector<int> &trace)
     {
       std::srand(std::time(0));

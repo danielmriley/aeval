@@ -2726,6 +2726,35 @@ namespace ufo
     return fla;
   }
 
+  // Get first array variable from formula
+  Expr getFirstArray(Expr formula)
+  {
+    ExprSet vars;
+    filter(formula, bind::IsConst(), inserter(vars, vars.begin()));
+    for (auto &v : vars)
+      if (isOpX<ARRAY_TY>(bind::typeOf(v)))
+        return v;
+    return NULL;
+  }
+
+  // Extract all array-typed constants from a formula
+  ExprVector getArrayVars(Expr formula, ExprFactory &efac)
+  {
+    ExprVector result;
+    ExprSet allVars;
+    filter(formula, bind::IsConst(), inserter(allVars, allVars.begin()));
+
+    for (auto &v : allVars)
+    {
+      Expr ty = bind::typeOf(v);
+      if (isOpX<ARRAY_TY>(ty))
+      {
+        result.push_back(v);
+      }
+    }
+    return result;
+  }
+
   /* find expressions of type expr = arrayVar in e and store it in output */
   inline static void getArrayEqualExprs(Expr e, Expr arrayVar, ExprVector & output)
   {

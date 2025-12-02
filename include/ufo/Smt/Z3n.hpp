@@ -677,6 +677,34 @@ namespace ufo
     void pop (unsigned n = 1) { depth -= n; solver.pop (n); }
     //void reset () { solver.reset (); }
     void reset () { solver.pop (depth); solver.push (); depth = 1; }
+    
+    /// Load assertions from an SMT-LIB2 file (preserves quantifiers)
+    ExprVector loadFromFile (const std::string &filename)
+    {
+      Z3_solver_from_file (ctx, solver, filename.c_str ());
+      ctx.check_error ();
+      return getAssertions ();
+    }
+    
+    /// Load assertions from an SMT-LIB2 string (preserves quantifiers)
+    ExprVector loadFromString(const std::string &smt)
+    {
+      Z3_solver_from_string (ctx, solver, smt.c_str ());
+      ctx.check_error ();
+      return getAssertions ();
+    }
+    
+    /// Get all assertions currently in the solver
+    ExprVector getAssertions ()
+    {
+      ExprVector result;
+      z3::ast_vector assertions (ctx, Z3_solver_get_assertions (ctx, solver));
+      for (unsigned i = 0; i < assertions.size (); ++i)
+      {
+        result.push_back (z3.toExpr (assertions [i]));
+      }
+      return result;
+    }
   };
 
 
