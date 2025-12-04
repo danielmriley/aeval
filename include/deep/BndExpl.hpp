@@ -71,116 +71,257 @@ namespace ufo
 
     vector<ExprVector> getBindVars() { return bindVars; }
 
-    tribool validateCEX(ExprVector ccex, Expr src, Expr dst, int len)
+    // Helper struct to hold parsed CEX data
+    struct CEXData {
+      map<Expr, pair<Expr, Expr>> traceValueFuncs; // array -> (indexVar, valueExpr)
+      int traceStart = 0;
+      int traceEnd = 0;
+      bool boundsFound = false;
+    };
+
+    // Extract bounds from a quantifier condition expression
+    // Handles: (AND (LEQ 0 idx) (LEQ idx N)), (GEQ idx 0), (LT/GT variants)
+    void extractBoundsFromCondition(Expr condition, int &traceStart, int &traceEnd, bool &boundsFound)
     {
-      SMTUtils u(m_efac, debug ? 1 : 0);
-      Expr cex;
-      // TODO: Need to handle all of the possible expressions in ccex.
-      for(auto &e: ccex)
+      if (isOpX<AND>(condition))
       {
-       cex = e;
+        for (auto it = condition->args_begin(); it != condition->args_end(); ++it)
+          extractBoundsFromCondition(*it, traceStart, traceEnd, boundsFound);
       }
-      outs() << "CEX formula: " << cex << "\n";
-      u.isSat(cex);
-
-      Expr array = getFirstArray(cex);
-      outs() << "Trace array: " << *array << "\n";
-      // Expr mdl = u.getModel(cex);
-      // outs() << "Model from CEX: " << *mdl << "\n";
-      ExprVector traceVec = u.unrollTrace(array, 0, len);
-      outs() << "Unrolled trace:\n";
-      for(auto &t: traceVec)
+      else if (isOpX<LEQ>(condition))
       {
-        outs() << *t << "\n";
-      }
-
-      vector<vector<int>> traces;
-      getAllTraces(src, dst, len, vector<int>(), traces);
-      outs() << "Found " << traces.size() << " traces to the error state.\n";
-      ExprVector ssa;
-      tribool res = false;
-      for(auto &trace : traces)
-      {
-        getSSA(trace, ssa);
-        for (auto &e : ssa)
+        Expr left = condition->left();
+        Expr right = condition->right();
+        if (isOpX<MPZ>(left) && !isOpX<MPZ>(right))
         {
-          outs() << *e << "\n";
+          traceStart = lexical_cast<int>(left);
+          boundsFound = true;
         }
-        SMTUtils u(m_efac);
-        res = u.isSat(ssa);
-        if (res == true)
+        else if (isOpX<MPZ>(right) && !isOpX<MPZ>(left))
         {
-          outs() << "Trace is SAT\n";
-        }
-        else if (res == false)
-        {
-          outs() << "Trace is UNSAT\n";
-        }
-        else
-        {
-          outs() << "Trace is INDET\n";
+          traceEnd = lexical_cast<int>(right);
+          boundsFound = true;
         }
       }
-
-      for(auto b: bindVars)
+      else if (isOpX<GEQ>(condition))
       {
-        outs() << "Bind vars:\n";
-        for(auto bv: b)
+        Expr left = condition->left();
+        Expr right = condition->right();
+        if (isOpX<MPZ>(right) && !isOpX<MPZ>(left))
         {
-          outs() << *bv << "\n";
+          traceStart = lexical_cast<int>(right);
+          boundsFound = true;
+        }
+        else if (isOpX<MPZ>(left) && !isOpX<MPZ>(right))
+        {
+          traceEnd = lexical_cast<int>(left);
+          boundsFound = true;
         }
       }
+      else if (isOpX<LT>(condition))
+      {
+        Expr left = condition->left();
+        Expr right = condition->right();
+        if (isOpX<MPZ>(left) && !isOpX<MPZ>(right))
+        {
+          traceStart = lexical_cast<int>(left) + 1;
+          boundsFound = true;
+        }
+        else if (isOpX<MPZ>(right) && !isOpX<MPZ>(left))
+        {
+          traceEnd = lexical_cast<int>(right) - 1;
+          boundsFound = true;
+        }
+      }
+      else if (isOpX<GT>(condition))
+      {
+        Expr left = condition->left();
+        Expr right = condition->right();
+        if (isOpX<MPZ>(right) && !isOpX<MPZ>(left))
+        {
+          traceStart = lexical_cast<int>(right) + 1;
+          boundsFound = true;
+        }
+        else if (isOpX<MPZ>(left) && !isOpX<MPZ>(right))
+        {
+          traceEnd = lexical_cast<int>(left) - 1;
+          boundsFound = true;
+        }
+      }
+    }
 
-      // Now validate CEX by constraining the unrolled traces with the concrete values
-      // The CEX array is a compact representation of the trace - traceVec[i] is the 
-      // value of the tracked variable at step i. We match these against bindVars[i][0]
-      // (the first variable at each step in the unrolled SSA).
-      outs() << "\n=== Validating CEX against traces ===\n";
+    // Parse CEX assertions to extract trace value functions and bounds
+    // CEX format: forall i => (cond -> (select trace_arr i) = value_func(i))
+    CEXData parseCEXAssertions(const ExprVector &ccex)
+    {
+      CEXData data;
       
-      // Index of the variable in bindVars that corresponds to the trace
-      // For now, assume it's the first variable (index 0)
-      int traceVarIdx = 0;
-      
-      for(auto &trace : traces)
+      for (auto &assertion : ccex)
       {
-        ssa.clear();
-        getSSA(trace, ssa);
+        if (debug)
+          outs() << "  Processing CEX assertion: " << *assertion << "\n";
         
-        // Add equalities between bindVars and traceVec values
-        // bindVars[i] contains variables at step i+1 (after first transition)
-        // traceVec[i] contains the value at index i
-        for (size_t i = 0; i < bindVars.size() && i < traceVec.size(); i++)
+        if (!isOpX<FORALL>(assertion)) continue;
+        
+        Expr indexVar = assertion->first();
+        Expr body = assertion->last();
+        
+        if (!isOpX<IMPL>(body)) continue;
+        
+        // Extract bounds from condition (only once)
+        if (!data.boundsFound)
         {
-          if (bindVars[i].size() > traceVarIdx)
+          Expr condition = body->left();
+          extractBoundsFromCondition(condition, data.traceStart, data.traceEnd, data.boundsFound);
+        }
+        
+        // Extract value function from conclusion
+        Expr conclusion = body->right();
+        if (isOpX<EQ>(conclusion))
+        {
+          Expr lhs = conclusion->left();
+          Expr rhs = conclusion->right();
+          
+          if (isOpX<SELECT>(lhs))
           {
-            Expr eq = mk<EQ>(bindVars[i][traceVarIdx], traceVec[i]);
-            ssa.push_back(eq);
-            if (debug)
-            {
-              outs() << "Adding constraint: " << *eq << "\n";
-            }
+            data.traceValueFuncs[lhs->left()] = make_pair(indexVar, rhs);
+          }
+          else if (isOpX<SELECT>(rhs))
+          {
+            data.traceValueFuncs[rhs->left()] = make_pair(indexVar, lhs);
           }
         }
-        
-        SMTUtils u2(m_efac);
-        tribool constrained_res = u2.isSat(ssa);
-        if (constrained_res == true)
+      }
+      
+      return data;
+    }
+
+    // Build substitution map from CEX value functions for all steps
+    ExprMap buildSubstitutionMap(const CEXData &cexData, const ExprVector &traceArrays)
+    {
+      ExprMap varToValue;
+      
+      for (size_t step = 0; step < bindVars.size(); step++)
+      {
+        int varIdx = 0;
+        for (auto &arr : traceArrays)
         {
-          outs() << "CEX VALID: Trace with CEX constraints is SAT\n";
-          res = true;
-        }
-        else if (constrained_res == false)
-        {
-          outs() << "CEX INVALID: Trace with CEX constraints is UNSAT\n";
-        }
-        else
-        {
-          outs() << "CEX UNKNOWN: Trace with CEX constraints is INDETERMINATE\n";
+          if (varIdx < (int)bindVars[step].size())
+          {
+            auto it = cexData.traceValueFuncs.find(arr);
+            if (it != cexData.traceValueFuncs.end())
+            {
+              Expr valueFunc = it->second.second;
+              
+              // Replace bound variable 0 with the step index
+              Expr stepIdx = mkTerm<mpz_class>(step, m_efac);
+              Expr bvar0 = bind::bvar(0, mk<INT_TY>(m_efac));
+              Expr concreteValue = replaceAll(valueFunc, bvar0, stepIdx);
+              
+              varToValue[bindVars[step][varIdx]] = concreteValue;
+            }
+          }
+          varIdx++;
         }
       }
+      
+      return varToValue;
+    }
 
-      return res;
-      // bnd.exploreTraces(1500, 1000, true);
+    // Substitute values into SSA formulas and validate the result
+    tribool substituteAndValidate(const ExprVector &ssa, ExprMap &varToValue)
+    {
+      ExprVector substitutedSSA;
+      for (auto &formula : ssa)
+      {
+        // Use the batch replaceAll that takes an ExprMap
+        Expr substituted = replaceAll(formula, varToValue);
+        substitutedSSA.push_back(substituted);
+      }
+
+      if (debug)
+      {
+        outs() << "  Substituted SSA:\n";
+        pprint(substitutedSSA, 4);
+      }
+      
+      SMTUtils u2(m_efac);
+      Expr simpl = u.simplify(conjoin(substitutedSSA, m_efac));
+      
+      if (debug)
+        outs() << "  Simplified: " << *simpl << "\n";
+      
+      return u2.isTrue(simpl);
+    }
+
+    tribool validateCEX(ExprVector ccex, Expr src, Expr dst)
+    {
+      // Parse CEX assertions to extract value functions and bounds
+      CEXData cexData = parseCEXAssertions(ccex);
+      
+      if (debug)
+      {
+        outs() << "  Extracted bounds: start=" << cexData.traceStart 
+               << ", end=" << cexData.traceEnd << "\n";
+        outs() << "  Found " << cexData.traceValueFuncs.size() << " trace value functions:\n";
+        for (auto &kv : cexData.traceValueFuncs)
+          outs() << "    " << *kv.first << " -> " << *kv.second.second << "\n";
+      }
+      
+      // Calculate trace length from bounds
+      int len = cexData.traceEnd - cexData.traceStart + 1;
+      if (len <= 0)
+      {
+        outs() << "  ERROR: Invalid trace bounds (start=" << cexData.traceStart 
+               << ", end=" << cexData.traceEnd << ")\n";
+        return indeterminate;
+      }
+
+      // Get a single trace efficiently (for CEX validation we typically only need one)
+      vector<int> trace;
+      if (!getSingleTrace(src, dst, len, trace))
+      {
+        outs() << "  ERROR: Could not find a trace of length " << len << "\n";
+        return indeterminate;
+      }
+      
+      if (debug)
+        outs() << "  Found trace of length " << trace.size() << "\n";
+
+      // Get trace arrays in order (to match bindVars indices)
+      ExprVector traceArrays;
+      for (auto &kv : cexData.traceValueFuncs)
+        traceArrays.push_back(kv.first);
+
+      // Validate the trace
+      ExprVector ssa;
+      getSSA(trace, ssa);
+      
+      if (debug)
+      {
+        outs() << "  Original SSA (" << ssa.size() << " formulas)\n";
+        outs() << "  Bind vars: " << bindVars.size() << " steps, "
+               << (bindVars.size() > 0 ? bindVars[0].size() : 0) << " vars/step\n";
+        outs() << "\n  Validating CEX against trace...\n";
+      }
+
+      ExprMap varToValue = buildSubstitutionMap(cexData, traceArrays);
+      tribool traceResult = substituteAndValidate(ssa, varToValue);
+      
+      if (traceResult == true)
+      {
+        outs() << "  CEX VALID: Substituted trace is TRUE\n";
+      }
+      else if (traceResult == false)
+      {
+        outs() << "  CEX INVALID: Substituted trace is FALSE\n";
+      }
+      else
+      {
+        outs() << "  CEX UNKNOWN: Substituted trace is INDETERMINATE\n";
+      }
+
+      return traceResult;
     }
 
     void guessRandomTrace(vector<int> &trace)
@@ -221,6 +362,50 @@ namespace ufo
         }
       }
       return unsat;
+    }
+
+    // Efficiently build a single trace of given length (iterative, not recursive)
+    // Returns true if a valid trace was found
+    bool getSingleTrace(Expr src, Expr dst, int len, vector<int> &trace)
+    {
+      trace.clear();
+      trace.reserve(len);
+      
+      Expr current = src;
+      for (int step = 0; step < len; step++)
+      {
+        bool found = false;
+        Expr target = (step == len - 1) ? dst : Expr(nullptr);
+        
+        for (auto a : ruleManager.outgs[current])
+        {
+          Expr nextRel = ruleManager.chcs[a].dstRelation;
+          
+          // On last step, must reach dst; otherwise just pick any valid transition
+          if (step == len - 1)
+          {
+            if (nextRel == dst)
+            {
+              trace.push_back(a);
+              found = true;
+              break;
+            }
+          }
+          else
+          {
+            // Pick the first available transition (typically the loop)
+            trace.push_back(a);
+            current = nextRel;
+            found = true;
+            break;
+          }
+        }
+        
+        if (!found)
+          return false;
+      }
+      
+      return true;
     }
 
     void getAllTraces(Expr src, Expr dst, int len, vector<int> trace, vector<vector<int>> &traces)

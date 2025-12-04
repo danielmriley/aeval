@@ -1,0 +1,25 @@
+(define-fun x_at_i ((i Int)) (_ BitVec 8)
+  ((_ int2bv 8) i)
+)
+(define-fun y_at_i ((i Int)) (_ BitVec 8)
+  ((_ int2bv 8) i)
+)
+
+(declare-const trace_x (Array Int (_ BitVec 8)))
+(declare-const trace_y (Array Int (_ BitVec 8)))
+
+
+(assert 
+  (forall ((i Int)) 
+    (=> (and (<= 0 i) (<= i 256)) 
+        (= (select trace_x i) (x_at_i i))
+    )
+  )
+)
+(assert 
+  (forall ((i Int)) 
+    (=> (and (<= 0 i) (<= i 256)) 
+        (= (select trace_y i) (y_at_i i))
+    )
+  )
+)

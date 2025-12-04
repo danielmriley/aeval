@@ -341,6 +341,11 @@ namespace ufo
       else return simplifyBool(simplifyArithm(removeITE(ex)));
     }
 
+    Expr simplify(Expr ex)
+    {
+      return z3_simplify(z3, ex);
+    }
+
     /**
      * Unroll a compact trace representation by evaluating array selections
      * at each index from start to end.

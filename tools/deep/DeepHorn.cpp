@@ -221,7 +221,7 @@ int main (int argc, char ** argv)
     res = learnInvariants5(string(argv[argc - 1]), ccex, max_attempts, to, densecode, aggressivepruning,
                            do_dl, do_mu, do_elim, do_arithm, do_disj, do_prop, mbp_eqs,
                            d_m, d_p, d_d, d_s, d_f, d_r, d_g, d_se, d_lia2bv, d_horn, d_sertrans,
-                           d2, doGJ, doReg, doCon, debug);
+                           d2, doGJ, doReg, doCon, skipTranslation, skipSampling, debug);
   else if (vers4)      // MBP-based, path-sensitive algorithms
     learnInvariants4(string(argv[argc-1]), max_attempts, to, densecode, aggressivepruning,
                    do_dl, do_mu, do_elim, do_arithm, do_disj, do_prop, mbp_eqs,

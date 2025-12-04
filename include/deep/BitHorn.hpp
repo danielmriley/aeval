@@ -2356,14 +2356,20 @@ namespace ufo
       return 1;
     }
 
-    ZSolver<EZ3> solver(z3);
-    ExprVector ccexExprs = solver.loadFromFile(ccex);
+    bool do_ccex = ccex != "";
 
-    BndExpl bnd(ruleManager, to, debug);
-    bnd.validateCEX(ccexExprs, mk<TRUE>(efac), ruleManager.failDecl, 17);
-    exit(1);
+    if (do_ccex)
+    {
+      ZSolver<EZ3> solver(z3);
+      ExprVector ccexExprs = solver.loadFromFile(ccex);
 
-    BitHorn bh(efac, z3, ruleManager, d2, doGJ, doReg, doCon, debug);
+      BndExpl bnd(ruleManager, to, debug);
+      bnd.validateCEX(ccexExprs, mk<TRUE>(efac), ruleManager.failDecl);
+      exit(1);
+    }
+  
+    BitHorn bh(efac, z3, ruleManager, maxAttempts, d2, 
+      doGJ, doReg, doCon, translateBv2Lia, skipSampling, debug);
 
     if (ser)
     {

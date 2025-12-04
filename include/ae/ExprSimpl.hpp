@@ -1792,6 +1792,13 @@ namespace ufo
     }
   };
 
+  inline static Expr simplifyBV(Expr exp)
+  {
+    std::map<Expr, unsigned> bitwidths;
+    RW<SimplifyBVExpr> rw(new SimplifyBVExpr(exp->getFactory(), bitwidths));
+    return dagVisit(rw, exp);
+  }
+
   static Expr simplifyArr (Expr exp);
 
   struct SimplifyArrExpr
