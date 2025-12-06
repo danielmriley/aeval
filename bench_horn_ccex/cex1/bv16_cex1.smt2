@@ -1,13 +1,13 @@
-;// 16-bit version of bv4_cex1
+;// filepath: bv16_cex1.smt2
 ; (set-logic HORN)
 (declare-fun inv ((_ BitVec 16)) Bool)
 
 (assert (forall ((x (_ BitVec 16))) 
-  (=> (= x #x0000) (inv x))
+  (=> (= x #b0000000000000000) (inv x))
 ))
 (assert (forall ((x0 (_ BitVec 16)) (x1 (_ BitVec 16))) 
   (=> (and (inv x0)
-        (= x1 (bvadd x0 #x0001)))
+        (= x1 (bvadd x0 #b0000000000000001)))
     (inv x1)
   )
 ))
@@ -16,3 +16,4 @@
 ))
 
 (check-sat)
+(exit)

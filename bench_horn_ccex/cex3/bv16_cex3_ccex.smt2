@@ -15,21 +15,21 @@
 
 (assert 
   (forall ((i Int)) 
-    (=> (and (<= 0 i) (<= i 65536)) 
+    (=> (and (<= 0 i) (<= i 65535)) 
         (= (select trace_x i) (x_at_i i))
     )
   )
 )
 (assert 
   (forall ((i Int)) 
-    (=> (and (<= 0 i) (<= i 65536)) 
+    (=> (and (<= 0 i) (<= i 65535)) 
         (= (select trace_y i) (y_at_i i))
     )
   )
 )
 (assert 
   (forall ((i Int)) 
-    (=> (and (<= 0 i) (<= i 65536)) 
+    (=> (and (<= 0 i) (<= i 65535)) 
         (= (select trace_z i) (z_at_i i))
     )
   )

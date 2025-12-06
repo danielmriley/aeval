@@ -7,7 +7,7 @@
 
 (assert 
   (forall ((i Int)) 
-    (=> (and (<= 0 i) (<= i 16)) 
+    (=> (and (<= 0 i) (<= i 15)) 
         (= (select trace i) (x_at_i i))
     )
   )

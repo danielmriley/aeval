@@ -2333,22 +2333,29 @@ namespace ufo
     }
   }; // End BitHorn class
 
-  inline bool learnInvariants5(string smt, string ccex, unsigned maxAttempts, unsigned to,
+  inline bool learnInvariants5(string smt, string ccex, bool ccexInductive, bool ccexUnrolling,
+                               unsigned maxAttempts, unsigned to,
                                bool freqs, bool aggp, int dat, int mut, bool doElim, bool doArithm,
                                bool doDisj, int doProp, int mbpEqs, bool dAllMbp, bool dAddProp,
                                bool dAddDat, bool dStrenMbp, int dFwd, bool dRec, bool dGenerous,
                                bool dSee, bool ser, bool horn, bool serTrans, bool d2, bool doGJ,
                                bool doReg, bool doCon, bool translateBv2Lia, bool skipSampling, int debug)
   {
+    using namespace std::chrono;
+    auto totalStart = high_resolution_clock::now();
+    
     ExprFactory efac;
     EZ3 z3(efac);
 
+    auto parseStart = high_resolution_clock::now();
     CHCs ruleManager(efac, z3, debug);
     if (!ruleManager.parse(smt, doElim, doArithm))
     {
       outs() << "Error parsing input file\n";
       return 1;
     }
+    auto parseEnd = high_resolution_clock::now();
+    auto parseTime = duration_cast<milliseconds>(parseEnd - parseStart).count();
 
     if (!ruleManager.hasBV && !ser)
     {
@@ -2360,11 +2367,34 @@ namespace ufo
 
     if (do_ccex)
     {
+      auto ccexLoadStart = high_resolution_clock::now();
       ZSolver<EZ3> solver(z3);
       ExprVector ccexExprs = solver.loadFromFile(ccex);
+      auto ccexLoadEnd = high_resolution_clock::now();
+      auto ccexLoadTime = duration_cast<milliseconds>(ccexLoadEnd - ccexLoadStart).count();
+
+      outs() << "\n[Global Timing] CHC Parse: " << parseTime << "ms, "
+             << "CCEX Load: " << ccexLoadTime << "ms\n";
 
       BndExpl bnd(ruleManager, to, debug);
-      bnd.validateCEX(ccexExprs, mk<TRUE>(efac), ruleManager.failDecl);
+      
+      // Run validation methods based on flags
+      if (ccexInductive)
+      {
+        outs() << "\n=== Inductive CEX Validation ===\n";
+        tribool inductiveResult = bnd.validateCEXInductive(ccexExprs);
+      }
+      
+      if (ccexUnrolling)
+      {
+        outs() << "\n=== Unrolling-based CEX Validation ===\n";
+        tribool unrollResult = bnd.validateCEX(ccexExprs, mk<TRUE>(efac), ruleManager.failDecl);
+      }
+      
+      auto totalEnd = high_resolution_clock::now();
+      auto totalTime = duration_cast<milliseconds>(totalEnd - totalStart).count();
+      outs() << "\n[Global Timing] Total wall-clock: " << totalTime << "ms\n";
+      
       exit(1);
     }
   

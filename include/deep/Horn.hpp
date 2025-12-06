@@ -1412,6 +1412,13 @@ namespace ufo
       }
     }
 
+    void serializeExpr(Expr e)
+    {
+      std::ofstream out("tmp.smt2");
+      u.print(e, out);
+      out.close();
+    }
+
     void serialize(bool horn = true)
     {
       if (horn) serializeHorn();

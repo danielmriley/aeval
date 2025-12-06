@@ -190,6 +190,8 @@ int main (int argc, char ** argv)
   bool skipSampling = getBoolValue("--skip-sampling", false, argc, argv);
   int debug = getIntValue(OPT_DEBUG, 0, argc, argv);
   string ccex = getStrValue("--ccex", "", argc, argv);
+  bool ccexInductive = !getBoolValue("--no-ccex-inductive", false, argc, argv);
+  bool ccexUnrolling = !getBoolValue("--no-ccex-unrolling", false, argc, argv);
 
   if (d_m || d_p || d_d || d_s) do_disj = true;
   if (do_disj)
@@ -218,7 +220,7 @@ int main (int argc, char ** argv)
 
   bool res = false;
   if(bv_solver)
-    res = learnInvariants5(string(argv[argc - 1]), ccex, max_attempts, to, densecode, aggressivepruning,
+    res = learnInvariants5(string(argv[argc - 1]), ccex, ccexInductive, ccexUnrolling, max_attempts, to, densecode, aggressivepruning,
                            do_dl, do_mu, do_elim, do_arithm, do_disj, do_prop, mbp_eqs,
                            d_m, d_p, d_d, d_s, d_f, d_r, d_g, d_se, d_lia2bv, d_horn, d_sertrans,
                            d2, doGJ, doReg, doCon, skipTranslation, skipSampling, debug);

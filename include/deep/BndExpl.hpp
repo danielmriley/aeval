@@ -8,6 +8,7 @@
 #include "ufo/ExprBv.hh"
 #include <algorithm>
 #include <limits>
+#include <chrono>
 
 using namespace std;
 using namespace boost;
@@ -74,14 +75,17 @@ namespace ufo
     // Helper struct to hold parsed CEX data
     struct CEXData {
       map<Expr, pair<Expr, Expr>> traceValueFuncs; // array -> (indexVar, valueExpr)
-      int traceStart = 0;
-      int traceEnd = 0;
+      int64_t traceStart = 0;
+      int64_t traceEnd = 0;
+      Expr traceStartExpr = nullptr;  // For bitvector bounds that exceed int64
+      Expr traceEndExpr = nullptr;    // For bitvector bounds that exceed int64
+      Expr indexType = nullptr;       // Type of the index (int or bitvector sort)
       bool boundsFound = false;
     };
 
     // Extract bounds from a quantifier condition expression
     // Handles: (AND (LEQ 0 idx) (LEQ idx N)), (GEQ idx 0), (LT/GT variants)
-    void extractBoundsFromCondition(Expr condition, int &traceStart, int &traceEnd, bool &boundsFound)
+    void extractBoundsFromCondition(Expr condition, int64_t &traceStart, int64_t &traceEnd, bool &boundsFound)
     {
       if (isOpX<AND>(condition))
       {
@@ -94,12 +98,14 @@ namespace ufo
         Expr right = condition->right();
         if (isOpX<MPZ>(left) && !isOpX<MPZ>(right))
         {
-          traceStart = lexical_cast<int>(left);
+          cpp_int val = lexical_cast<cpp_int>(left);
+          traceStart = val.convert_to<int64_t>();
           boundsFound = true;
         }
         else if (isOpX<MPZ>(right) && !isOpX<MPZ>(left))
         {
-          traceEnd = lexical_cast<int>(right);
+          cpp_int val = lexical_cast<cpp_int>(right);
+          traceEnd = val.convert_to<int64_t>();
           boundsFound = true;
         }
       }
@@ -109,12 +115,14 @@ namespace ufo
         Expr right = condition->right();
         if (isOpX<MPZ>(right) && !isOpX<MPZ>(left))
         {
-          traceStart = lexical_cast<int>(right);
+          cpp_int val = lexical_cast<cpp_int>(right);
+          traceStart = val.convert_to<int64_t>();
           boundsFound = true;
         }
         else if (isOpX<MPZ>(left) && !isOpX<MPZ>(right))
         {
-          traceEnd = lexical_cast<int>(left);
+          cpp_int val = lexical_cast<cpp_int>(left);
+          traceEnd = val.convert_to<int64_t>();
           boundsFound = true;
         }
       }
@@ -124,12 +132,14 @@ namespace ufo
         Expr right = condition->right();
         if (isOpX<MPZ>(left) && !isOpX<MPZ>(right))
         {
-          traceStart = lexical_cast<int>(left) + 1;
+          cpp_int val = lexical_cast<cpp_int>(left);
+          traceStart = val.convert_to<int64_t>() + 1;
           boundsFound = true;
         }
         else if (isOpX<MPZ>(right) && !isOpX<MPZ>(left))
         {
-          traceEnd = lexical_cast<int>(right) - 1;
+          cpp_int val = lexical_cast<cpp_int>(right);
+          traceEnd = val.convert_to<int64_t>() - 1;
           boundsFound = true;
         }
       }
@@ -139,19 +149,162 @@ namespace ufo
         Expr right = condition->right();
         if (isOpX<MPZ>(right) && !isOpX<MPZ>(left))
         {
-          traceStart = lexical_cast<int>(right) + 1;
+          cpp_int val = lexical_cast<cpp_int>(right);
+          traceStart = val.convert_to<int64_t>() + 1;
           boundsFound = true;
         }
         else if (isOpX<MPZ>(left) && !isOpX<MPZ>(right))
         {
-          traceEnd = lexical_cast<int>(left) - 1;
+          cpp_int val = lexical_cast<cpp_int>(left);
+          traceEnd = val.convert_to<int64_t>() - 1;
           boundsFound = true;
+        }
+      }
+      // Bitvector unsigned comparisons (for zero-extend benchmarks)
+      else if (isOpX<BULE>(condition))  // bvule: left <= right (unsigned)
+      {
+        Expr left = condition->left();
+        Expr right = condition->right();
+        if (bv::is_bvnum(left) && !bv::is_bvnum(right))
+        {
+          mpz_class val = bv::toMpz(left);
+          traceStart = val.get_si();
+          boundsFound = true;
+        }
+        else if (bv::is_bvnum(right) && !bv::is_bvnum(left))
+        {
+          mpz_class val = bv::toMpz(right);
+          traceEnd = val.get_si();
+          boundsFound = true;
+        }
+      }
+      else if (isOpX<BUGE>(condition))  // bvuge: left >= right (unsigned)
+      {
+        Expr left = condition->left();
+        Expr right = condition->right();
+        if (bv::is_bvnum(right) && !bv::is_bvnum(left))
+        {
+          mpz_class val = bv::toMpz(right);
+          traceStart = val.get_si();
+          boundsFound = true;
+        }
+        else if (bv::is_bvnum(left) && !bv::is_bvnum(right))
+        {
+          mpz_class val = bv::toMpz(left);
+          traceEnd = val.get_si();
+          boundsFound = true;
+        }
+      }
+      else if (isOpX<BULT>(condition))  // bvult: left < right (unsigned)
+      {
+        Expr left = condition->left();
+        Expr right = condition->right();
+        if (bv::is_bvnum(left) && !bv::is_bvnum(right))
+        {
+          mpz_class val = bv::toMpz(left);
+          traceStart = val.get_si() + 1;
+          boundsFound = true;
+        }
+        else if (bv::is_bvnum(right) && !bv::is_bvnum(left))
+        {
+          mpz_class val = bv::toMpz(right);
+          traceEnd = val.get_si() - 1;
+          boundsFound = true;
+        }
+      }
+      else if (isOpX<BUGT>(condition))  // bvugt: left > right (unsigned)
+      {
+        Expr left = condition->left();
+        Expr right = condition->right();
+        if (bv::is_bvnum(right) && !bv::is_bvnum(left))
+        {
+          mpz_class val = bv::toMpz(right);
+          traceStart = val.get_si() + 1;
+          boundsFound = true;
+        }
+        else if (bv::is_bvnum(left) && !bv::is_bvnum(right))
+        {
+          mpz_class val = bv::toMpz(left);
+          traceEnd = val.get_si() - 1;
+          boundsFound = true;
+        }
+      }
+    }
+
+    // Extract bound expressions (start and end) from a condition
+    // This handles bitvector bounds that may exceed int64 capacity
+    void extractBoundExprs(Expr condition, Expr &startExpr, Expr &endExpr, Expr &indexType)
+    {
+      if (isOpX<AND>(condition))
+      {
+        for (auto it = condition->args_begin(); it != condition->args_end(); ++it)
+          extractBoundExprs(*it, startExpr, endExpr, indexType);
+      }
+      else if (isOpX<BULE>(condition))  // bvule: left <= right (unsigned)
+      {
+        Expr left = condition->left();
+        Expr right = condition->right();
+        if (bv::is_bvnum(left) && !bv::is_bvnum(right))
+        {
+          startExpr = left;
+          if (!indexType) indexType = bind::typeOf(right);
+        }
+        else if (bv::is_bvnum(right) && !bv::is_bvnum(left))
+        {
+          endExpr = right;
+          if (!indexType) indexType = bind::typeOf(left);
+        }
+      }
+      else if (isOpX<BUGE>(condition))  // bvuge: left >= right (unsigned)
+      {
+        Expr left = condition->left();
+        Expr right = condition->right();
+        if (bv::is_bvnum(right) && !bv::is_bvnum(left))
+        {
+          startExpr = right;
+          if (!indexType) indexType = bind::typeOf(left);
+        }
+        else if (bv::is_bvnum(left) && !bv::is_bvnum(right))
+        {
+          endExpr = left;
+          if (!indexType) indexType = bind::typeOf(right);
+        }
+      }
+      else if (isOpX<LEQ>(condition))
+      {
+        Expr left = condition->left();
+        Expr right = condition->right();
+        if (isOpX<MPZ>(left) && !isOpX<MPZ>(right))
+        {
+          startExpr = left;
+          if (!indexType) indexType = bind::typeOf(right);
+        }
+        else if (isOpX<MPZ>(right) && !isOpX<MPZ>(left))
+        {
+          endExpr = right;
+          if (!indexType) indexType = bind::typeOf(left);
+        }
+      }
+      else if (isOpX<GEQ>(condition))
+      {
+        Expr left = condition->left();
+        Expr right = condition->right();
+        if (isOpX<MPZ>(right) && !isOpX<MPZ>(left))
+        {
+          startExpr = right;
+          if (!indexType) indexType = bind::typeOf(left);
+        }
+        else if (isOpX<MPZ>(left) && !isOpX<MPZ>(right))
+        {
+          endExpr = left;
+          if (!indexType) indexType = bind::typeOf(right);
         }
       }
     }
 
     // Parse CEX assertions to extract trace value functions and bounds
     // CEX format: forall i => (cond -> (select trace_arr i) = value_func(i))
+    // or: forall i => (cond -> AND((select arr1 i) = f1(i), (select arr2 i) = f2(i), ...))
     CEXData parseCEXAssertions(const ExprVector &ccex)
     {
       CEXData data;
@@ -163,7 +316,12 @@ namespace ufo
         
         if (!isOpX<FORALL>(assertion)) continue;
         
-        Expr indexVar = assertion->first();
+        // Get the bound variable - for FORALL, the first arg is the variable declaration
+        // and the bound variable in the body is bvar(0, type)
+        Expr varDecl = assertion->first();
+        Expr varType = bind::rangeTy(varDecl);
+        Expr indexVar = bind::bvar(0, varType);  // Create the bound variable reference
+        
         Expr body = assertion->last();
         
         if (!isOpX<IMPL>(body)) continue;
@@ -173,14 +331,18 @@ namespace ufo
         {
           Expr condition = body->left();
           extractBoundsFromCondition(condition, data.traceStart, data.traceEnd, data.boundsFound);
+          // Also extract bound expressions for large bitvector values
+          extractBoundExprs(condition, data.traceStartExpr, data.traceEndExpr, data.indexType);
         }
         
         // Extract value function from conclusion
         Expr conclusion = body->right();
-        if (isOpX<EQ>(conclusion))
-        {
-          Expr lhs = conclusion->left();
-          Expr rhs = conclusion->right();
+        
+        // Helper lambda to extract value function from an equality
+        auto extractFromEq = [&](Expr eq) {
+          if (!isOpX<EQ>(eq)) return;
+          Expr lhs = eq->left();
+          Expr rhs = eq->right();
           
           if (isOpX<SELECT>(lhs))
           {
@@ -189,6 +351,19 @@ namespace ufo
           else if (isOpX<SELECT>(rhs))
           {
             data.traceValueFuncs[rhs->left()] = make_pair(indexVar, lhs);
+          }
+        };
+        
+        if (isOpX<EQ>(conclusion))
+        {
+          extractFromEq(conclusion);
+        }
+        else if (isOpX<AND>(conclusion))
+        {
+          // Handle conjunction of equalities
+          for (auto it = conclusion->args_begin(); it != conclusion->args_end(); ++it)
+          {
+            extractFromEq(*it);
           }
         }
       }
@@ -246,18 +421,27 @@ namespace ufo
       }
       
       SMTUtils u2(m_efac);
+      // ruleManager.serializeExpr(conjoin(substitutedSSA, m_efac));
       Expr simpl = u.simplify(conjoin(substitutedSSA, m_efac));
       
       if (debug)
-        outs() << "  Simplified: " << *simpl << "\n";
+      {
+        outs() << "  Simplified: " << simpl << "\n";
+      }
       
-      return u2.isTrue(simpl);
+      return isOpX<TRUE>(simpl);
     }
 
     tribool validateCEX(ExprVector ccex, Expr src, Expr dst)
     {
+      using namespace std::chrono;
+      auto totalStart = high_resolution_clock::now();
+      
       // Parse CEX assertions to extract value functions and bounds
+      auto parseStart = high_resolution_clock::now();
       CEXData cexData = parseCEXAssertions(ccex);
+      auto parseEnd = high_resolution_clock::now();
+      auto parseTime = duration_cast<microseconds>(parseEnd - parseStart).count();
       
       if (debug)
       {
@@ -269,21 +453,37 @@ namespace ufo
       }
       
       // Calculate trace length from bounds
-      int len = cexData.traceEnd - cexData.traceStart + 1;
-      if (len <= 0)
+      int64_t len64 = cexData.traceEnd - cexData.traceStart + 1;
+      if (len64 <= 0)
       {
         outs() << "  ERROR: Invalid trace bounds (start=" << cexData.traceStart 
                << ", end=" << cexData.traceEnd << ")\n";
         return indeterminate;
       }
+      
+      // Check if trace is too long for unrolling-based validation
+      // Memory limit: vector<int> with N elements needs ~4N bytes
+      // 500M steps = ~2GB memory, which is a reasonable limit
+      const int64_t MAX_UNROLL_LENGTH = 5000000000LL; // 5 billion steps max
+      if (len64 > MAX_UNROLL_LENGTH)
+      {
+        outs() << "  ERROR: Trace too long for unrolling (" << len64 << " steps, max " 
+               << MAX_UNROLL_LENGTH << ")\n";
+        outs() << "  Consider using inductive validation for large traces.\n";
+        return indeterminate;
+      }
+      int64_t len = len64;
 
       // Get a single trace efficiently (for CEX validation we typically only need one)
+      auto traceStart = high_resolution_clock::now();
       vector<int> trace;
-      if (!getSingleTrace(src, dst, len, trace))
+      if (!getSingleTrace(src, dst, len, trace)) // TODO: Use the same method for trace extraction as in DL.
       {
         outs() << "  ERROR: Could not find a trace of length " << len << "\n";
         return indeterminate;
       }
+      auto traceEnd = high_resolution_clock::now();
+      auto traceTime = duration_cast<milliseconds>(traceEnd - traceStart).count();
       
       if (debug)
         outs() << "  Found trace of length " << trace.size() << "\n";
@@ -294,8 +494,11 @@ namespace ufo
         traceArrays.push_back(kv.first);
 
       // Validate the trace
+      auto ssaStart = high_resolution_clock::now();
       ExprVector ssa;
       getSSA(trace, ssa);
+      auto ssaEnd = high_resolution_clock::now();
+      auto ssaTime = duration_cast<milliseconds>(ssaEnd - ssaStart).count();
       
       if (debug)
       {
@@ -305,8 +508,26 @@ namespace ufo
         outs() << "\n  Validating CEX against trace...\n";
       }
 
+      auto substStart = high_resolution_clock::now();
       ExprMap varToValue = buildSubstitutionMap(cexData, traceArrays);
-      tribool traceResult = substituteAndValidate(ssa, varToValue);
+      auto substEnd = high_resolution_clock::now();
+      auto substTime = duration_cast<milliseconds>(substEnd - substStart).count();
+      
+      auto validateStart = high_resolution_clock::now();
+      tribool traceResult = substituteAndValidate(ssa, varToValue); // TODO: optimize by cutting out early.
+      auto validateEnd = high_resolution_clock::now();
+      auto validateTime = duration_cast<milliseconds>(validateEnd - validateStart).count();
+      
+      auto totalEnd = high_resolution_clock::now();
+      auto totalTime = duration_cast<milliseconds>(totalEnd - totalStart).count();
+      
+      // Print timing stats
+      outs() << "  [Timing] Parse CEX: " << parseTime << "ms, "
+             << "Trace: " << traceTime << "ms, "
+             << "SSA: " << ssaTime << "ms, "
+             << "Subst: " << substTime << "ms, "
+             << "Validate: " << validateTime << "ms, "
+             << "Total: " << totalTime << "ms\n";
       
       if (traceResult == true)
       {
@@ -322,6 +543,401 @@ namespace ufo
       }
 
       return traceResult;
+    }
+
+    // Alternative inductive CEX validation using 3 solver checks:
+    // 1. Init check: f(0) satisfies the initial constraint
+    // 2. Transition check: f(i) /\ transition => f(i+1) is valid (negation is UNSAT)
+    // 3. Property check: f(N) violates the property (reaches error)
+    tribool validateCEXInductive(ExprVector ccex)
+    {
+      using namespace std::chrono;
+      auto totalStart = high_resolution_clock::now();
+      
+      // Parse CEX assertions to extract value functions and bounds
+      auto parseStart = high_resolution_clock::now();
+      CEXData cexData = parseCEXAssertions(ccex);
+      auto parseEnd = high_resolution_clock::now();
+      auto parseTime = duration_cast<microseconds>(parseEnd - parseStart).count();
+      
+      if (debug)
+      {
+        outs() << "  [Inductive] Extracted bounds: start=" << cexData.traceStart 
+               << ", end=" << cexData.traceEnd << "\n";
+        outs() << "  [Inductive] Found " << cexData.traceValueFuncs.size() << " trace value functions:\n";
+        for (auto &kv : cexData.traceValueFuncs)
+          outs() << "    " << *kv.first << " -> " << *kv.second.second << "\n";
+      }
+
+      // Get trace arrays in order
+      ExprVector traceArrays;
+      for (auto &kv : cexData.traceValueFuncs)
+        traceArrays.push_back(kv.first);
+
+      // Find the Init, Transition, and Property (Query) CHCs
+      HornRuleExt* initCHC = nullptr;
+      HornRuleExt* transCHC = nullptr;
+      HornRuleExt* queryCHC = nullptr;
+      
+      for (auto &chc : ruleManager.chcs)
+      {
+        if (chc.isFact && !chc.isQuery)
+          initCHC = &chc;
+        else if (chc.isInductive)
+          transCHC = &chc;
+        else if (chc.isQuery && !chc.isFact)
+          queryCHC = &chc;
+      }
+
+      if (!initCHC || !transCHC || !queryCHC)
+      {
+        outs() << "  [Inductive] ERROR: Could not identify Init/Trans/Query CHCs\n";
+        return indeterminate;
+      }
+
+      if (debug)
+      {
+        outs() << "  [Inductive] Init CHC body: " << *initCHC->body << "\n";
+        outs() << "  [Inductive] Trans CHC body: " << *transCHC->body << "\n";
+        outs() << "  [Inductive] Query CHC body: " << *queryCHC->body << "\n";
+      }
+
+      // Helper to create a step index as the appropriate type (int or bitvector)
+      // based on the index variable type from the CCEX
+      auto makeStepIndex = [&](int64_t step, Expr indexVar) -> Expr {
+        if (!indexVar) return mkTerm<mpz_class>(step, m_efac);
+        
+        // For bound variables (bvar), check the type directly
+        if (bind::isBVar(indexVar))
+        {
+          Expr varType = bind::typeOf(indexVar);
+          if (bv::is_bvsort(varType))
+          {
+            unsigned width = bv::width(varType);
+            return bv::bvnum(mpz_class(step), width, m_efac);
+          }
+          return mkTerm<mpz_class>(step, m_efac);
+        }
+        
+        // For function applications (constants), check rangeTy
+        if (bind::isFapp(indexVar))
+        {
+          Expr idxType = bind::rangeTy(bind::fname(indexVar));
+          if (bv::is_bvsort(idxType))
+          {
+            unsigned width = bv::width(idxType);
+            return bv::bvnum(mpz_class(step), width, m_efac);
+          }
+        }
+        
+        return mkTerm<mpz_class>(step, m_efac);
+      };
+      
+      // Helper to check if index is bitvector type
+      auto isIndexBvType = [&](Expr indexVar, unsigned &bvWidth) -> bool {
+        if (!indexVar) return false;
+        
+        if (bind::isBVar(indexVar))
+        {
+          Expr varType = bind::typeOf(indexVar);
+          if (bv::is_bvsort(varType))
+          {
+            bvWidth = bv::width(varType);
+            return true;
+          }
+          return false;
+        }
+        
+        if (bind::isFapp(indexVar))
+        {
+          Expr idxType = bind::rangeTy(bind::fname(indexVar));
+          if (bv::is_bvsort(idxType))
+          {
+            bvWidth = bv::width(idxType);
+            return true;
+          }
+        }
+        
+        return false;
+      };
+
+      // Helper to substitute value functions into an expression
+      // Given vars and step index, replace each var with f(step)
+      auto substituteStep = [&](Expr expr, const ExprVector &vars, int64_t step) -> Expr {
+        ExprMap subst;
+        int varIdx = 0;
+        for (auto &arr : traceArrays)
+        {
+          if (varIdx < (int)vars.size())
+          {
+            auto it = cexData.traceValueFuncs.find(arr);
+            if (it != cexData.traceValueFuncs.end())
+            {
+              Expr indexVar = it->second.first;  // The actual index variable from CCEX
+              Expr valueFunc = it->second.second;
+              Expr stepIdx = makeStepIndex(step, indexVar);
+              if (debug)
+              {
+                outs() << "    substituteStep: indexVar=" << *indexVar 
+                       << ", valueFunc=" << *valueFunc
+                       << ", stepIdx=" << *stepIdx << "\n";
+              }
+              Expr concreteValue = replaceAll(valueFunc, indexVar, stepIdx);
+              if (debug)
+                outs() << "    substituteStep: concreteValue=" << *concreteValue << "\n";
+              subst[vars[varIdx]] = concreteValue;
+            }
+          }
+          varIdx++;
+        }
+        return replaceAll(expr, subst);
+      };
+
+      // Version that takes an expression for the step (for large bitvector bounds)
+      auto substituteStepExpr = [&](Expr expr, const ExprVector &vars, Expr stepExpr) -> Expr {
+        ExprMap subst;
+        int varIdx = 0;
+        for (auto &arr : traceArrays)
+        {
+          if (varIdx < (int)vars.size())
+          {
+            auto it = cexData.traceValueFuncs.find(arr);
+            if (it != cexData.traceValueFuncs.end())
+            {
+              Expr indexVar = it->second.first;  // The actual index variable from CCEX
+              Expr valueFunc = it->second.second;
+              Expr concreteValue = replaceAll(valueFunc, indexVar, stepExpr);
+              subst[vars[varIdx]] = concreteValue;
+            }
+          }
+          varIdx++;
+        }
+        return replaceAll(expr, subst);
+      };
+
+      SMTUtils solver(m_efac);
+      tribool result = true;
+      long long initTime = 0, transTime = 0, propTime = 0;
+
+      auto setupEnd = high_resolution_clock::now();
+      auto setupTime = duration_cast<microseconds>(setupEnd - parseEnd).count();
+
+      // === Check 1: Init ===
+      // Substitute f(0) into init body and check it's satisfiable (TRUE)
+      {
+        auto initStart = high_resolution_clock::now();
+        Expr initBody = initCHC->body;
+        Expr initSubst = substituteStep(initBody, initCHC->dstVars, 0);
+        
+        if (debug)
+          outs() << "  [Inductive] Init check: " << *initSubst << "\n";
+        
+        Expr initSimpl = u.simplify(initSubst);
+        tribool initResult = solver.isTrue(initSimpl);
+        
+        auto initEnd = high_resolution_clock::now();
+        initTime = duration_cast<microseconds>(initEnd - initStart).count();
+        
+        if (initResult == true)
+        {
+          outs() << "  [Inductive] Init: PASS (f(0) satisfies init)\n";
+        }
+        else
+        {
+          outs() << "  [Inductive] Init: FAIL (f(0) does not satisfy init)\n";
+          result = false;
+        }
+      }
+
+      // === Check 2: Transition (Inductive Step) ===
+      // For validity: check that NOT(substituted_trans) is UNSAT
+      // This proves: forall i: f(i) => f(i+1)
+      {
+        auto transStart = high_resolution_clock::now();
+        
+        // Determine index type from the first trace value function
+        bool isBvIndex = false;
+        unsigned bvWidth = 0;
+        if (!traceArrays.empty())
+        {
+          auto it = cexData.traceValueFuncs.find(traceArrays[0]);
+          if (it != cexData.traceValueFuncs.end())
+          {
+            isBvIndex = isIndexBvType(it->second.first, bvWidth);
+          }
+        }
+
+        // Create symbolic index variable and i+1 expression based on index type
+        Expr iVar, iPlusOne, boundsExpr;
+        if (isBvIndex)
+        {
+          iVar = bv::bvConst(mkTerm<string>("_cex_i", m_efac), bvWidth);
+          iPlusOne = bv::bvadd(iVar, bv::bvnum(mpz_class(1), bvWidth, m_efac));
+          // bounds: 0 <= i <= traceEnd - 1 (as bitvectors)
+          boundsExpr = mk<AND>(
+            bv::bvuge(iVar, bv::bvnum(mpz_class(cexData.traceStart), bvWidth, m_efac)),
+            bv::bvule(iVar, bv::bvnum(mpz_class(cexData.traceEnd - 1), bvWidth, m_efac))
+          );
+        }
+        else
+        {
+          iVar = bind::intConst(mkTerm<string>("_cex_i", m_efac));
+          iPlusOne = mk<PLUS>(iVar, mkTerm<mpz_class>(1, m_efac));
+          boundsExpr = mk<AND>(
+            mk<GEQ>(iVar, mkTerm<mpz_class>(cexData.traceStart, m_efac)),
+            mk<LEQ>(iVar, mkTerm<mpz_class>(cexData.traceEnd - 1, m_efac))
+          );
+        }
+
+        // Substitute f(i) for srcVars and f(i+1) for dstVars
+        ExprMap srcSubst, dstSubst;
+        
+        int varIdx = 0;
+        for (auto &arr : traceArrays)
+        {
+          auto it = cexData.traceValueFuncs.find(arr);
+          if (it != cexData.traceValueFuncs.end())
+          {
+            Expr indexVar = it->second.first;  // Actual index var from CCEX
+            Expr valueFunc = it->second.second;
+            
+            // f(i) for srcVars
+            if (varIdx < (int)transCHC->srcVars.size())
+            {
+              Expr srcValue = replaceAll(valueFunc, indexVar, iVar);
+              srcSubst[transCHC->srcVars[varIdx]] = srcValue;
+            }
+            
+            // f(i+1) for dstVars
+            if (varIdx < (int)transCHC->dstVars.size())
+            {
+              Expr dstValue = replaceAll(valueFunc, indexVar, iPlusOne);
+              dstSubst[transCHC->dstVars[varIdx]] = dstValue;
+            }
+          }
+          varIdx++;
+        }
+
+        // Substitute into transition body
+        Expr transBody = transCHC->body;
+        Expr transWithSrc = replaceAll(transBody, srcSubst);
+        Expr transWithBoth = replaceAll(transWithSrc, dstSubst);
+        
+        if (debug)
+        {
+          outs() << "  [Inductive] Trans body: " << *transBody << "\n";
+          outs() << "  [Inductive] Trans after substitution: " << *transWithBoth << "\n";
+        }
+        
+        // Simplify the formula first - this may reduce int2bv(x+1) = bvadd(int2bv(x), 1) to TRUE
+        Expr transSimpl = u.simplify(transWithBoth);
+        if (debug)
+          outs() << "  [Inductive] Trans simplified: " << *transSimpl << "\n";
+        
+        // First, check if simplification already proved it
+        if (isOpX<TRUE>(transSimpl))
+        {
+          auto transEnd = high_resolution_clock::now();
+          transTime = duration_cast<microseconds>(transEnd - transStart).count();
+          outs() << "  [Inductive] Transition: PASS (simplified to TRUE)\n";
+        }
+        else
+        {
+          // For validity check: (bounds /\ NOT(substituted_trans)) should be UNSAT
+          Expr validityCheck = mk<AND>(boundsExpr, mk<NEG>(transSimpl));
+          
+          if (debug)
+            outs() << "  [Inductive] Trans validity check (expect UNSAT): " << *validityCheck << "\n";
+          
+          tribool transResult = solver.isSat(validityCheck);
+          auto transEnd = high_resolution_clock::now();
+          transTime = duration_cast<microseconds>(transEnd - transStart).count();
+          
+          if (transResult == false)
+          {
+            outs() << "  [Inductive] Transition: PASS (f(i) => f(i+1) is valid)\n";
+          }
+          else
+          {
+            outs() << "  [Inductive] Transition: FAIL (f(i) => f(i+1) is not valid)\n";
+            result = false;
+          }
+        }
+      }
+
+      // === Check 3: Property (Query) ===
+      // Substitute f(N) into query body and check it's satisfiable (reaches error)
+      // The trace goes from step 0 to step traceEnd, so we check the property at traceEnd
+      {
+        auto propStart = high_resolution_clock::now();
+        Expr queryBody = queryCHC->body;
+        
+        Expr querySubst;
+        if (cexData.traceEndExpr)
+        {
+          // Use the expression directly for large bitvector bounds
+          querySubst = substituteStepExpr(queryBody, queryCHC->srcVars, cexData.traceEndExpr);
+          if (debug)
+          {
+            outs() << "  [Inductive] Property check at step (expr) " << *cexData.traceEndExpr << "\n";
+            outs() << "  [Inductive] Query body: " << *queryBody << "\n";
+            outs() << "  [Inductive] Query substituted: " << *querySubst << "\n";
+          }
+        }
+        else
+        {
+          // Use the int64_t value
+          int64_t propertyStep = cexData.traceEnd;
+          querySubst = substituteStep(queryBody, queryCHC->srcVars, propertyStep);
+          if (debug)
+          {
+            outs() << "  [Inductive] Property check at step " << propertyStep << "\n";
+            outs() << "  [Inductive] Query body: " << *queryBody << "\n";
+            outs() << "  [Inductive] Query substituted: " << *querySubst << "\n";
+          }
+        }
+        
+        Expr querySimpl = u.simplify(querySubst);
+        if (debug)
+          outs() << "  [Inductive] Query simplified: " << *querySimpl << "\n";
+        tribool queryResult = solver.isTrue(querySimpl);
+        
+        auto propEnd = high_resolution_clock::now();
+        propTime = duration_cast<microseconds>(propEnd - propStart).count();
+        
+        if (queryResult == true)
+        {
+          outs() << "  [Inductive] Property: PASS (f(N) reaches error state)\n";
+        }
+        else
+        {
+          outs() << "  [Inductive] Property: FAIL (f(N) does not reach error)\n";
+          result = false;
+        }
+      }
+
+      auto totalEnd = high_resolution_clock::now();
+      auto totalTime = duration_cast<microseconds>(totalEnd - totalStart).count();
+      
+      // Print timing stats
+      outs() << "  [Inductive Timing] Parse: " << (parseTime/1000.0) << "ms, "
+             << "Setup: " << (setupTime/1000.0) << "ms, "
+             << "Init: " << (initTime/1000.0) << "ms, "
+             << "Trans: " << (transTime/1000.0) << "ms, "
+             << "Prop: " << (propTime/1000.0) << "ms, "
+             << "Total: " << (totalTime/1000.0) << "ms\n";
+
+      // Final result
+      if (result == true)
+      {
+        outs() << "  [Inductive] CEX VALID: All 3 checks passed\n";
+      }
+      else
+      {
+        outs() << "  [Inductive] CEX INVALID: One or more checks failed\n";
+      }
+
+      return result;
     }
 
     void guessRandomTrace(vector<int> &trace)
@@ -366,13 +982,13 @@ namespace ufo
 
     // Efficiently build a single trace of given length (iterative, not recursive)
     // Returns true if a valid trace was found
-    bool getSingleTrace(Expr src, Expr dst, int len, vector<int> &trace)
+    bool getSingleTrace(Expr src, Expr dst, int64_t len, vector<int> &trace)
     {
       trace.clear();
-      trace.reserve(len);
+      trace.reserve(static_cast<size_t>(len));
       
       Expr current = src;
-      for (int step = 0; step < len; step++)
+      for (int64_t step = 0; step < len; step++)
       {
         bool found = false;
         Expr target = (step == len - 1) ? dst : Expr(nullptr);
@@ -487,10 +1103,10 @@ namespace ufo
       ExprVector bindVars2;
       bindVars.clear();
       ExprVector bindVars1 = ruleManager.chcs[trace[0]].srcVars;
-      int bindVar_index = 0;
-      int locVar_index = 0;
+      int64_t bindVar_index = 0;
+      int64_t locVar_index = 0;
 
-      for (int s = 0; s < trace.size(); s++)
+      for (size_t s = 0; s < trace.size(); s++)
       {
         auto &step = trace[s];
         bindVars2.clear();

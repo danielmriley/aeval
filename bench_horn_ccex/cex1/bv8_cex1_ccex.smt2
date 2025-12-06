@@ -7,8 +7,10 @@
 
 (assert 
   (forall ((i Int)) 
-    (=> (and (<= 0 i) (<= i 256)) 
+    (=> (and (<= 0 i) (<= i 255)) 
         (= (select trace i) (x_at_i i))
     )
   )
 )
+
+(check-sat)

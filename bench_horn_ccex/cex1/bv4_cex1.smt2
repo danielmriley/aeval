@@ -1,4 +1,4 @@
-;// filepath: /home/daniel/Projects/cex/examples/smt/rep/simple_01.smt2
+;// filepath: bv4_cex1.smt2
 ; (set-logic HORN)
 (declare-fun inv ((_ BitVec 4)) Bool)
 

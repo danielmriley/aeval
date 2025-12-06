@@ -952,7 +952,7 @@ namespace ufo
       }
       else if (isOpX<AND>(e))
       {
-        out << "(and ";
+        out << "(and\n ";
         ExprSet cnjs;
         getConj(e, cnjs);
         int i = 0;
@@ -960,13 +960,13 @@ namespace ufo
         {
           i++;
           print(c, out);
-          if (i != cnjs.size()) out << " ";
+          if (i != cnjs.size()) out << "\n ";
         }
         out << ")";
       }
       else if (isOpX<OR>(e))
       {
-        out << "(or ";
+        out << "(or\n ";
         ExprSet dsjs;
         getDisj(e, dsjs);
         int i = 0;
@@ -974,7 +974,7 @@ namespace ufo
         {
           i++;
           print(d, out);
-          if (i != dsjs.size()) out << " ";
+          if (i != dsjs.size()) out << "\n ";
         }
         out << ")";
       }
