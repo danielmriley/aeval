@@ -1,31 +1,35 @@
-; Zero-extend benchmark: 256-bit values, 512-bit counter
-; Trace length: 2^256 + 1 steps (0 to 2^256)
+; Zero-extend version of cex1: single variable x, property uses zero_extend
+; Equivalent to bv256_cex1.smt2 but with pure BV property (no bv2int)
+;
+; Original property: (not (< (+ 1 (bv2int x)) 2^256))
+; With zero_extend: NOT(bvult(bvadd(zext(x), 1), 2^256))
+;
+; Trace: x=0,1,2,...,2^256-1 (2^256 states)
 
 (set-logic HORN)
 
-(declare-fun inv ((_ BitVec 256) (_ BitVec 512)) Bool)
+(declare-fun inv ((_ BitVec 256)) Bool)
 
-; Initial state: x = 0, counter = 0
+; Initial state: x = 0
 (assert 
-  (inv #x0000000000000000000000000000000000000000000000000000000000000000 #x00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000)
+  (inv #x0000000000000000000000000000000000000000000000000000000000000000)
 )
 
-; Transition: x' = x + 1, counter' = counter + zero_extend(1)
+; Transition: x' = x + 1
 (assert 
-  (forall ((x (_ BitVec 256)) (counter (_ BitVec 512)) 
-           (x_next (_ BitVec 256)) (counter_next (_ BitVec 512)))
-    (=> (and (inv x counter)
-             (= x_next (bvadd x #x0000000000000000000000000000000000000000000000000000000000000001))
-             (= counter_next (bvadd counter ((_ zero_extend 256) #x0000000000000000000000000000000000000000000000000000000000000001))))
-        (inv x_next counter_next))
+  (forall ((x (_ BitVec 256)) (x_next (_ BitVec 256)))
+    (=> (and (inv x)
+             (= x_next (bvadd x #x0000000000000000000000000000000000000000000000000000000000000001)))
+        (inv x_next))
   )
 )
 
-; Property: counter < 2^k (should be violated after 2^k steps)
+; Property: zero_extend(x) + 1 < 2^256 (violated when x = 2^256-1)
 (assert 
-  (forall ((x (_ BitVec 256)) (counter (_ BitVec 512)))
-    (=> (inv x counter)
-        (bvult counter #x00000000000000000000000000000000000000000000000000000000000000010000000000000000000000000000000000000000000000000000000000000000))
+  (forall ((x (_ BitVec 256)))
+    (=> (and (inv x) 
+             (not (bvult (bvadd ((_ zero_extend 256) x) #x00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000001) #x00000000000000000000000000000000000000000000000000000000000000010000000000000000000000000000000000000000000000000000000000000000)))
+        false)
   )
 )
 

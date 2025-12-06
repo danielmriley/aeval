@@ -13,6 +13,17 @@ bool getBoolValue(const char * opt, bool defValue, int argc, char ** argv)
   return defValue;
 }
 
+// Get boolean with support for both --flag (true) and --no-flag (false) syntax
+bool getBoolValueWithNegation(const char * posOpt, const char * negOpt, bool defValue, int argc, char ** argv)
+{
+  for (int i = 1; i < argc; i++)
+  {
+    if (strcmp(argv[i], posOpt) == 0) return true;
+    if (strcmp(argv[i], negOpt) == 0) return false;
+  }
+  return defValue;
+}
+
 char * getStrValue(const char * opt, char * defValue, int argc, char ** argv)
 {
   for (int i = 1; i < argc-1; i++)
@@ -190,8 +201,10 @@ int main (int argc, char ** argv)
   bool skipSampling = getBoolValue("--skip-sampling", false, argc, argv);
   int debug = getIntValue(OPT_DEBUG, 0, argc, argv);
   string ccex = getStrValue("--ccex", "", argc, argv);
-  bool ccexInductive = !getBoolValue("--no-ccex-inductive", false, argc, argv);
-  bool ccexUnrolling = !getBoolValue("--no-ccex-unrolling", false, argc, argv);
+  // CCEX validation methods: inductive is default (handles large traces), unrolling is opt-in
+  // Supports both --use-ccex-inductive/--no-ccex-inductive and --use-ccex-unrolling/--no-ccex-unrolling
+  bool ccexInductive = getBoolValueWithNegation("--use-ccex-inductive", "--no-ccex-inductive", true, argc, argv);
+  bool ccexUnrolling = getBoolValueWithNegation("--use-ccex-unrolling", "--no-ccex-unrolling", false, argc, argv);
 
   if (d_m || d_p || d_d || d_s) do_disj = true;
   if (do_disj)

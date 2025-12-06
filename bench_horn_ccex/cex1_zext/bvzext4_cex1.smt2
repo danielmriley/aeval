@@ -1,31 +1,35 @@
-; Zero-extend benchmark: 4-bit values, 8-bit counter
-; Trace length: 17 steps (0 to 16)
+; Zero-extend version of cex1: single variable x, property uses zero_extend
+; Equivalent to bv4_cex1.smt2 but with pure BV property (no bv2int)
+;
+; Original property: (not (< (+ 1 (bv2int x)) 16))
+; With zero_extend: NOT(bvult(bvadd(zext(x), 1), 16))
+;
+; Trace: x=0,1,2,...,15 (16 states)
 
 (set-logic HORN)
 
-(declare-fun inv ((_ BitVec 4) (_ BitVec 8)) Bool)
+(declare-fun inv ((_ BitVec 4)) Bool)
 
-; Initial state: x = 0, counter = 0
+; Initial state: x = 0
 (assert 
-  (inv #x0 #x00)
+  (inv #x0)
 )
 
-; Transition: x' = x + 1, counter' = counter + zero_extend(1)
+; Transition: x' = x + 1
 (assert 
-  (forall ((x (_ BitVec 4)) (counter (_ BitVec 8)) 
-           (x_next (_ BitVec 4)) (counter_next (_ BitVec 8)))
-    (=> (and (inv x counter)
-             (= x_next (bvadd x #x1))
-             (= counter_next (bvadd counter ((_ zero_extend 4) #x1))))
-        (inv x_next counter_next))
+  (forall ((x (_ BitVec 4)) (x_next (_ BitVec 4)))
+    (=> (and (inv x)
+             (= x_next (bvadd x #x1)))
+        (inv x_next))
   )
 )
 
-; Property: counter < 2^k (should be violated after 2^k steps)
+; Property: zero_extend(x) + 1 < 16 (violated when x = 15)
 (assert 
-  (forall ((x (_ BitVec 4)) (counter (_ BitVec 8)))
-    (=> (inv x counter)
-        (bvult counter #x10))
+  (forall ((x (_ BitVec 4)))
+    (=> (and (inv x) 
+             (not (bvult (bvadd ((_ zero_extend 4) x) #x01) #x10)))
+        false)
   )
 )
 

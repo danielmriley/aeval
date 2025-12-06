@@ -386,13 +386,37 @@ namespace ufo
             auto it = cexData.traceValueFuncs.find(arr);
             if (it != cexData.traceValueFuncs.end())
             {
+              Expr indexVar = it->second.first;  // Get the actual index variable from CCEX
               Expr valueFunc = it->second.second;
               
-              // Replace bound variable 0 with the step index
-              Expr stepIdx = mkTerm<mpz_class>(step, m_efac);
-              Expr bvar0 = bind::bvar(0, mk<INT_TY>(m_efac));
-              Expr concreteValue = replaceAll(valueFunc, bvar0, stepIdx);
+              if (debug)
+              {
+                outs() << "  [Subst] Step " << step << ", var " << varIdx 
+                       << ": indexVar type = " << *bind::typeOf(indexVar)
+                       << ", valueFunc = " << *valueFunc << "\n";
+              }
               
+              // Create step index with matching type
+              Expr stepIdx;
+              Expr indexType = bind::typeOf(indexVar);
+              if (bv::is_bvsort(indexType))
+              {
+                unsigned width = bv::width(indexType);
+                stepIdx = bv::bvnum(mpz_class(step), width, m_efac);
+              }
+              else
+              {
+                stepIdx = mkTerm<mpz_class>(step, m_efac);
+              }
+              
+              Expr concreteValue = replaceAll(valueFunc, indexVar, stepIdx);
+              
+              if (debug)
+              {
+                outs() << "  [Subst] Replacing " << *indexVar << " with " << *stepIdx 
+                       << " -> " << *concreteValue << "\n";
+              }
+
               varToValue[bindVars[step][varIdx]] = concreteValue;
             }
           }
@@ -453,8 +477,11 @@ namespace ufo
       }
       
       // Calculate trace length from bounds
-      int64_t len64 = cexData.traceEnd - cexData.traceStart + 1;
-      if (len64 <= 0)
+      // Trace structure: 1 init + N transitions + 1 query = N + 2 CHCs
+      // To reach state traceEnd from state traceStart, we need (traceEnd - traceStart) transitions
+      // Total CHCs = 1 (init) + (traceEnd - traceStart) (transitions) + 1 (query) = traceEnd - traceStart + 2
+      int64_t len64 = cexData.traceEnd - cexData.traceStart + 2;
+      if (len64 <= 1)
       {
         outs() << "  ERROR: Invalid trace bounds (start=" << cexData.traceStart 
                << ", end=" << cexData.traceEnd << ")\n";

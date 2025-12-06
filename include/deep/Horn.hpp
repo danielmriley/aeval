@@ -2,6 +2,7 @@
 #define HORN__HPP__
 
 #include <fstream>
+#include <chrono>
 #include "ae/AeValSolver.hpp"
 #include "ae/ExprSimplBv.hpp"
 
@@ -326,11 +327,20 @@ namespace ufo
 
     bool parse(string smt, bool doElim = true, bool doArithm = true)
     {
+      using namespace std::chrono;
+      auto totalParseStart = high_resolution_clock::now();
+      
       if (debug > 0) outs () << "\nPARSING" << "\n=======\n";
       std::unique_ptr<ufo::ZFixedPoint <EZ3> > m_fp;
       m_fp.reset (new ZFixedPoint<EZ3> (m_z3));
       ZFixedPoint<EZ3> &fp = *m_fp;
+      
+      auto loadStart = high_resolution_clock::now();
       fp.loadFPfromFile(smt);
+      auto loadEnd = high_resolution_clock::now();
+      auto loadTime = duration_cast<milliseconds>(loadEnd - loadStart).count();
+      
+      auto processStart = high_resolution_clock::now();
       chcs.reserve(fp.m_rules.size());
 
       ExprMap eqs;
@@ -377,7 +387,10 @@ namespace ufo
           hr.body = r;
         }
       }
+      auto processEnd = high_resolution_clock::now();
+      auto processTime = duration_cast<milliseconds>(processEnd - processStart).count();
 
+      auto setupStart = high_resolution_clock::now();
       for (auto & hr : chcs)
       {
         Expr head = hr.body->right();
@@ -402,6 +415,8 @@ namespace ufo
         }
         hasBV |= containsOp<BVSORT>(hr.body);
       }
+      auto setupEnd = high_resolution_clock::now();
+      auto setupTime = duration_cast<milliseconds>(setupEnd - setupStart).count();
 
       if (debug > 0) outs () << "Reserved space for " << chcs.size()
                           << " CHCs and " << decls.size() << " declarations\n";
@@ -409,6 +424,7 @@ namespace ufo
       // the second loop is needed because we want to distinguish
       // uninterpreted functions used as variables
       // from relations to be synthesized
+      auto elimStart = high_resolution_clock::now();
       for (auto it = chcs.begin(); it != chcs.end(); )
       {
         // ExprVector origSrcSymbs, origDstSymbs;
@@ -444,8 +460,19 @@ namespace ufo
           hr.shrinkLocVars();
         }
         else
-          hr.body = conjoin(hr.lin, m_efac);
+        {
+          // Lightweight mode: skip expensive solver-based simplification
+          // but still do essential rewriting
+          hr.body = eliminateQuantifiers(conjoin(hr.lin, m_efac), hr.locVars,
+                                                 false, false);  // No arithm, no core QE
+          hr.body = u.removeITE(hr.body);
+          // Skip removeRedundantConjuncts - it's the expensive part
+        }
       }
+      auto elimEnd = high_resolution_clock::now();
+      auto elimTime = duration_cast<milliseconds>(elimEnd - elimStart).count();
+      
+      auto declElimStart = high_resolution_clock::now();
       if (doElim)
       {
         int sz = chcs.size();
@@ -493,14 +520,30 @@ namespace ufo
 
       for (int i = 0; i < chcs.size(); i++)
         outgs[chcs[i].srcRelation].push_back(i);
+      auto declElimEnd = high_resolution_clock::now();
+      auto declElimTime = duration_cast<milliseconds>(declElimEnd - declElimStart).count();
 
+      auto cycleStart = high_resolution_clock::now();
       findCycles();
+      auto cycleEnd = high_resolution_clock::now();
+      auto cycleTime = duration_cast<milliseconds>(cycleEnd - cycleStart).count();
 
       // prepare a version of wtoCHCs w/o queries
       dwtoCHCs = wtoCHCs;
       for (auto it = dwtoCHCs.begin(); it != dwtoCHCs.end();)
         if ((*it)->isQuery) it = dwtoCHCs.erase(it);
           else ++it;
+
+      auto totalParseEnd = high_resolution_clock::now();
+      auto totalParseTime = duration_cast<milliseconds>(totalParseEnd - totalParseStart).count();
+      
+      outs() << "[Parse Timing] Load: " << loadTime << "ms, "
+             << "Process: " << processTime << "ms, "
+             << "Setup: " << setupTime << "ms, "
+             << "Elim: " << elimTime << "ms, "
+             << "DeclElim: " << declElimTime << "ms, "
+             << "Cycles: " << cycleTime << "ms, "
+             << "Total: " << totalParseTime << "ms\n";
 
       if (debug >= 1)
       {

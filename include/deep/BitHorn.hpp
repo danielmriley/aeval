@@ -2347,6 +2347,14 @@ namespace ufo
     ExprFactory efac;
     EZ3 z3(efac);
 
+    // For CEX-only validation, skip expensive elimination passes
+    bool do_ccex = ccex != "";
+    bool skipElimForCcex = do_ccex && ccexInductive && !ccexUnrolling;
+    if (skipElimForCcex)
+    {
+      doElim = false;  // Skip elimination for inductive CEX validation
+    }
+
     auto parseStart = high_resolution_clock::now();
     CHCs ruleManager(efac, z3, debug);
     if (!ruleManager.parse(smt, doElim, doArithm))
@@ -2362,8 +2370,6 @@ namespace ufo
       outs() << "Input is not in BV format\n";
       return 1;
     }
-
-    bool do_ccex = ccex != "";
 
     if (do_ccex)
     {

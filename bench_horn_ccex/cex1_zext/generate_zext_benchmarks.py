@@ -1,15 +1,24 @@
 #!/usr/bin/env python3
 """
 Generate zero-extend benchmarks for various bit widths.
-These benchmarks use a counter with 2x the bit width to avoid int2bv issues.
+These are equivalent to cex1 benchmarks but with pure BV property (no bv2int).
+
+CHC structure: Single variable x (k bits)
+- Init: x = 0
+- Trans: x' = x + 1
+- Property: zero_extend(x) + 1 < 2^k (violated when x = 2^k - 1)
+
+CCEX structure: 
+- Index is 2k-bit BV (replaces Int index from original)
+- Value function: x_at_i(i) = extract(i) (lower k bits)
+- Bounds: 0 to 2^k - 1
 """
 
 import os
 
 def generate_chc(k):
     """Generate CHC file for k-bit zero-extend benchmark."""
-    counter_bits = 2 * k
-    max_val = 2**k  # Counter reaches this value when overflow would occur
+    index_bits = 2 * k  # Index type is 2x width for overflow-free counting
     
     # Format hex values appropriately
     def hex_val(val, bits):
@@ -18,44 +27,51 @@ def generate_chc(k):
     
     x_zero = hex_val(0, k)
     x_one = hex_val(1, k)
-    counter_zero = hex_val(0, counter_bits)
-    counter_one = hex_val(1, k)  # For zero_extend source
-    counter_max = hex_val(max_val, counter_bits)
+    ext_one = hex_val(1, index_bits)
+    ext_max = hex_val(2**k, index_bits)  # 2^k in hex
     
-    # For comments, use 2^k notation for large values
-    if k <= 64:
-        trace_len_str = f"{max_val + 1} steps (0 to {max_val})"
+    # Use 2^k notation for comments on large values
+    if k <= 16:
+        overflow_str = str(2**k)
+        max_steps_str = str(2**k - 1)
+        states_str = str(2**k)
     else:
-        trace_len_str = f"2^{k} + 1 steps (0 to 2^{k})"
+        overflow_str = f"2^{k}"
+        max_steps_str = f"2^{k}-1"
+        states_str = f"2^{k}"
     
-    return f"""; Zero-extend benchmark: {k}-bit values, {counter_bits}-bit counter
-; Trace length: {trace_len_str}
+    return f"""; Zero-extend version of cex1: single variable x, property uses zero_extend
+; Equivalent to bv{k}_cex1.smt2 but with pure BV property (no bv2int)
+;
+; Original property: (not (< (+ 1 (bv2int x)) {overflow_str}))
+; With zero_extend: NOT(bvult(bvadd(zext(x), 1), {overflow_str}))
+;
+; Trace: x=0,1,2,...,{max_steps_str} ({states_str} states)
 
 (set-logic HORN)
 
-(declare-fun inv ((_ BitVec {k}) (_ BitVec {counter_bits})) Bool)
+(declare-fun inv ((_ BitVec {k})) Bool)
 
-; Initial state: x = 0, counter = 0
+; Initial state: x = 0
 (assert 
-  (inv {x_zero} {counter_zero})
+  (inv {x_zero})
 )
 
-; Transition: x' = x + 1, counter' = counter + zero_extend(1)
+; Transition: x' = x + 1
 (assert 
-  (forall ((x (_ BitVec {k})) (counter (_ BitVec {counter_bits})) 
-           (x_next (_ BitVec {k})) (counter_next (_ BitVec {counter_bits})))
-    (=> (and (inv x counter)
-             (= x_next (bvadd x {x_one}))
-             (= counter_next (bvadd counter ((_ zero_extend {k}) {counter_one}))))
-        (inv x_next counter_next))
+  (forall ((x (_ BitVec {k})) (x_next (_ BitVec {k})))
+    (=> (and (inv x)
+             (= x_next (bvadd x {x_one})))
+        (inv x_next))
   )
 )
 
-; Property: counter < 2^k (should be violated after 2^k steps)
+; Property: zero_extend(x) + 1 < {overflow_str} (violated when x = {max_steps_str})
 (assert 
-  (forall ((x (_ BitVec {k})) (counter (_ BitVec {counter_bits})))
-    (=> (inv x counter)
-        (bvult counter {counter_max}))
+  (forall ((x (_ BitVec {k})))
+    (=> (and (inv x) 
+             (not (bvult (bvadd ((_ zero_extend {k}) x) {ext_one}) {ext_max})))
+        false)
   )
 )
 
@@ -64,45 +80,40 @@ def generate_chc(k):
 
 def generate_ccex(k):
     """Generate CCEX file for k-bit zero-extend benchmark."""
-    counter_bits = 2 * k
-    max_val = 2**k
+    index_bits = 2 * k
     
     # Format hex values
     def hex_val(val, bits):
         hex_digits = (bits + 3) // 4
         return f"#x{val:0{hex_digits}x}"
     
-    counter_zero = hex_val(0, counter_bits)
-    counter_max = hex_val(max_val, counter_bits)
+    idx_zero = hex_val(0, index_bits)
+    idx_max = hex_val(2**k - 1, index_bits)  # 2^k - 1 in hex
     
     # For comments, use 2^k notation for large values
-    if k <= 64:
-        bounds_str = f"0 to {max_val}"
+    if k <= 16:
+        bounds_str = f"0 to {2**k - 1} ({2**k} states)"
     else:
-        bounds_str = f"0 to 2^{k}"
+        bounds_str = f"0 to 2^{k}-1 (2^{k} states)"
     
     return f"""; Compact CEX for {k}-bit zero-extend benchmark
-; Value functions:
-;   x at step i = extract lower {k} bits from {counter_bits}-bit index
-;   counter at step i = i (the index itself)
+; Single variable x, BV index (replaces Int index from original)
+;
+; Value function: x at step i = extract(i) (lower {k} bits of {index_bits}-bit index)
+; This is the BV equivalent of int2bv(i)
+;
 ; Trace bounds: {bounds_str}
 
-(define-fun x_at_i ((i (_ BitVec {counter_bits}))) (_ BitVec {k})
+(define-fun x_at_i ((i (_ BitVec {index_bits}))) (_ BitVec {k})
   ((_ extract {k-1} 0) i)
 )
 
-(define-fun counter_at_i ((i (_ BitVec {counter_bits}))) (_ BitVec {counter_bits})
-  i
-)
-
-(declare-const trace_x (Array (_ BitVec {counter_bits}) (_ BitVec {k})))
-(declare-const trace_counter (Array (_ BitVec {counter_bits}) (_ BitVec {counter_bits})))
+(declare-const trace (Array (_ BitVec {index_bits}) (_ BitVec {k})))
 
 (assert 
-  (forall ((i (_ BitVec {counter_bits}))) 
-    (=> (and (bvule {counter_zero} i) (bvule i {counter_max})) 
-        (and (= (select trace_x i) (x_at_i i))
-             (= (select trace_counter i) (counter_at_i i)))
+  (forall ((i (_ BitVec {index_bits}))) 
+    (=> (and (bvule {idx_zero} i) (bvule i {idx_max})) 
+        (= (select trace i) (x_at_i i))
     )
   )
 )

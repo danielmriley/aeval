@@ -23,9 +23,11 @@ def run_test_method(bitwidth, method):
         return None, "FILES_MISSING"
     
     if method == "inductive":
-        cmd = [FREQHORN, "--bv", "--ccex", ccex_file, "--no-ccex-unrolling", chc_file]
+        # Inductive only: default is inductive, disable unrolling (which is already off by default)
+        cmd = [FREQHORN, "--bv", "--ccex", ccex_file, chc_file]
     else:  # unrolling
-        cmd = [FREQHORN, "--bv", "--ccex", ccex_file, "--no-ccex-inductive", chc_file]
+        # Unrolling only: enable unrolling, disable inductive
+        cmd = [FREQHORN, "--bv", "--ccex", ccex_file, "--use-ccex-unrolling", "--no-ccex-inductive", chc_file]
     
     start_time = time.time()
     try:

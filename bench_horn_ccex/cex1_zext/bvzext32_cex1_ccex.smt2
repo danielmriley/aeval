@@ -1,25 +1,21 @@
 ; Compact CEX for 32-bit zero-extend benchmark
-; Value functions:
-;   x at step i = extract lower 32 bits from 64-bit index
-;   counter at step i = i (the index itself)
-; Trace bounds: 0 to 4294967296
+; Single variable x, BV index (replaces Int index from original)
+;
+; Value function: x at step i = extract(i) (lower 32 bits of 64-bit index)
+; This is the BV equivalent of int2bv(i)
+;
+; Trace bounds: 0 to 2^32-1 (2^32 states)
 
 (define-fun x_at_i ((i (_ BitVec 64))) (_ BitVec 32)
   ((_ extract 31 0) i)
 )
 
-(define-fun counter_at_i ((i (_ BitVec 64))) (_ BitVec 64)
-  i
-)
-
-(declare-const trace_x (Array (_ BitVec 64) (_ BitVec 32)))
-(declare-const trace_counter (Array (_ BitVec 64) (_ BitVec 64)))
+(declare-const trace (Array (_ BitVec 64) (_ BitVec 32)))
 
 (assert 
   (forall ((i (_ BitVec 64))) 
-    (=> (and (bvule #x0000000000000000 i) (bvule i #x0000000100000000)) 
-        (and (= (select trace_x i) (x_at_i i))
-             (= (select trace_counter i) (counter_at_i i)))
+    (=> (and (bvule #x0000000000000000 i) (bvule i #x00000000ffffffff)) 
+        (= (select trace i) (x_at_i i))
     )
   )
 )
