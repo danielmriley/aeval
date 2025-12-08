@@ -801,9 +801,22 @@ namespace ufo
           iVar = bv::bvConst(mkTerm<string>("_cex_i", m_efac), bvWidth);
           iPlusOne = bv::bvadd(iVar, bv::bvnum(mpz_class(1), bvWidth, m_efac));
           // bounds: 0 <= i <= traceEnd - 1 (as bitvectors)
+          // Use expression bounds when available (for values exceeding int64)
+          Expr startBound = cexData.traceStartExpr ? cexData.traceStartExpr 
+                            : bv::bvnum(mpz_class(cexData.traceStart), bvWidth, m_efac);
+          Expr endBound;
+          if (cexData.traceEndExpr)
+          {
+            // traceEnd - 1 for the transition check (we check i and i+1)
+            endBound = bv::bvsub(cexData.traceEndExpr, bv::bvnum(mpz_class(1), bvWidth, m_efac));
+          }
+          else
+          {
+            endBound = bv::bvnum(mpz_class(cexData.traceEnd - 1), bvWidth, m_efac);
+          }
           boundsExpr = mk<AND>(
-            bv::bvuge(iVar, bv::bvnum(mpz_class(cexData.traceStart), bvWidth, m_efac)),
-            bv::bvule(iVar, bv::bvnum(mpz_class(cexData.traceEnd - 1), bvWidth, m_efac))
+            bv::bvuge(iVar, startBound),
+            bv::bvule(iVar, endBound)
           );
         }
         else

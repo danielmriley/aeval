@@ -1,0 +1,42 @@
+; SAFE zero-extend version of cex3: three variables x, y, z all increment by 1
+; The transition only fires when ALL next states satisfy the property
+; This means the property is ALWAYS satisfied (no CEX exists)
+
+(set-logic HORN)
+
+(declare-fun inv ((_ BitVec 128) (_ BitVec 128) (_ BitVec 128)) Bool)
+
+; Initial state: x = 0, y = 0, z = 0
+(assert 
+  (forall ((x (_ BitVec 128)) (y (_ BitVec 128)) (z (_ BitVec 128)))
+    (=> (and (= x #x00000000000000000000000000000000) (= y #x00000000000000000000000000000000) (= z #x00000000000000000000000000000000)) (inv x y z))
+  )
+)
+
+; Transition: all increment by 1, ONLY when all next states satisfy property
+(assert 
+  (forall ((x (_ BitVec 128)) (y (_ BitVec 128)) (z (_ BitVec 128))
+           (x_next (_ BitVec 128)) (y_next (_ BitVec 128)) (z_next (_ BitVec 128)))
+    (=> (and (inv x y z)
+             (bvult (bvadd ((_ zero_extend 128) x) #x0000000000000000000000000000000000000000000000000000000000000002) #x0000000000000000000000000000000100000000000000000000000000000000)
+             (bvult (bvadd ((_ zero_extend 128) y) #x0000000000000000000000000000000000000000000000000000000000000002) #x0000000000000000000000000000000100000000000000000000000000000000)
+             (bvult (bvadd ((_ zero_extend 128) z) #x0000000000000000000000000000000000000000000000000000000000000002) #x0000000000000000000000000000000100000000000000000000000000000000)
+             (= x_next (bvadd x #x00000000000000000000000000000001))
+             (= y_next (bvadd y #x00000000000000000000000000000001))
+             (= z_next (bvadd z #x00000000000000000000000000000001)))
+        (inv x_next y_next z_next))
+  )
+)
+
+; Property: all three must satisfy zext(v)+1 < 2^128
+(assert 
+  (forall ((x (_ BitVec 128)) (y (_ BitVec 128)) (z (_ BitVec 128)))
+    (=> (and (inv x y z) 
+             (not (and (bvult (bvadd ((_ zero_extend 128) x) #x0000000000000000000000000000000000000000000000000000000000000001) #x0000000000000000000000000000000100000000000000000000000000000000)
+                       (bvult (bvadd ((_ zero_extend 128) y) #x0000000000000000000000000000000000000000000000000000000000000001) #x0000000000000000000000000000000100000000000000000000000000000000)
+                       (bvult (bvadd ((_ zero_extend 128) z) #x0000000000000000000000000000000000000000000000000000000000000001) #x0000000000000000000000000000000100000000000000000000000000000000))))
+        false)
+  )
+)
+
+(check-sat)
