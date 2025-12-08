@@ -1,0 +1,39 @@
+; Zero-extend version of cex3: three variables x, y, z all increment by 1
+; Property: zext(x)+1 < 2^64 AND zext(y)+1 < 2^64 AND zext(z)+1 < 2^64
+; Trace: 0 to 2^64-1
+
+(set-logic HORN)
+
+(declare-fun inv ((_ BitVec 64) (_ BitVec 64) (_ BitVec 64)) Bool)
+
+; Initial state: x = 0, y = 0, z = 0
+(assert 
+  (forall ((x (_ BitVec 64)) (y (_ BitVec 64)) (z (_ BitVec 64)))
+    (=> (and (= x #x0000000000000000) (= y #x0000000000000000) (= z #x0000000000000000)) (inv x y z))
+  )
+)
+
+; Transition: x' = x + 1, y' = y + 1, z' = z + 1
+(assert 
+  (forall ((x (_ BitVec 64)) (y (_ BitVec 64)) (z (_ BitVec 64))
+           (x_next (_ BitVec 64)) (y_next (_ BitVec 64)) (z_next (_ BitVec 64)))
+    (=> (and (inv x y z)
+             (= x_next (bvadd x #x0000000000000001))
+             (= y_next (bvadd y #x0000000000000001))
+             (= z_next (bvadd z #x0000000000000001)))
+        (inv x_next y_next z_next))
+  )
+)
+
+; Property: all three must satisfy zext(v)+1 < 2^64
+(assert 
+  (forall ((x (_ BitVec 64)) (y (_ BitVec 64)) (z (_ BitVec 64)))
+    (=> (and (inv x y z) 
+             (not (and (bvult (bvadd ((_ zero_extend 64) x) #x00000000000000000000000000000001) #x00000000000000010000000000000000)
+                       (bvult (bvadd ((_ zero_extend 64) y) #x00000000000000000000000000000001) #x00000000000000010000000000000000)
+                       (bvult (bvadd ((_ zero_extend 64) z) #x00000000000000000000000000000001) #x00000000000000010000000000000000))))
+        false)
+  )
+)
+
+(check-sat)
