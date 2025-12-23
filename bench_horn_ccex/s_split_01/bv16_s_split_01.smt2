@@ -7,16 +7,16 @@
 
 (declare-rel fail ())
 
-(rule (=> (and (= x0 (_ bv0 16)) (= y0 (_ bv5000 16)))
+(rule (=> (and (= x0 #x0000) (= y0 #x1388))
     (inv x0 y0)))
 
 (rule (=> (and
         (inv x0 y0)
-        (= x1 (bvadd x0 (_ bv1 16)))
-        (= y1 (ite (bvuge x0 (_ bv5000 16)) (bvadd y0 (_ bv1 16)) y0)))
+        (= x1 (bvadd x0 #x0001))
+        (= y1 (ite (bvuge x0 #x1388) (bvadd y0 #x0001) y0)))
     (inv x1 y1)))
 
-(rule (=> (and (inv x0 y0) (= x0 (_ bv10000 16))
+(rule (=> (and (inv x0 y0) (= x0 #x2710)
     (= y0 x0)) fail))
 
 (query fail)

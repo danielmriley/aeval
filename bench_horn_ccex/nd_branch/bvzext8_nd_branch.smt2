@@ -16,8 +16,8 @@
 (assert 
   (forall ((x (_ BitVec 8)) (x_next (_ BitVec 8)))
     (=> (and (inv x)
-             (or (and (= ((_ extract 0 0) x) (_ bv0 1)) (= x_next (bvadd x #x01)))
-                 (and (= ((_ extract 0 0) x) (_ bv1 1)) (= x_next (bvadd x #x02)))))
+             (or (and (= ((_ extract 0 0) x) #b0) (= x_next (bvadd x #x01)))
+                 (and (= ((_ extract 0 0) x) #b1) (= x_next (bvadd x #x02)))))
         (inv x_next))
   )
 )

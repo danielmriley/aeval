@@ -5,8 +5,8 @@
 
 (define-fun x_at_i ((i (_ BitVec 16))) (_ BitVec 8)
   (ite (= i #x0000)
-    (_ bv0 8)
-    (bvsub (bvshl ((_ extract 7 0) i) (_ bv1 8)) (_ bv1 8))
+    #x00
+    (bvsub (bvshl ((_ extract 7 0) i) #x01) #x01)
   )
 )
 

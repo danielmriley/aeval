@@ -9,6 +9,8 @@
 #include <algorithm>
 #include <limits>
 #include <chrono>
+#include <sstream>
+#include <cctype>
 
 using namespace std;
 using namespace boost;
@@ -456,6 +458,242 @@ namespace ufo
       return isOpX<TRUE>(simpl);
     }
 
+    // Helper to truncate large numeric constants in output
+    string truncateLargeConsts(string s)
+    {
+      string res = "";
+      int digitCount = 0;
+      int startDigit = -1;
+      
+      for (size_t i = 0; i < s.length(); i++)
+      {
+        if (isdigit(s[i]))
+        {
+          if (digitCount == 0) startDigit = i;
+          digitCount++;
+        }
+        else
+        {
+          if (digitCount > 50)
+          {
+            res += s.substr(startDigit, 10) + "..." + s.substr(i-10, 10);
+          }
+          else if (digitCount > 0)
+          {
+            res += s.substr(startDigit, digitCount);
+          }
+          
+          res += s[i];
+          digitCount = 0;
+        }
+      }
+      if (digitCount > 50)
+      {
+        res += s.substr(startDigit, 10) + "..." + s.substr(s.length()-10, 10);
+      }
+      else if (digitCount > 0)
+      {
+        res += s.substr(startDigit, digitCount);
+      }
+      return res;
+    }
+
+    // Identify which variables caused validation failure
+    void reportValidCEXVariables(Expr body, ExprMap &subst, const ExprVector &vars, string stepName)
+    {
+      outs() << "  [Error State Variable Report]\n";
+      
+      // Decompose body into conjuncts
+      ExprVector conjuncts;
+      if (isOpX<AND>(body))
+      {
+        for (auto it = body->args_begin(); it != body->args_end(); ++it)
+           conjuncts.push_back(*it);
+      }
+      else
+      {
+        conjuncts.push_back(body);
+      }
+      
+      for (auto &conj : conjuncts)
+      {
+        // Skip trivial equalities (e.g. x = x)
+        if (isOpX<EQ>(conj) && conj->left() == conj->right())
+          continue;
+
+        // Handle disjunctions: only report variables in satisfied disjuncts
+        if (isOpX<OR>(conj))
+        {
+           bool handled = false;
+           for (auto it = conj->args_begin(); it != conj->args_end(); ++it)
+           {
+              Expr disjunct = *it;
+              Expr val = replaceAll(disjunct, subst);
+              Expr simplified = u.simplify(val);
+              
+              if (isOpX<TRUE>(simplified))
+              {
+                 stringstream ss;
+                 ss << *disjunct;
+                 outs() << "    Constraint (satisfied disjunct): " << truncateLargeConsts(ss.str()) << "\n";
+                 
+                 bool foundVar = false;
+                 for (auto &v : vars)
+                 {
+                    if (contains(disjunct, v))
+                    {
+                       Expr vVal = subst[v];
+                       if (!vVal) vVal = mk<TRUE>(m_efac);
+                       stringstream ssVal;
+                       ssVal << *vVal;
+                       outs() << "      -> Variable: " << *v << " = " << truncateLargeConsts(ssVal.str()) << "\n";
+                       foundVar = true;
+                    }
+                 }
+                 if (!foundVar)
+                 {
+                    outs() << "      -> No tracked variable found in disjunct\n";
+                 }
+                 handled = true;
+              }
+           }
+           if (handled) continue;
+        }
+
+        // For a valid CEX, the conjunct is TRUE.
+        // We want to show the constraint and the variables involved.
+        stringstream ss;
+        ss << *conj;
+        outs() << "    Constraint: " << truncateLargeConsts(ss.str()) << "\n";
+        
+        bool found = false;
+        for (auto &v : vars)
+        {
+          if (contains(conj, v))
+          {
+            // Evaluate the variable to show its value
+            Expr val = subst[v];
+            if (!val) val = mk<TRUE>(m_efac); // Should not happen if subst is complete
+            
+            stringstream ssVal;
+            ssVal << *val;
+            outs() << "      -> Variable: " << *v << " = " << truncateLargeConsts(ssVal.str()) << "\n";
+            found = true;
+          }
+        }
+        if (!found)
+        {
+           outs() << "      -> No tracked variable found in constraint\n";
+        }
+      }
+      outs() << "  [End Report]\n";
+    }
+
+    void identifyFailingVariables(const ExprVector &ssa, ExprMap &varToValue)
+    {
+      outs() << "\n  [Detailed Validation Report]\n";
+      SMTUtils u(m_efac);
+      
+      for (size_t i = 0; i < ssa.size(); ++i)
+      {
+        Expr formula = ssa[i];
+        Expr subst = replaceAll(formula, varToValue);
+        Expr simpl = u.simplify(subst);
+        
+        if (isOpX<FALSE>(simpl))
+        {
+          outs() << "  Step " << i << " failed validation.\n";
+          
+          // Decompose formula into conjuncts
+          ExprVector conjuncts;
+          if (isOpX<AND>(formula))
+          {
+            for (auto it = formula->args_begin(); it != formula->args_end(); ++it)
+               conjuncts.push_back(*it);
+          }
+          else
+          {
+            conjuncts.push_back(formula);
+          }
+          
+          for (auto &conj : conjuncts)
+          {
+            Expr s = replaceAll(conj, varToValue);
+            if (isOpX<FALSE>(u.simplify(s)))
+            {
+              outs() << "    Failing constraint: " << *conj << "\n";
+              
+              // Identify involved variables from bindVars[i]
+              if (i < bindVars.size())
+              {
+                bool found = false;
+                for (auto &v : bindVars[i])
+                {
+                  if (contains(conj, v))
+                  {
+                    outs() << "    -> Potentially incorrect variable: " << *v << "\n";
+                    found = true;
+                  }
+                }
+                if (!found)
+                {
+                   outs() << "    -> No destination variable found in constraint (guard violation?)\n";
+                }
+              }
+            }
+          }
+        }
+      }
+      outs() << "  [End Report]\n\n";
+    }
+
+    void reportInductiveFailure(Expr body, ExprMap &subst, const ExprVector &vars, string stepName)
+    {
+      outs() << "  [Detailed " << stepName << " Report]\n";
+      SMTUtils u(m_efac);
+      
+      // Decompose body into conjuncts
+      ExprVector conjuncts;
+      if (isOpX<AND>(body))
+      {
+        for (auto it = body->args_begin(); it != body->args_end(); ++it)
+           conjuncts.push_back(*it);
+      }
+      else
+      {
+        conjuncts.push_back(body);
+      }
+      
+      for (auto &conj : conjuncts)
+      {
+        // Skip trivial equalities (e.g. x = x)
+        if (isOpX<EQ>(conj) && conj->left() == conj->right())
+          continue;
+
+        Expr s = replaceAll(conj, subst);
+        // Simplify to check if this conjunct fails
+        if (isOpX<FALSE>(u.simplify(s)))
+        {
+          outs() << "    Failing constraint: " << *conj << "\n";
+          
+          bool found = false;
+          for (auto &v : vars)
+          {
+            if (contains(conj, v))
+            {
+              outs() << "    -> Potentially incorrect variable: " << *v << "\n";
+              found = true;
+            }
+          }
+          if (!found)
+          {
+             outs() << "    -> No tracked variable found in constraint\n";
+          }
+        }
+      }
+      outs() << "  [End Report]\n";
+    }
+
     tribool validateCEX(ExprVector ccex, Expr src, Expr dst)
     {
       using namespace std::chrono;
@@ -559,10 +797,22 @@ namespace ufo
       if (traceResult == true)
       {
         outs() << "  CEX VALID: Substituted trace is TRUE\n";
+        
+        // Report for the last step (Query)
+        if (!ssa.empty() && !bindVars.empty())
+        {
+           // The last SSA formula corresponds to the query
+           Expr queryBody = ssa.back();
+           // The variables in the last step
+           ExprVector &queryVars = bindVars.back();
+           
+           reportValidCEXVariables(queryBody, varToValue, queryVars, "Unrolled Property");
+        }
       }
       else if (traceResult == false)
       {
         outs() << "  CEX INVALID: Substituted trace is FALSE\n";
+        identifyFailingVariables(ssa, varToValue);
       }
       else
       {
@@ -600,6 +850,13 @@ namespace ufo
       ExprVector traceArrays;
       for (auto &kv : cexData.traceValueFuncs)
         traceArrays.push_back(kv.first);
+
+      if(debug)
+      {
+        outs() << "  [Inductive] Trace arrays:\n";
+        for (auto &arr : traceArrays)
+          outs() << "    " << *arr << "\n";
+      }
 
       // Find the Init, Transition, and Property (Query) CHCs
       HornRuleExt* initCHC = nullptr;
@@ -688,9 +945,8 @@ namespace ufo
         return false;
       };
 
-      // Helper to substitute value functions into an expression
-      // Given vars and step index, replace each var with f(step)
-      auto substituteStep = [&](Expr expr, const ExprVector &vars, int64_t step) -> Expr {
+      // Helper to build substitution map for a given step (int)
+      auto buildStepSubstInt = [&](const ExprVector &vars, int64_t step) -> ExprMap {
         ExprMap subst;
         int varIdx = 0;
         for (auto &arr : traceArrays)
@@ -700,28 +956,20 @@ namespace ufo
             auto it = cexData.traceValueFuncs.find(arr);
             if (it != cexData.traceValueFuncs.end())
             {
-              Expr indexVar = it->second.first;  // The actual index variable from CCEX
+              Expr indexVar = it->second.first;
               Expr valueFunc = it->second.second;
               Expr stepIdx = makeStepIndex(step, indexVar);
-              if (debug)
-              {
-                outs() << "    substituteStep: indexVar=" << *indexVar 
-                       << ", valueFunc=" << *valueFunc
-                       << ", stepIdx=" << *stepIdx << "\n";
-              }
               Expr concreteValue = replaceAll(valueFunc, indexVar, stepIdx);
-              if (debug)
-                outs() << "    substituteStep: concreteValue=" << *concreteValue << "\n";
               subst[vars[varIdx]] = concreteValue;
             }
           }
           varIdx++;
         }
-        return replaceAll(expr, subst);
+        return subst;
       };
 
-      // Version that takes an expression for the step (for large bitvector bounds)
-      auto substituteStepExpr = [&](Expr expr, const ExprVector &vars, Expr stepExpr) -> Expr {
+      // Helper to build substitution map for a given step (Expr)
+      auto buildStepSubstExpr = [&](const ExprVector &vars, Expr stepExpr) -> ExprMap {
         ExprMap subst;
         int varIdx = 0;
         for (auto &arr : traceArrays)
@@ -731,7 +979,7 @@ namespace ufo
             auto it = cexData.traceValueFuncs.find(arr);
             if (it != cexData.traceValueFuncs.end())
             {
-              Expr indexVar = it->second.first;  // The actual index variable from CCEX
+              Expr indexVar = it->second.first;
               Expr valueFunc = it->second.second;
               Expr concreteValue = replaceAll(valueFunc, indexVar, stepExpr);
               subst[vars[varIdx]] = concreteValue;
@@ -739,6 +987,19 @@ namespace ufo
           }
           varIdx++;
         }
+        return subst;
+      };
+
+      // Helper to substitute value functions into an expression
+      // Given vars and step index, replace each var with f(step)
+      auto substituteStep = [&](Expr expr, const ExprVector &vars, int64_t step) -> Expr {
+        ExprMap subst = buildStepSubstInt(vars, step);
+        return replaceAll(expr, subst);
+      };
+
+      // Version that takes an expression for the step (for large bitvector bounds)
+      auto substituteStepExpr = [&](Expr expr, const ExprVector &vars, Expr stepExpr) -> Expr {
+        ExprMap subst = buildStepSubstExpr(vars, stepExpr);
         return replaceAll(expr, subst);
       };
 
@@ -760,7 +1021,7 @@ namespace ufo
           outs() << "  [Inductive] Init check: " << *initSubst << "\n";
         
         Expr initSimpl = u.simplify(initSubst);
-        tribool initResult = solver.isTrue(initSimpl);
+        tribool initResult = solver.isSat(initSimpl);
         
         auto initEnd = high_resolution_clock::now();
         initTime = duration_cast<microseconds>(initEnd - initStart).count();
@@ -772,6 +1033,8 @@ namespace ufo
         else
         {
           outs() << "  [Inductive] Init: FAIL (f(0) does not satisfy init)\n";
+          ExprMap initSubstMap = buildStepSubstInt(initCHC->dstVars, 0);
+          reportInductiveFailure(initCHC->body, initSubstMap, initCHC->dstVars, "Init");
           result = false;
         }
       }
@@ -812,12 +1075,22 @@ namespace ufo
           }
           else
           {
-            endBound = bv::bvnum(mpz_class(cexData.traceEnd - 1), bvWidth, m_efac);
+            // Handle N=0 case to avoid underflow in traceEnd - 1
+            endBound = bv::bvnum(mpz_class(cexData.traceEnd > 0 ? cexData.traceEnd - 1 : 0), bvWidth, m_efac);
           }
-          boundsExpr = mk<AND>(
-            bv::bvuge(iVar, startBound),
-            bv::bvule(iVar, endBound)
-          );
+          
+          if (cexData.traceEnd == 0 && !cexData.traceEndExpr)
+          {
+             // Empty range for N=0, make bounds false
+             boundsExpr = mk<FALSE>(m_efac);
+          }
+          else
+          {
+             boundsExpr = mk<AND>(
+               bv::bvuge(iVar, startBound),
+               bv::bvule(iVar, endBound)
+             );
+          }
         }
         else
         {
@@ -900,6 +1173,34 @@ namespace ufo
           else
           {
             outs() << "  [Inductive] Transition: FAIL (f(i) => f(i+1) is not valid)\n";
+            
+            // Get failing index i from model
+            Expr failingI = solver.getModel(iVar);
+            if (failingI)
+            {
+               outs() << "    Failing step i = " << *failingI << "\n";
+               
+               // Build substitution for this i
+               ExprMap srcSubst = buildStepSubstExpr(transCHC->srcVars, failingI);
+               
+               Expr failingIPlusOne;
+               if (isBvIndex)
+                 failingIPlusOne = bv::bvadd(failingI, bv::bvnum(mpz_class(1), bvWidth, m_efac));
+               else
+                 failingIPlusOne = mk<PLUS>(failingI, mkTerm<mpz_class>(1, m_efac));
+                 
+               ExprMap dstSubst = buildStepSubstExpr(transCHC->dstVars, failingIPlusOne);
+               
+               // Merge maps
+               ExprMap fullSubst = srcSubst;
+               fullSubst.insert(dstSubst.begin(), dstSubst.end());
+               
+               // Combine vars for reporting
+               ExprVector allVars = transCHC->srcVars;
+               allVars.insert(allVars.end(), transCHC->dstVars.begin(), transCHC->dstVars.end());
+               
+               reportInductiveFailure(transCHC->body, fullSubst, allVars, "Transition");
+            }
             result = false;
           }
         }
@@ -948,10 +1249,26 @@ namespace ufo
         if (queryResult == true)
         {
           outs() << "  [Inductive] Property: PASS (f(N) reaches error state)\n";
+          
+          // Report variables responsible for the error state
+          ExprMap querySubstMap;
+          if (cexData.traceEndExpr)
+            querySubstMap = buildStepSubstExpr(queryCHC->srcVars, cexData.traceEndExpr);
+          else
+            querySubstMap = buildStepSubstInt(queryCHC->srcVars, cexData.traceEnd);
+            
+          reportValidCEXVariables(queryCHC->body, querySubstMap, queryCHC->srcVars, "Property");
         }
         else
         {
           outs() << "  [Inductive] Property: FAIL (f(N) does not reach error)\n";
+          ExprMap querySubstMap;
+          if (cexData.traceEndExpr)
+            querySubstMap = buildStepSubstExpr(queryCHC->srcVars, cexData.traceEndExpr);
+          else
+            querySubstMap = buildStepSubstInt(queryCHC->srcVars, cexData.traceEnd);
+            
+          reportInductiveFailure(queryCHC->body, querySubstMap, queryCHC->srcVars, "Property");
           result = false;
         }
       }

@@ -1,0 +1,22 @@
+#include <assert.h>
+#include <stdint.h>
+
+// CBMC intrinsics
+unsigned int nondet_uint();
+unsigned char nondet_uchar();
+unsigned short nondet_ushort();
+unsigned long nondet_ulong();
+void __CPROVER_assume(int);
+
+int main() {
+    uint8_t v0 = 0;
+    uint8_t v1 = 0;
+
+    while(1) {
+
+        // Transition
+        v0 = (v0 + 1);
+        v1 = (v1 + 2);
+    }
+    return 0;
+}
