@@ -1,5 +1,5 @@
 digraph print {
  true ->  inv
  inv ->  inv
- inv ->  fail
+ inv ->  false
 }

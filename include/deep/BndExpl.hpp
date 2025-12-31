@@ -1132,7 +1132,7 @@ namespace ufo
         }
 
         // Substitute into transition body
-        Expr transBody = transCHC->body;
+        Expr transBody = u.removeRedundantConjuncts(transCHC->body);
         Expr transWithSrc = replaceAll(transBody, srcSubst);
         Expr transWithBoth = replaceAll(transWithSrc, dstSubst);
         
@@ -1143,7 +1143,9 @@ namespace ufo
         }
         
         // Simplify the formula first - this may reduce int2bv(x+1) = bvadd(int2bv(x), 1) to TRUE
-        Expr transSimpl = u.simplify(transWithBoth);
+        Expr transSimpl = transWithBoth; 
+        // transSimpl = u.simplify(transWithBoth);
+
         if (debug)
           outs() << "  [Inductive] Trans simplified: " << *transSimpl << "\n";
         
@@ -1158,51 +1160,62 @@ namespace ufo
         {
           // For validity check: (bounds /\ NOT(substituted_trans)) should be UNSAT
           Expr validityCheck = mk<AND>(boundsExpr, mk<NEG>(transSimpl));
-          
-          if (debug)
-            outs() << "  [Inductive] Trans validity check (expect UNSAT): " << *validityCheck << "\n";
-          
-          tribool transResult = solver.isSat(validityCheck);
-          auto transEnd = high_resolution_clock::now();
-          transTime = duration_cast<microseconds>(transEnd - transStart).count();
-          
-          if (transResult == false)
+          validityCheck = u.simplify(validityCheck);
+          if (isOpX<TRUE>(validityCheck))
           {
-            outs() << "  [Inductive] Transition: PASS (f(i) => f(i+1) is valid)\n";
+            auto transEnd = high_resolution_clock::now();
+            transTime = duration_cast<microseconds>(transEnd - transStart).count();
+            outs() << "  [Inductive] Transition: PASS (simplified to TRUE)\n";
           }
-          else
+          else 
           {
-            outs() << "  [Inductive] Transition: FAIL (f(i) => f(i+1) is not valid)\n";
+            if (debug)
+              outs() << "  [Inductive] Trans validity check (expect UNSAT): " << *validityCheck << "\n";
             
-            // Get failing index i from model
-            Expr failingI = solver.getModel(iVar);
-            if (failingI)
+            tribool transResult = solver.isSat(validityCheck);
+            auto transEnd = high_resolution_clock::now();
+            transTime = duration_cast<microseconds>(transEnd - transStart).count();
+            
+            if (transResult == false)
             {
-               outs() << "    Failing step i = " << *failingI << "\n";
-               
-               // Build substitution for this i
-               ExprMap srcSubst = buildStepSubstExpr(transCHC->srcVars, failingI);
-               
-               Expr failingIPlusOne;
-               if (isBvIndex)
-                 failingIPlusOne = bv::bvadd(failingI, bv::bvnum(mpz_class(1), bvWidth, m_efac));
-               else
-                 failingIPlusOne = mk<PLUS>(failingI, mkTerm<mpz_class>(1, m_efac));
-                 
-               ExprMap dstSubst = buildStepSubstExpr(transCHC->dstVars, failingIPlusOne);
-               
-               // Merge maps
-               ExprMap fullSubst = srcSubst;
-               fullSubst.insert(dstSubst.begin(), dstSubst.end());
-               
-               // Combine vars for reporting
-               ExprVector allVars = transCHC->srcVars;
-               allVars.insert(allVars.end(), transCHC->dstVars.begin(), transCHC->dstVars.end());
-               
-               reportInductiveFailure(transCHC->body, fullSubst, allVars, "Transition");
+              outs() << "  [Inductive] Transition: PASS (f(i) => f(i+1) is valid)\n";
             }
-            result = false;
+            else
+            {
+              outs() << "  [Inductive] Transition: FAIL (f(i) => f(i+1) is not valid)\n";
+              
+              // Get failing index i from model
+              Expr failingI = solver.getModel(iVar);
+              if (failingI)
+              {
+                 outs() << "    Failing step i = " << *failingI << "\n";
+                 
+                 // Build substitution for this i
+                 ExprMap srcSubst = buildStepSubstExpr(transCHC->srcVars, failingI);
+                 
+                 Expr failingIPlusOne;
+                 if (isBvIndex)
+                   failingIPlusOne = bv::bvadd(failingI, bv::bvnum(mpz_class(1), bvWidth, m_efac));
+                 else
+                   failingIPlusOne = mk<PLUS>(failingI, mkTerm<mpz_class>(1, m_efac));
+                   
+                 ExprMap dstSubst = buildStepSubstExpr(transCHC->dstVars, failingIPlusOne);
+                 
+                 // Merge maps
+                 ExprMap fullSubst = srcSubst;
+                 fullSubst.insert(dstSubst.begin(), dstSubst.end());
+                 
+                 // Combine vars for reporting
+                 ExprVector allVars = transCHC->srcVars;
+                 allVars.insert(allVars.end(), transCHC->dstVars.begin(), transCHC->dstVars.end());
+                 
+                 reportInductiveFailure(transCHC->body, fullSubst, allVars, "Transition");
+              }
+              result = false;
+            }
+
           }
+
         }
       }
 
