@@ -2385,23 +2385,28 @@ namespace ufo
       BndExpl bnd(ruleManager, to, debug);
       
       // Run validation methods based on flags
+      tribool finalResult = indeterminate;
+      
       if (ccexInductive)
       {
         outs() << "\n=== Inductive CEX Validation ===\n";
         tribool inductiveResult = bnd.validateCEXInductive(ccexExprs);
+        finalResult = inductiveResult;
       }
       
       if (ccexUnrolling)
       {
         outs() << "\n=== Unrolling-based CEX Validation ===\n";
         tribool unrollResult = bnd.validateCEX(ccexExprs, mk<TRUE>(efac), ruleManager.failDecl);
+        if (indeterminate(finalResult)) finalResult = unrollResult;
       }
       
       auto totalEnd = high_resolution_clock::now();
       auto totalTime = duration_cast<milliseconds>(totalEnd - totalStart).count();
       outs() << "\n[Global Timing] Total wall-clock: " << totalTime << "ms\n";
       
-      exit(1);
+      // Return 0 if validation succeeded, 1 otherwise
+      exit(finalResult == true ? 0 : 1);
     }
   
     BitHorn bh(efac, z3, ruleManager, maxAttempts, d2, 

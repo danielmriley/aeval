@@ -498,6 +498,333 @@ namespace ufo
       return res;
     }
 
+    // Compute cone of influence: variables that affect the property violation
+    // Returns set of variable indices (0-based) that are in the cone
+    set<int> computeConeOfInfluence(HornRuleExt* queryCHC, HornRuleExt* transCHC)
+    {
+      set<int> relevantVarIndices;
+      
+      if (!queryCHC || !transCHC) return relevantVarIndices;
+      
+      // Step 1: Find variables used in the property (query) body
+      // Filter out trivial equalities like x=x
+      ExprSet queryConjuncts;
+      getConj(queryCHC->body, queryConjuncts);
+      
+      ExprSet queryVars;
+      for (auto& conj : queryConjuncts)
+      {
+        // Skip trivial equalities (x = x)
+        if (isOpX<EQ>(conj) && conj->left() == conj->right())
+          continue;
+        
+        filter(conj, bind::IsConst(), inserter(queryVars, queryVars.begin()));
+      }
+      
+      // Map query vars to indices in srcVars
+      for (size_t i = 0; i < queryCHC->srcVars.size(); i++)
+      {
+        if (queryVars.count(queryCHC->srcVars[i]) > 0)
+          relevantVarIndices.insert(i);
+      }
+      
+      if (debug)
+      {
+        outs() << "  [Slicing] Initial relevant vars from query: {";
+        for (int idx : relevantVarIndices) outs() << idx << " ";
+        outs() << "}\n";
+      }
+      
+      // Step 2: Backward reachability through transition relation
+      // Build dependency map: dstVar[i] -> set of srcVar indices it depends on
+      map<int, set<int>> depMap;
+      
+      // Parse transition body to find dependencies
+      ExprSet transConjuncts;
+      getConj(transCHC->body, transConjuncts);
+      
+      for (size_t dstIdx = 0; dstIdx < transCHC->dstVars.size(); dstIdx++)
+      {
+        Expr dstVar = transCHC->dstVars[dstIdx];
+        
+        // Find constraints involving this dstVar
+        for (auto& conj : transConjuncts)
+        {
+          // Skip trivial equalities (x = x)
+          if (isOpX<EQ>(conj) && conj->left() == conj->right())
+            continue;
+            
+          if (!contains(conj, dstVar)) continue;
+          
+          // Get all variables in this conjunct
+          ExprSet conjVars;
+          filter(conj, bind::IsConst(), inserter(conjVars, conjVars.begin()));
+          
+          // Find which srcVars are involved
+          for (size_t srcIdx = 0; srcIdx < transCHC->srcVars.size(); srcIdx++)
+          {
+            if (conjVars.count(transCHC->srcVars[srcIdx]) > 0)
+              depMap[dstIdx].insert(srcIdx);
+          }
+        }
+      }
+      
+      if (debug)
+      {
+        outs() << "  [Slicing] Dependency map:\n";
+        for (auto& kv : depMap)
+        {
+          outs() << "    dst[" << kv.first << "] depends on src{";
+          for (int idx : kv.second) outs() << idx << " ";
+          outs() << "}\n";
+        }
+      }
+      
+      // Step 3: Fixed-point computation
+      // For inductive transitions, dstVars correspond to srcVars (same indices)
+      bool changed = true;
+      while (changed)
+      {
+        changed = false;
+        set<int> toAdd;
+        
+        for (int idx : relevantVarIndices)
+        {
+          // idx is a relevant dst variable, add its dependencies
+          if (depMap.count(idx) > 0)
+          {
+            for (int depIdx : depMap[idx])
+            {
+              if (relevantVarIndices.count(depIdx) == 0)
+              {
+                toAdd.insert(depIdx);
+                changed = true;
+              }
+            }
+          }
+        }
+        
+        relevantVarIndices.insert(toAdd.begin(), toAdd.end());
+      }
+      
+      if (debug)
+      {
+        outs() << "  [Slicing] Final cone of influence: {";
+        for (int idx : relevantVarIndices) outs() << idx << " ";
+        outs() << "}\n";
+      }
+      
+      return relevantVarIndices;
+    }
+    
+    // Check if trace arrays cover the cone of influence
+    // Returns true if all variables in the cone are covered by the trace
+    bool traceCoversCone(const ExprVector& traceArrays, const set<int>& cone, 
+                         HornRuleExt* transCHC)
+    {
+      if (!transCHC) return false;
+      
+      // The trace arrays correspond to variables by index
+      // Check if all cone indices are covered
+      for (int idx : cone)
+      {
+        if (idx >= (int)traceArrays.size())
+        {
+          if (debug)
+            outs() << "  [Slicing] Cone index " << idx << " not covered by trace\n";
+          return false;
+        }
+      }
+      
+      return true;
+    }
+    
+    // Validate partial CEX by checking only the cone of influence
+    // This is called when standard validation fails but trace covers the cone
+    tribool validatePartialCEXInductive(ExprVector ccex, const set<int>& cone,
+                                        HornRuleExt* initCHC, HornRuleExt* transCHC, 
+                                        HornRuleExt* queryCHC, CEXData& cexData,
+                                        const ExprVector& traceArrays)
+    {
+      using namespace std::chrono;
+      
+      outs() << "\n=== Partial CEX Validation (Cone of Influence) ===\n";
+      outs() << "  [Partial] Validating with cone: {";
+      for (int idx : cone) outs() << idx << " ";
+      outs() << "}\n";
+      
+      SMTUtils solver(m_efac);
+      tribool result = true;
+      
+      // Helper to check if index is bitvector type
+      auto isIndexBvType = [&](Expr indexVar, unsigned &bvWidth) -> bool {
+        if (!indexVar) return false;
+        if (bind::isBVar(indexVar))
+        {
+          Expr varType = bind::typeOf(indexVar);
+          if (bv::is_bvsort(varType))
+          {
+            bvWidth = bv::width(varType);
+            return true;
+          }
+          return false;
+        }
+        if (bind::isFapp(indexVar))
+        {
+          Expr idxType = bind::rangeTy(bind::fname(indexVar));
+          if (bv::is_bvsort(idxType))
+          {
+            bvWidth = bv::width(idxType);
+            return true;
+          }
+        }
+        return false;
+      };
+      
+      // Determine index type
+      bool isBvIndex = false;
+      unsigned bvWidth = 0;
+      if (!traceArrays.empty())
+      {
+        auto it = cexData.traceValueFuncs.find(traceArrays[0]);
+        if (it != cexData.traceValueFuncs.end())
+          isBvIndex = isIndexBvType(it->second.first, bvWidth);
+      }
+      
+      // Create symbolic index
+      Expr iVar, iPlusOne, boundsExpr;
+      if (isBvIndex)
+      {
+        iVar = bv::bvConst(mkTerm<string>("_cex_i", m_efac), bvWidth);
+        iPlusOne = bv::bvadd(iVar, bv::bvnum(mpz_class(1), bvWidth, m_efac));
+        Expr startBound = cexData.traceStartExpr ? cexData.traceStartExpr 
+                          : bv::bvnum(mpz_class(cexData.traceStart), bvWidth, m_efac);
+        Expr endBound = cexData.traceEndExpr 
+                        ? bv::bvsub(cexData.traceEndExpr, bv::bvnum(mpz_class(1), bvWidth, m_efac))
+                        : bv::bvnum(mpz_class(cexData.traceEnd > 0 ? cexData.traceEnd - 1 : 0), bvWidth, m_efac);
+        boundsExpr = mk<AND>(bv::bvuge(iVar, startBound), bv::bvule(iVar, endBound));
+      }
+      else
+      {
+        iVar = bind::intConst(mkTerm<string>("_cex_i", m_efac));
+        iPlusOne = mk<PLUS>(iVar, mkTerm<mpz_class>(1, m_efac));
+        boundsExpr = mk<AND>(
+          mk<GEQ>(iVar, mkTerm<mpz_class>(cexData.traceStart, m_efac)),
+          mk<LEQ>(iVar, mkTerm<mpz_class>(cexData.traceEnd - 1, m_efac))
+        );
+      }
+      
+      // Build substitution maps for ONLY the cone variables
+      ExprMap srcSubst, dstSubst;
+      for (int idx : cone)
+      {
+        if (idx >= (int)traceArrays.size()) continue;
+        
+        Expr arr = traceArrays[idx];
+        auto it = cexData.traceValueFuncs.find(arr);
+        if (it == cexData.traceValueFuncs.end()) continue;
+        
+        Expr indexVar = it->second.first;
+        Expr valueFunc = it->second.second;
+        
+        if (idx < (int)transCHC->srcVars.size())
+        {
+          Expr srcValue = replaceAll(valueFunc, indexVar, iVar);
+          srcSubst[transCHC->srcVars[idx]] = srcValue;
+        }
+        if (idx < (int)transCHC->dstVars.size())
+        {
+          Expr dstValue = replaceAll(valueFunc, indexVar, iPlusOne);
+          dstSubst[transCHC->dstVars[idx]] = dstValue;
+        }
+      }
+      
+      // === Transition Check (only for cone variables) ===
+      // Extract transition constraints that only involve cone variables
+      ExprSet transConjuncts;
+      getConj(transCHC->body, transConjuncts);
+      
+      ExprVector coneConstraints;
+      for (auto& conj : transConjuncts)
+      {
+        // Check if this conjunct only involves cone variables
+        ExprSet conjVars;
+        filter(conj, bind::IsConst(), inserter(conjVars, conjVars.begin()));
+        
+        bool inCone = true;
+        for (auto& v : conjVars)
+        {
+          // Check if v is a src/dst var outside the cone
+          bool isSrcVar = false, isDstVar = false;
+          int srcIdx = -1, dstIdx = -1;
+          
+          for (size_t i = 0; i < transCHC->srcVars.size(); i++)
+          {
+            if (transCHC->srcVars[i] == v) { isSrcVar = true; srcIdx = i; break; }
+          }
+          for (size_t i = 0; i < transCHC->dstVars.size(); i++)
+          {
+            if (transCHC->dstVars[i] == v) { isDstVar = true; dstIdx = i; break; }
+          }
+          
+          if (isSrcVar && cone.count(srcIdx) == 0) { inCone = false; break; }
+          if (isDstVar && cone.count(dstIdx) == 0) { inCone = false; break; }
+        }
+        
+        if (inCone)
+          coneConstraints.push_back(conj);
+      }
+      
+      if (debug)
+      {
+        outs() << "  [Partial] Cone constraints:\n";
+        for (auto& c : coneConstraints)
+          outs() << "    " << *c << "\n";
+      }
+      
+      // Check transition validity for cone constraints only
+      Expr coneBody = conjoin(coneConstraints, m_efac);
+      Expr transWithSrc = replaceAll(coneBody, srcSubst);
+      Expr transWithBoth = replaceAll(transWithSrc, dstSubst);
+      Expr transSimpl = u.simplify(transWithBoth);
+      
+      if (debug)
+        outs() << "  [Partial] Trans after substitution: " << *transSimpl << "\n";
+      
+      if (isOpX<TRUE>(transSimpl))
+      {
+        outs() << "  [Partial] Transition: PASS (simplified to TRUE)\n";
+      }
+      else
+      {
+        Expr validityCheck = mk<AND>(boundsExpr, mk<NEG>(transSimpl));
+        validityCheck = u.simplify(validityCheck);
+        
+        tribool transResult = solver.isSat(validityCheck);
+        
+        if (transResult == false)
+        {
+          outs() << "  [Partial] Transition: PASS (cone constraints valid)\n";
+        }
+        else
+        {
+          outs() << "  [Partial] Transition: FAIL (cone constraints not valid)\n";
+          result = false;
+        }
+      }
+      
+      if (result == true)
+      {
+        outs() << "  [Partial] CEX VALID: Partial trace covers cone of influence\n";
+      }
+      else
+      {
+        outs() << "  [Partial] CEX INVALID: Partial trace does not satisfy cone constraints\n";
+      }
+      
+      return result;
+    }
+
     // Identify which variables caused validation failure
     void reportValidCEXVariables(Expr body, ExprMap &subst, const ExprVector &vars, string stepName)
     {
@@ -1296,6 +1623,47 @@ namespace ufo
              << "Trans: " << (transTime/1000.0) << "ms, "
              << "Prop: " << (propTime/1000.0) << "ms, "
              << "Total: " << (totalTime/1000.0) << "ms\n";
+
+      // If standard validation failed, try partial CEX validation via slicing
+      if (result == false)
+      {
+        // Compute cone of influence from property
+        set<int> cone = computeConeOfInfluence(queryCHC, transCHC);
+        
+        // Check if this is a partial CEX (trace has fewer variables than system)
+        size_t totalVars = transCHC ? transCHC->srcVars.size() : 0;
+        bool isPartialCEX = (traceArrays.size() < totalVars);
+        
+        if (isPartialCEX && debug)
+        {
+          outs() << "  [Slicing] Detected partial CEX: trace has " << traceArrays.size() 
+                 << " vars, system has " << totalVars << " vars\n";
+        }
+        
+        // Check if trace covers the cone of influence
+        if (isPartialCEX && traceCoversCone(traceArrays, cone, transCHC))
+        {
+          outs() << "  [Slicing] Trace covers cone of influence, attempting partial validation...\n";
+          
+          // Try partial validation with only cone variables
+          tribool partialResult = validatePartialCEXInductive(ccex, cone, initCHC, transCHC, 
+                                                               queryCHC, cexData, traceArrays);
+          
+          if (partialResult == true)
+          {
+            outs() << "  [Inductive] CEX VALID (Partial): Trace covers cone of influence\n";
+            return true;
+          }
+        }
+        else if (isPartialCEX)
+        {
+          outs() << "  [Slicing] Trace does NOT cover cone of influence\n";
+          outs() << "  [Slicing] Cone requires variable indices: {";
+          for (int idx : cone) outs() << idx << " ";
+          outs() << "}\n";
+          outs() << "  [Slicing] Trace provides " << traceArrays.size() << " variables\n";
+        }
+      }
 
       // Final result
       if (result == true)
