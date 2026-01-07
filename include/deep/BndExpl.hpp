@@ -1634,14 +1634,19 @@ namespace ufo
         size_t totalVars = transCHC ? transCHC->srcVars.size() : 0;
         bool isPartialCEX = (traceArrays.size() < totalVars);
         
-        if (isPartialCEX && debug)
+        if (debug)
         {
-          outs() << "  [Slicing] Detected partial CEX: trace has " << traceArrays.size() 
-                 << " vars, system has " << totalVars << " vars\n";
+          if (isPartialCEX)
+            outs() << "  [Slicing] Detected partial CEX: trace has " << traceArrays.size() 
+                   << " vars, system has " << totalVars << " vars\n";
+          else
+             outs() << "  [Slicing] Full CEX detected, checking if slicing can rescue validation...\n";
         }
         
         // Check if trace covers the cone of influence
-        if (isPartialCEX && traceCoversCone(traceArrays, cone, transCHC))
+        bool coversCone = traceCoversCone(traceArrays, cone, transCHC);
+
+        if (coversCone)
         {
           outs() << "  [Slicing] Trace covers cone of influence, attempting partial validation...\n";
           
