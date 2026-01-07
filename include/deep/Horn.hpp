@@ -3,6 +3,8 @@
 
 #include <fstream>
 #include <chrono>
+#include <iomanip>
+#include <sstream>
 #include "ae/AeValSolver.hpp"
 #include "ae/ExprSimplBv.hpp"
 
@@ -1821,6 +1823,617 @@ namespace ufo
         }
         chc.body = conjoin(newBody, this->m_efac);
       }
+    }
+
+    /**
+     * Generate a SyGuS file for CVC5 to synthesize closed-form functions
+     * describing the evolution of state variables along a concrete execution trace.
+     * 
+     * This method:
+     * 1. Identifies the main invariant relation, fact (init), trans, and query rules
+     * 2. Simulates a bounded concrete trace by successive model finding
+     * 3. Generates SyGuS constraints from (step → state) pairs
+     * 4. Outputs a .sygus file that CVC5 can solve to find closed-form expressions
+     *
+     * @param filename        Output SyGuS filename (default: "counterexample.sygus")
+     * @param num_points      Number of trace points to collect (default: 128)
+     * @param step_bitwidth   Bit-width for the step parameter (default: 16)
+     * @param include_bad_check  Whether to check if bad state is reached (default: true)
+     * @return true if SyGuS file was successfully generated, false otherwise
+     */
+    bool generateCounterexampleSyGuS(
+        const std::string& filename = "counterexample.sygus",
+        int num_points = 128,
+        int step_bitwidth = 16,
+        bool include_bad_check = true)
+    {
+      if (!hasBV)
+      {
+        outs() << "Error: generateCounterexampleSyGuS requires BV logic\n";
+        return false;
+      }
+
+      outs() << "\n=== Generating Counterexample SyGuS ===\n";
+
+      // Step 1: Identify main components
+      Expr main_rel = nullptr;
+      HornRuleExt* fact_rule = nullptr;
+      HornRuleExt* trans_rule = nullptr;
+      HornRuleExt* query_rule = nullptr;
+
+      for (auto& d : decls)
+      {
+        if (d->left() != mk<TRUE>(m_efac) && d->left() != failDecl && !invVars[d->left()].empty())
+        {
+          if (main_rel != nullptr && main_rel != d->left())
+          {
+            outs() << "Warning: Multiple main relations found. Using first one.\n";
+          }
+          else
+          {
+            main_rel = d->left();
+          }
+        }
+      }
+
+      if (main_rel == nullptr)
+      {
+        outs() << "Error: Could not identify main invariant relation\n";
+        return false;
+      }
+
+      outs() << "  Main relation: " << *main_rel << "\n";
+
+      // Find fact, trans, and query rules
+      for (auto& hr : chcs)
+      {
+        if (hr.isFact && hr.dstRelation == main_rel)
+        {
+          fact_rule = &hr;
+        }
+        else if (hr.isInductive && hr.srcRelation == main_rel && hr.dstRelation == main_rel)
+        {
+          trans_rule = &hr;
+        }
+        else if (hr.isQuery && hr.srcRelation == main_rel)
+        {
+          query_rule = &hr;
+        }
+      }
+
+      if (fact_rule == nullptr)
+      {
+        outs() << "Error: Could not find initialization (fact) rule\n";
+        return false;
+      }
+      if (trans_rule == nullptr)
+      {
+        outs() << "Error: Could not find transition (inductive) rule\n";
+        return false;
+      }
+
+      outs() << "  Found fact rule, trans rule" << (query_rule ? ", and query rule" : "") << "\n";
+
+      // Get state variables
+      ExprVector state_vars = invVars[main_rel];
+      outs() << "  State variables: " << state_vars.size() << "\n";
+
+      // Determine bit-widths per variable
+      std::map<Expr, unsigned> var_bw;
+      for (auto& v : state_vars)
+      {
+        Expr vtype = bind::typeOf(v);
+        if (bv::is_bvsort(vtype))
+        {
+          var_bw[v] = bv::width(vtype);
+        }
+        else
+        {
+          outs() << "Warning: Variable " << *v << " is not BV type, skipping\n";
+        }
+      }
+
+      // Step 2: Extract concrete initial state
+      outs() << "  Extracting initial state...\n";
+      std::vector<std::map<Expr, Expr>> trace;
+      
+      ZSolver<EZ3> init_solver(m_z3);
+      
+      // Instantiate fact body with destination variables = state variables
+      Expr init_body = replaceAll(fact_rule->body, fact_rule->dstVars, state_vars);
+      init_solver.assertExpr(init_body);
+
+      if (!init_solver.solve())
+      {
+        outs() << "Error: Initial state is unsatisfiable\n";
+        return false;
+      }
+
+      // Extract concrete initial values
+      std::map<Expr, Expr> current_state;
+      auto init_model = init_solver.getModel();
+      for (auto& v : state_vars)
+      {
+        Expr val = init_model.eval(v);
+        if (val == nullptr || val == v)
+        {
+          // If no value from model, try to extract from body directly
+          // For simple cases like (= x #x0), the body itself constrains it
+          val = bv::bvnum(mpz_class(0), var_bw[v], m_efac);
+          outs() << "    Warning: Using default 0 for " << *v << "\n";
+        }
+        current_state[v] = val;
+        if (debug >= 2)
+        {
+          outs() << "    " << *v << " = " << *val << "\n";
+        }
+      }
+      trace.push_back(current_state);
+      outs() << "  Initial state extracted (step 0)\n";
+
+      // Step 3: Simulate bounded concrete trace
+      outs() << "  Simulating trace for " << num_points << " steps...\n";
+      
+      // Create "next" variables for the successor state
+      ExprVector next_vars;
+      for (size_t i = 0; i < state_vars.size(); i++)
+      {
+        Expr new_name = mkTerm<string>("__next_" + to_string(i), m_efac);
+        next_vars.push_back(cloneVar(state_vars[i], new_name));
+      }
+
+      int bad_reached_at = -1;
+      for (int step = 1; step < num_points; ++step)
+      {
+        ZSolver<EZ3> succ_solver(m_z3);
+        
+        // Assert current concrete state
+        for (auto& v : state_vars)
+        {
+          succ_solver.assertExpr(mk<EQ>(v, current_state[v]));
+        }
+
+        // Instantiate transition body
+        Expr inst_body = replaceAll(trans_rule->body, trans_rule->srcVars, state_vars);
+        inst_body = replaceAll(inst_body, trans_rule->dstVars, next_vars);
+        succ_solver.assertExpr(inst_body);
+
+        if (!succ_solver.solve())
+        {
+          outs() << "  No successor at step " << step << ", stopping trace\n";
+          break;
+        }
+
+        // Extract successor state
+        auto succ_model = succ_solver.getModel();
+        std::map<Expr, Expr> next_state;
+        for (size_t i = 0; i < state_vars.size(); i++)
+        {
+          Expr val = succ_model.eval(next_vars[i]);
+          if (val == nullptr || val == next_vars[i])
+          {
+            // No concrete value, use previous
+            val = current_state[state_vars[i]];
+          }
+          next_state[state_vars[i]] = val;
+        }
+        
+        trace.push_back(next_state);
+        current_state = next_state;
+
+        // Optional: check if bad state is reached
+        if (include_bad_check && query_rule != nullptr && bad_reached_at < 0)
+        {
+          ZSolver<EZ3> bad_solver(m_z3);
+          for (auto& v : state_vars)
+          {
+            bad_solver.assertExpr(mk<EQ>(v, current_state[v]));
+          }
+          Expr bad_body = replaceAll(query_rule->body, query_rule->srcVars, state_vars);
+          bad_solver.assertExpr(bad_body);
+          
+          if (bad_solver.solve())
+          {
+            bad_reached_at = step;
+            outs() << "  Bad state reached at step " << step << "\n";
+          }
+        }
+
+        if (debug >= 3 && step % 10 == 0)
+        {
+          outs() << "    Step " << step << " completed\n";
+        }
+      }
+
+      outs() << "  Collected " << trace.size() << " trace points\n";
+
+      // Step 4: Generate SyGuS file
+      outs() << "  Writing SyGuS file: " << filename << "\n";
+      
+      std::ofstream out(filename);
+      if (!out.is_open())
+      {
+        outs() << "Error: Could not open file " << filename << " for writing\n";
+        return false;
+      }
+
+      // Header
+      out << "; SyGuS file for counterexample synthesis\n";
+      out << "; Generated from CHC system\n";
+      out << "; Main relation: " << *main_rel << "\n";
+      out << "; Trace points collected: " << trace.size() << "\n";
+      if (bad_reached_at >= 0)
+      {
+        out << "; Bad state reached at step: " << bad_reached_at << "\n";
+      }
+      out << "\n";
+      out << "(set-logic BV)\n\n";
+
+      // Generate synth-fun for each state variable
+      for (size_t varIdx = 0; varIdx < state_vars.size(); varIdx++)
+      {
+        Expr v = state_vars[varIdx];
+        if (var_bw.find(v) == var_bw.end()) continue;
+
+        unsigned vwidth = var_bw[v];
+        std::string fun_name = "state_" + to_string(varIdx);
+
+        out << "; Function for variable " << *v << "\n";
+        out << "(synth-fun " << fun_name << " ((step (_ BitVec " << step_bitwidth << "))) ";
+        out << "(_ BitVec " << vwidth << ")\n";
+
+        // Grammar
+        out << "  ((Start (_ BitVec " << vwidth << ")) (Shift (_ BitVec " << vwidth << ")))\n";
+        out << "  ((Start (_ BitVec " << vwidth << ") (\n";
+        
+        // Convert step to variable width if different
+        if ((unsigned)step_bitwidth < vwidth)
+        {
+          out << "    ((_ zero_extend " << (vwidth - step_bitwidth) << ") step)\n";
+        }
+        else if ((unsigned)step_bitwidth > vwidth)
+        {
+          out << "    ((_ extract " << (vwidth - 1) << " 0) step)\n";
+        }
+        else
+        {
+          out << "    step\n";
+        }
+
+        // Constants - common useful values
+        out << "    #x" << std::string(vwidth / 4, '0') << "\n";  // 0
+        out << "    #x" << std::string(vwidth / 4 - 1, '0') << "1\n";  // 1
+
+        // BV operations
+        out << "    (bvadd Start Start)\n";
+        out << "    (bvsub Start Start)\n";
+        out << "    (bvxor Start Start)\n";
+        out << "    (bvand Start Start)\n";
+        out << "    (bvor Start Start)\n";
+        out << "    (bvnot Start)\n";
+        out << "    (bvneg Start)\n";
+        out << "    (bvlshr Start Shift)\n";
+        out << "    (bvshl Start Shift)\n";
+        out << "  ))\n";
+        
+        // Shift amounts
+        out << "  (Shift (_ BitVec " << vwidth << ") (\n";
+        for (int sh = 0; sh <= 8 && sh < (int)vwidth; sh++)
+        {
+          out << "    #x" << std::string(vwidth / 4 - 1, '0') << std::hex << sh << std::dec << "\n";
+        }
+        out << "  ))\n";
+        out << "))\n\n";
+      }
+
+      // Generate constraints from trace
+      out << "; Constraints from concrete trace\n";
+      for (size_t step = 0; step < trace.size(); step++)
+      {
+        const auto& state = trace[step];
+        
+        for (size_t varIdx = 0; varIdx < state_vars.size(); varIdx++)
+        {
+          Expr v = state_vars[varIdx];
+          if (var_bw.find(v) == var_bw.end()) continue;
+          
+          auto it = state.find(v);
+          if (it == state.end()) continue;
+
+          unsigned vwidth = var_bw[v];
+          std::string fun_name = "state_" + to_string(varIdx);
+
+          // Convert step to hex string
+          std::stringstream step_ss;
+          step_ss << std::hex << std::setfill('0') << std::setw(step_bitwidth / 4) << step;
+          std::string step_hex = step_ss.str();
+
+          // Convert value to hex string
+          std::string val_hex;
+          Expr val = it->second;
+          if (bv::is_bvnum(val))
+          {
+            mpz_class valMpz = bv::toMpz(val);
+            std::stringstream val_ss;
+            val_ss << std::hex << std::setfill('0') << std::setw(vwidth / 4);
+            // Handle the mpz_class properly
+            std::string hexStr = valMpz.get_str(16);
+            // Pad to correct width
+            while (hexStr.length() < vwidth / 4)
+            {
+              hexStr = "0" + hexStr;
+            }
+            val_hex = hexStr;
+          }
+          else
+          {
+            // Try to extract from the expression
+            val_hex = std::string(vwidth / 4, '0');
+            outs() << "Warning: Could not extract value for " << *v << " at step " << step << "\n";
+          }
+
+          out << "(constraint (= (" << fun_name << " #x" << step_hex << ") #x" << val_hex << "))\n";
+        }
+      }
+
+      out << "\n(check-synth)\n";
+      out.close();
+
+      outs() << "  SyGuS file generated successfully!\n";
+      outs() << "  Run with: cvc5 --lang=sygus2 " << filename << "\n";
+
+      return true;
+    }
+
+    /**
+     * Run CVC5 on a SyGuS file and parse the result.
+     * 
+     * @param sygus_filename  The SyGuS file to solve
+     * @param timeout_seconds Timeout in seconds (default: 60)
+     * @return A map from function name to synthesized expression (as string), or empty on failure
+     */
+    std::map<std::string, std::string> runCVC5SyGuS(
+        const std::string& sygus_filename,
+        int timeout_seconds = 60)
+    {
+      std::map<std::string, std::string> result;
+      
+      std::string cmd = "timeout " + to_string(timeout_seconds) + "s cvc5 --lang=sygus2 " + sygus_filename;
+      
+      outs() << "  Running: " << cmd << "\n";
+      
+      FILE* pipe = popen(cmd.c_str(), "r");
+      if (!pipe)
+      {
+        outs() << "Error: Failed to run CVC5\n";
+        return result;
+      }
+
+      std::string output;
+      char buffer[256];
+      while (fgets(buffer, sizeof(buffer), pipe) != nullptr)
+      {
+        output += buffer;
+      }
+      
+      int status = pclose(pipe);
+      if (status != 0)
+      {
+        outs() << "CVC5 exited with status " << status << "\n";
+        if (!output.empty())
+        {
+          outs() << "Output: " << output << "\n";
+        }
+        return result;
+      }
+
+      outs() << "CVC5 output:\n" << output << "\n";
+
+      // Parse the output - CVC5 outputs (define-fun name (...) (...) body)
+      // Simple parsing: look for define-fun lines
+      std::istringstream iss(output);
+      std::string line;
+      while (std::getline(iss, line))
+      {
+        if (line.find("(define-fun") != std::string::npos)
+        {
+          // Extract function name and body
+          size_t nameStart = line.find("define-fun") + 11;
+          size_t nameEnd = line.find(" ", nameStart);
+          if (nameStart != std::string::npos && nameEnd != std::string::npos)
+          {
+            std::string fname = line.substr(nameStart, nameEnd - nameStart);
+            result[fname] = line;
+          }
+        }
+      }
+
+      return result;
+    }
+
+    /**
+     * Generate a CCEX file from CVC5's synthesized functions.
+     * 
+     * This creates a file in the same format as the benchmark CCEX files,
+     * which can be used with validateCEXInductive().
+     * 
+     * @param synthesized_funcs  Map from function name to define-fun string from CVC5
+     * @param ccex_filename      Output CCEX filename
+     * @param step_bitwidth      Bit-width of the step parameter used in synthesis
+     * @return true if CCEX file was successfully generated
+     */
+    bool generateCCEXFromSynthesis(
+        const std::map<std::string, std::string>& synthesized_funcs,
+        const std::string& ccex_filename = "synthesized_ccex.smt2",
+        int step_bitwidth = 16)
+    {
+      if (synthesized_funcs.empty())
+      {
+        outs() << "Error: No synthesized functions provided\n";
+        return false;
+      }
+
+      // Find main relation and get state variables
+      Expr main_rel = nullptr;
+      for (auto& d : decls)
+      {
+        if (d->left() != mk<TRUE>(m_efac) && d->left() != failDecl && !invVars[d->left()].empty())
+        {
+          main_rel = d->left();
+          break;
+        }
+      }
+
+      if (main_rel == nullptr)
+      {
+        outs() << "Error: Could not identify main invariant relation\n";
+        return false;
+      }
+
+      ExprVector state_vars = invVars[main_rel];
+
+      // Determine bit-widths per variable
+      std::map<int, unsigned> var_bw;
+      for (size_t i = 0; i < state_vars.size(); i++)
+      {
+        Expr vtype = bind::typeOf(state_vars[i]);
+        if (bv::is_bvsort(vtype))
+        {
+          var_bw[i] = bv::width(vtype);
+        }
+      }
+
+      outs() << "\n=== Generating CCEX from Synthesized Functions ===\n";
+
+      std::ofstream out(ccex_filename);
+      if (!out.is_open())
+      {
+        outs() << "Error: Could not open file " << ccex_filename << " for writing\n";
+        return false;
+      }
+
+      // Header comment
+      out << "; CCEX file generated from CVC5 SyGuS synthesis\n";
+      out << "; Main relation: " << *main_rel << "\n";
+      out << "; Number of state variables: " << state_vars.size() << "\n\n";
+
+      // Write the synthesized define-fun declarations
+      // We need to rename them from state_X to var_X_at_i format
+      out << "; Synthesized closed-form functions for state evolution\n";
+      for (size_t i = 0; i < state_vars.size(); i++)
+      {
+        std::string synth_name = "state_" + std::to_string(i);
+        auto it = synthesized_funcs.find(synth_name);
+        if (it == synthesized_funcs.end()) continue;
+
+        // Parse the define-fun and rewrite with new name
+        // Original: (define-fun state_0 ((step (_ BitVec 16))) (_ BitVec 4) body)
+        // Target:   (define-fun var_0_at_i ((i (_ BitVec 16))) (_ BitVec 4) body_with_i)
+        std::string def = it->second;
+        
+        // Replace function name
+        std::string new_name = "var_" + std::to_string(i) + "_at_i";
+        size_t name_pos = def.find(synth_name);
+        if (name_pos != std::string::npos)
+        {
+          def.replace(name_pos, synth_name.length(), new_name);
+        }
+        
+        // Replace 'step' with 'i' in parameter and body
+        size_t pos = 0;
+        while ((pos = def.find("step", pos)) != std::string::npos)
+        {
+          def.replace(pos, 4, "i");
+          pos += 1;
+        }
+        
+        out << def << "\n";
+      }
+      out << "\n";
+
+      // Declare trace arrays for each variable
+      out << "; Trace arrays (one per state variable)\n";
+      for (size_t i = 0; i < state_vars.size(); i++)
+      {
+        if (var_bw.find(i) == var_bw.end()) continue;
+        unsigned vwidth = var_bw[i];
+        out << "(declare-const trace_" << i << " (Array (_ BitVec " << step_bitwidth 
+            << ") (_ BitVec " << vwidth << ")))\n";
+      }
+      out << "\n";
+
+      // Generate the forall assertion that ties arrays to functions
+      out << "; Assert that trace arrays follow the synthesized functions\n";
+      out << "(assert\n";
+      out << "  (forall ((i (_ BitVec " << step_bitwidth << ")))\n";
+      out << "    (=> (and (bvule #x" << std::string(step_bitwidth / 4, '0') << " i) ";
+      out << "(bvule i #x" << std::string(step_bitwidth / 4, 'f') << "))\n";
+      out << "        (and\n";
+      
+      for (size_t i = 0; i < state_vars.size(); i++)
+      {
+        std::string synth_name = "state_" + std::to_string(i);
+        if (synthesized_funcs.find(synth_name) == synthesized_funcs.end()) continue;
+        
+        out << "          (= (select trace_" << i << " i) (var_" << i << "_at_i i))\n";
+      }
+      
+      out << "        )\n";
+      out << "    )\n";
+      out << "  )\n";
+      out << ")\n\n";
+      out << "(check-sat)\n";
+      
+      out.close();
+
+      outs() << "  CCEX file generated: " << ccex_filename << "\n";
+      return true;
+    }
+
+    /**
+     * Full pipeline: Generate SyGuS, run CVC5, create CCEX file.
+     * 
+     * @param sygus_filename    Temporary SyGuS filename
+     * @param ccex_filename     Output CCEX filename
+     * @param num_points        Number of trace points for synthesis
+     * @param step_bitwidth     Bit-width for step parameter
+     * @param timeout_seconds   CVC5 timeout
+     * @return true if the full pipeline succeeded
+     */
+    bool synthesizeCounterexample(
+        const std::string& sygus_filename = "counterexample.sygus",
+        const std::string& ccex_filename = "synthesized_ccex.smt2",
+        int num_points = 128,
+        int step_bitwidth = 16,
+        int timeout_seconds = 60)
+    {
+      outs() << "\n=== Counterexample Synthesis Pipeline ===\n";
+
+      // Step 1: Generate SyGuS file
+      if (!generateCounterexampleSyGuS(sygus_filename, num_points, step_bitwidth, true))
+      {
+        outs() << "Failed to generate SyGuS file\n";
+        return false;
+      }
+
+      // Step 2: Run CVC5
+      auto synthesized = runCVC5SyGuS(sygus_filename, timeout_seconds);
+      if (synthesized.empty())
+      {
+        outs() << "CVC5 synthesis failed or timed out\n";
+        return false;
+      }
+
+      // Step 3: Generate CCEX file
+      if (!generateCCEXFromSynthesis(synthesized, ccex_filename, step_bitwidth))
+      {
+        outs() << "Failed to generate CCEX file\n";
+        return false;
+      }
+
+      outs() << "\n=== Synthesis Pipeline Complete ===\n";
+      outs() << "  CCEX file ready for validation: " << ccex_filename << "\n";
+      return true;
     }
   };
 }

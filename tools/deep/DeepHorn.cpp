@@ -1,5 +1,6 @@
 #include "deep/RndLearnerV4.hpp"
 #include "deep/BitHorn.hpp"
+#include "deep/BndExpl.hpp"
 
 using namespace ufo;
 using namespace std;
@@ -98,6 +99,12 @@ int main (int argc, char ** argv)
   const char *OPT_SERTRANS = "--serialize-translation";
   const char *OPT_LIA2BV = "--lia2bv";
   const char *OPT_HORN = "--horn";
+  const char *OPT_SYGUS = "--sygus";
+  const char *OPT_SYGUS_POINTS = "--sygus-points";
+  const char *OPT_SYGUS_BITWIDTH = "--sygus-bitwidth";
+  const char *OPT_SYGUS_RUN = "--sygus-run";
+  const char *OPT_SYGUS_VALIDATE = "--sygus-validate";
+  const char *OPT_SYGUS_CCEX = "--sygus-ccex";
   const char *OPT_DEBUG = "--debug";
 
   if (getBoolValue(OPT_HELP, false, argc, argv) || argc == 1){
@@ -146,7 +153,14 @@ int main (int argc, char ** argv)
         " " << OPT_D3 << "                    datalearn phase lemmas\n" <<
         " " << OPT_D4 << "                     strengthen MBP with abduction\n" <<
         " " << OPT_D5 << "                           direction of phase discovery (0: backward, 1: forward (default), 2: both)\n" <<
-        " " << OPT_D6 << "                         do not consider duplicates of data candidates (needs \"" << OPT_DATA_LEARNING <<"\")\n";
+        " " << OPT_D6 << "                         do not consider duplicates of data candidates (needs \"" << OPT_DATA_LEARNING <<"\")\n\n" <<
+        "SyGuS counterexample synthesis options (for BV):\n" <<
+        " " << OPT_SYGUS << " <file>                   generate a SyGuS file for CVC5 counterexample synthesis\n" <<
+        " " << OPT_SYGUS_POINTS << " <N>            number of trace points to collect (default: 128)\n" <<
+        " " << OPT_SYGUS_BITWIDTH << " <N>          bit-width for step parameter (default: 16)\n" <<
+        " " << OPT_SYGUS_RUN << "                     also run CVC5 on the generated SyGuS file\n" <<
+        " " << OPT_SYGUS_VALIDATE << "              synthesize and validate CEX inductively\n" <<
+        " " << OPT_SYGUS_CCEX << " <file>           output CCEX file from synthesis (for validation)\n";
 
     return 0;
   }
@@ -206,6 +220,28 @@ int main (int argc, char ** argv)
   bool ccexInductive = getBoolValueWithNegation("--use-ccex-inductive", "--no-ccex-inductive", true, argc, argv);
   bool ccexUnrolling = getBoolValueWithNegation("--use-ccex-unrolling", "--no-ccex-unrolling", false, argc, argv);
 
+  // SyGuS counterexample synthesis options
+  // --sygus can be used alone (uses default filename) or with a custom filename
+  bool do_sygus = getBoolValue(OPT_SYGUS, false, argc, argv);
+  string sygus_file = "counterexample.sygus";  // default
+  // Check if --sygus has a following argument that doesn't start with --
+  for (int i = 1; i < argc - 1; i++)
+  {
+    if (strcmp(argv[i], OPT_SYGUS) == 0)
+    {
+      if (argv[i+1][0] != '-')  // Next arg is not another option
+      {
+        sygus_file = string(argv[i+1]);
+      }
+      break;
+    }
+  }
+  int sygus_points = getIntValue(OPT_SYGUS_POINTS, 128, argc, argv);
+  int sygus_bitwidth = getIntValue(OPT_SYGUS_BITWIDTH, 16, argc, argv);
+  bool sygus_run = getBoolValue(OPT_SYGUS_RUN, false, argc, argv);
+  bool sygus_validate = getBoolValue(OPT_SYGUS_VALIDATE, false, argc, argv);
+  string sygus_ccex_file = getStrValue(OPT_SYGUS_CCEX, "", argc, argv);
+
   if (d_m || d_p || d_d || d_s) do_disj = true;
   if (do_disj)
   {
@@ -229,6 +265,94 @@ int main (int argc, char ** argv)
   {
     d2 = true;
     if(do_dl < 1) do_dl = 1;
+  }
+
+  // Handle SyGuS counterexample synthesis mode
+  if (do_sygus)
+  {
+    ExprFactory efac;
+    EZ3 z3(efac);
+    CHCs ruleManager(efac, z3, debug);
+    
+    if (!ruleManager.parse(string(argv[argc - 1]), do_elim, do_arithm))
+    {
+      outs() << "Error parsing input file\n";
+      return 1;
+    }
+    
+    // Set default output filename if not specified
+    string output_file = (sygus_file != "") ? sygus_file : "counterexample.sygus";
+    
+    bool success = ruleManager.generateCounterexampleSyGuS(
+      output_file, 
+      sygus_points, 
+      sygus_bitwidth, 
+      true  // include_bad_check
+    );
+    
+    if (!success)
+    {
+      outs() << "Failed to generate SyGuS file\n";
+      return 1;
+    }
+    
+    // Optionally run CVC5
+    if (sygus_run)
+    {
+      auto result = ruleManager.runCVC5SyGuS(output_file, 60);
+      if (result.empty())
+      {
+        outs() << "CVC5 did not find a solution\n";
+        return 1;
+      }
+      outs() << "\nSynthesized functions:\n";
+      for (const auto& kv : result)
+      {
+        outs() << "  " << kv.first << ": " << kv.second << "\n";
+      }
+      
+      // Generate CCEX file if requested
+      if (sygus_ccex_file != "" || sygus_validate)
+      {
+        string ccex_output = (sygus_ccex_file != "") ? sygus_ccex_file : "synthesized_ccex.smt2";
+        bool ccex_ok = ruleManager.generateCCEXFromSynthesis(result, ccex_output, sygus_bitwidth);
+        if (!ccex_ok)
+        {
+          outs() << "Failed to generate CCEX file\n";
+          return 1;
+        }
+        outs() << "Generated CCEX file: " << ccex_output << "\n";
+        
+        // Validate if requested
+        if (sygus_validate)
+        {
+          outs() << "\nValidating counterexample inductively...\n";
+          
+          // Load the CCEX file
+          ZSolver<EZ3> solver(z3);
+          ExprVector ccexExprs = solver.loadFromFile(ccex_output);
+          
+          // Create BndExpl for validation
+          BndExpl bnd(ruleManager, 0, debug);
+          tribool inductiveResult = bnd.validateCEXInductive(ccexExprs);
+          
+          if (inductiveResult == true)
+          {
+            outs() << "✓ Counterexample is INDUCTIVE - property is FALSE\n";
+          }
+          else if (inductiveResult == false)
+          {
+            outs() << "✗ Counterexample is NOT inductive\n";
+          }
+          else
+          {
+            outs() << "? Counterexample validation is UNKNOWN\n";
+          }
+        }
+      }
+    }
+    
+    return 0;
   }
 
   bool res = false;
