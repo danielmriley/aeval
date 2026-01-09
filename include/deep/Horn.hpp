@@ -1843,8 +1843,8 @@ namespace ufo
      */
     bool generateCounterexampleSyGuS(
         const std::string& filename = "counterexample.sygus",
-        int num_points = 128,
-        int step_bitwidth = 16,
+        int num_points = -1,       // -1 means auto-detect
+        int step_bitwidth = -1,    // -1 means auto-detect
         bool include_bad_check = true)
     {
       if (!hasBV)
@@ -1920,17 +1920,68 @@ namespace ufo
 
       // Determine bit-widths per variable
       std::map<Expr, unsigned> var_bw;
+      unsigned max_state_bw = 0;
+      unsigned total_state_bits = 0;
       for (auto& v : state_vars)
       {
         Expr vtype = bind::typeOf(v);
         if (bv::is_bvsort(vtype))
         {
-          var_bw[v] = bv::width(vtype);
+          unsigned w = bv::width(vtype);
+          var_bw[v] = w;
+          if (w > max_state_bw) max_state_bw = w;
+          total_state_bits += w;
         }
         else
         {
           outs() << "Warning: Variable " << *v << " is not BV type, skipping\n";
         }
+      }
+
+      // Auto-detect num_points if not specified (-1)
+      // Use 2^(max_state_bw) as upper bound, capped at reasonable limits
+      if (num_points < 0)
+      {
+        // For a single variable of width w, we need at most 2^w states
+        // For multiple variables, the combined state space is larger, but
+        // the trace length to reach bad is usually bounded by the smallest dimension
+        unsigned effective_bits = max_state_bw;
+        if (effective_bits <= 8)
+          num_points = (1 << effective_bits);  // Full state space for small widths
+        else if (effective_bits <= 16)
+          num_points = 256;  // Cap at 256 for medium widths
+        else
+          num_points = 512;  // Cap at 512 for large widths
+        
+        outs() << "  Auto-detected trace points: " << num_points 
+               << " (based on " << max_state_bw << "-bit state width)\n";
+      }
+
+      // Auto-detect step_bitwidth if not specified (-1)
+      // Must be large enough to represent num_points values
+      if (step_bitwidth < 0)
+      {
+        // Calculate minimum bits needed: ceil(log2(num_points))
+        int bits_needed = 1;
+        int temp = num_points - 1;
+        while (temp > 1) { temp >>= 1; bits_needed++; }
+        
+        // Round up to standard sizes and ensure at least max_state_bw
+        if (bits_needed <= 4) step_bitwidth = 4;
+        else if (bits_needed <= 8) step_bitwidth = 8;
+        else if (bits_needed <= 16) step_bitwidth = 16;
+        else step_bitwidth = 32;
+        
+        // Ensure step_bitwidth is at least as wide as the widest state variable
+        // This simplifies extraction in synthesized functions
+        if ((unsigned)step_bitwidth < max_state_bw)
+        {
+          if (max_state_bw <= 8) step_bitwidth = 8;
+          else if (max_state_bw <= 16) step_bitwidth = 16;
+          else step_bitwidth = 32;
+        }
+        
+        outs() << "  Auto-detected step bitwidth: " << step_bitwidth << "\n";
       }
 
       // Step 2: Extract concrete initial state
@@ -2265,12 +2316,39 @@ namespace ufo
     bool generateCCEXFromSynthesis(
         const std::map<std::string, std::string>& synthesized_funcs,
         const std::string& ccex_filename = "synthesized_ccex.smt2",
-        int step_bitwidth = 16)
+        int step_bitwidth = -1)  // -1 means auto-detect from synthesized functions
     {
       if (synthesized_funcs.empty())
       {
         outs() << "Error: No synthesized functions provided\n";
         return false;
+      }
+
+      // Auto-detect step_bitwidth from synthesized function definitions
+      // Look for pattern: ((step (_ BitVec N)))
+      if (step_bitwidth <= 0)
+      {
+        for (auto& kv : synthesized_funcs)
+        {
+          std::string def = kv.second;
+          size_t bvPos = def.find("(_ BitVec ");
+          if (bvPos != std::string::npos)
+          {
+            size_t numStart = bvPos + 10;
+            size_t numEnd = def.find(")", numStart);
+            if (numEnd != std::string::npos)
+            {
+              std::string bwStr = def.substr(numStart, numEnd - numStart);
+              step_bitwidth = std::stoi(bwStr);
+              break;
+            }
+          }
+        }
+        if (step_bitwidth <= 0)
+        {
+          outs() << "Warning: Could not auto-detect step bitwidth, using 16\n";
+          step_bitwidth = 16;
+        }
       }
 
       // Find main relation and get state variables
@@ -2366,8 +2444,12 @@ namespace ufo
       out << "; Assert that trace arrays follow the synthesized functions\n";
       out << "(assert\n";
       out << "  (forall ((i (_ BitVec " << step_bitwidth << ")))\n";
-      out << "    (=> (and (bvule #x" << std::string(step_bitwidth / 4, '0') << " i) ";
-      out << "(bvule i #x" << std::string(step_bitwidth / 4, 'f') << "))\n";
+      
+      // Generate hex constants properly for any bitwidth
+      // For step_bitwidth bits, we need (step_bitwidth + 3) / 4 hex digits
+      int hex_digits = (step_bitwidth + 3) / 4;
+      out << "    (=> (and (bvule #x" << std::string(hex_digits, '0') << " i) ";
+      out << "(bvule i #x" << std::string(hex_digits, 'f') << "))\n";
       out << "        (and\n";
       
       for (size_t i = 0; i < state_vars.size(); i++)

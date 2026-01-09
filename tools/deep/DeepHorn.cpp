@@ -155,9 +155,9 @@ int main (int argc, char ** argv)
         " " << OPT_D5 << "                           direction of phase discovery (0: backward, 1: forward (default), 2: both)\n" <<
         " " << OPT_D6 << "                         do not consider duplicates of data candidates (needs \"" << OPT_DATA_LEARNING <<"\")\n\n" <<
         "SyGuS counterexample synthesis options (for BV):\n" <<
-        " " << OPT_SYGUS << " <file>                   generate a SyGuS file for CVC5 counterexample synthesis\n" <<
-        " " << OPT_SYGUS_POINTS << " <N>            number of trace points to collect (default: 128)\n" <<
-        " " << OPT_SYGUS_BITWIDTH << " <N>          bit-width for step parameter (default: 16)\n" <<
+        " " << OPT_SYGUS << " [file]                   generate a SyGuS file for CVC5 counterexample synthesis\n" <<
+        " " << OPT_SYGUS_POINTS << " <N>            number of trace points (default: auto, based on state bitwidth)\n" <<
+        " " << OPT_SYGUS_BITWIDTH << " <N>          bit-width for step parameter (default: auto)\n" <<
         " " << OPT_SYGUS_RUN << "                     also run CVC5 on the generated SyGuS file\n" <<
         " " << OPT_SYGUS_VALIDATE << "              synthesize and validate CEX inductively\n" <<
         " " << OPT_SYGUS_CCEX << " <file>           output CCEX file from synthesis (for validation)\n";
@@ -236,8 +236,8 @@ int main (int argc, char ** argv)
       break;
     }
   }
-  int sygus_points = getIntValue(OPT_SYGUS_POINTS, 128, argc, argv);
-  int sygus_bitwidth = getIntValue(OPT_SYGUS_BITWIDTH, 16, argc, argv);
+  int sygus_points = getIntValue(OPT_SYGUS_POINTS, -1, argc, argv);  // -1 = auto-detect
+  int sygus_bitwidth = getIntValue(OPT_SYGUS_BITWIDTH, -1, argc, argv);  // -1 = auto-detect
   bool sygus_run = getBoolValue(OPT_SYGUS_RUN, false, argc, argv);
   bool sygus_validate = getBoolValue(OPT_SYGUS_VALIDATE, false, argc, argv);
   string sygus_ccex_file = getStrValue(OPT_SYGUS_CCEX, "", argc, argv);
