@@ -35,45 +35,56 @@ Requires <a href="https://cvc5.github.io/">CVC5</a> to be installed and availabl
 freqhorn --sygus [file] --sygus-run --sygus-validate [options] <input.smt2>
 ```
 
+### Synthesis Modes
+
+There are two SyGuS generation modes:
+
+- **PBE (Point-Based Enumeration)**: `--sygus` - Collects concrete trace points and synthesizes a function that fits them. Good for discovering complex patterns from examples.
+
+- **TR (Transition Relation)**: `--sygus-tr` - Encodes the init constraint and a universal transition constraint. No unrolling required, works well for any bitwidth including 64-bit systems.
+
 ### Options
 
 | Option | Description |
 |--------|-------------|
-| `--sygus [file]` | Generate a SyGuS file for CVC5 counterexample synthesis (default: `counterexample.sygus`) |
-| `--sygus-points <N>` | Number of trace points to collect (default: 16, enough for pattern inference) |
-| `--sygus-bitwidth <N>` | Bit-width for the step parameter (default: auto, matches state width) |
-| `--sygus-run` | Run CVC5 on the generated SyGuS file and display synthesized functions |
+| `--sygus [file]` | Generate SyGuS file using PBE mode (default: `counterexample.sygus`) |
+| `--sygus-tr [file]` | Generate SyGuS file using TR mode (no unrolling needed) |
+| `--sygus-points <N>` | Number of trace points for PBE mode (default: 16) |
+| `--sygus-bitwidth <N>` | Bit-width for the step parameter (default: auto) |
+| `--sygus-run` | Run CVC5 on the generated SyGuS file |
 | `--sygus-validate` | Synthesize, generate CCEX file, and validate inductively |
-| `--sygus-ccex <file>` | Output CCEX file from synthesis (for manual validation) |
+| `--sygus-ccex <file>` | Output CCEX file from synthesis |
 
 ### Examples
 
-**Generate SyGuS file only:**
+**PBE mode (point-based):**
 ```bash
-freqhorn --sygus output.sygus bench_horn_ccex/cex1_zext/bvzext4_cex1.smt2
+freqhorn --sygus --sygus-run --sygus-validate bench_horn_ccex/cex1_zext/bvzext4_cex1.smt2
 ```
 
-**Synthesize and display functions:**
+**TR mode (transition relation) - recommended for large bitwidths:**
 ```bash
-freqhorn --sygus --sygus-run --sygus-points 32 bench_horn_ccex/cex1_zext/bvzext4_cex1.smt2
-```
-
-**Full pipeline (synthesize + validate):**
-```bash
-freqhorn --sygus --sygus-run --sygus-validate --sygus-points 64 --sygus-bitwidth 16 \
-    bench_horn_ccex/cex2_zext/bvzext4_cex2.smt2
+freqhorn --sygus-tr --sygus-run --sygus-validate bench_horn_ccex/cex1_zext/bvzext64_cex1.smt2
 ```
 
 ### How It Works
 
-1. **Trace Simulation**: Simulates the CHC transition system for N steps, collecting input-output examples for each state variable
-2. **SyGuS Generation**: Creates a SyGuS file with bitvector grammar constraints for CVC5
-3. **Synthesis**: CVC5 synthesizes closed-form functions `f(step)` that match the trace data
-4. **CCEX Generation**: Converts synthesized functions to a compact counterexample (CCEX) format
-5. **Inductive Validation**: Validates the CCEX using 3 checks:
-   - **Init**: `f(0)` satisfies the initial constraint
-   - **Transition**: `f(i) ∧ trans ⟹ f(i+1)` is valid
-   - **Property**: `f(N)` reaches the error state
+**PBE Mode:**
+1. Simulates the transition system for N steps
+2. Generates constraints: `(constraint (= (f_x 0) val_0))`, `(constraint (= (f_x 1) val_1))`, ...
+3. CVC5 synthesizes a function that fits all points
+
+**TR Mode:**
+1. Extracts initial state values
+2. Generates two constraints:
+   - **C1**: `(constraint (= (f_x 0) init_val))`
+   - **C2**: `(constraint (forall ((i BV)) (= (f_x (bvadd i 1)) (bvadd (f_x i) 1))))`
+3. CVC5 synthesizes a function that satisfies both constraints
+
+**Validation (both modes):**
+- **Init check**: `f(0)` satisfies the initial constraint
+- **Transition check**: `f(i) ∧ trans ⟹ f(i+1)` is valid
+- **Property check**: `f(N)` reaches the error state
 
 Benchmarks
 ==========

@@ -100,6 +100,7 @@ int main (int argc, char ** argv)
   const char *OPT_LIA2BV = "--lia2bv";
   const char *OPT_HORN = "--horn";
   const char *OPT_SYGUS = "--sygus";
+  const char *OPT_SYGUS_TR = "--sygus-tr";
   const char *OPT_SYGUS_POINTS = "--sygus-points";
   const char *OPT_SYGUS_BITWIDTH = "--sygus-bitwidth";
   const char *OPT_SYGUS_RUN = "--sygus-run";
@@ -155,8 +156,9 @@ int main (int argc, char ** argv)
         " " << OPT_D5 << "                           direction of phase discovery (0: backward, 1: forward (default), 2: both)\n" <<
         " " << OPT_D6 << "                         do not consider duplicates of data candidates (needs \"" << OPT_DATA_LEARNING <<"\")\n\n" <<
         "SyGuS counterexample synthesis options (for BV):\n" <<
-        " " << OPT_SYGUS << " [file]                   generate a SyGuS file for CVC5 counterexample synthesis\n" <<
-        " " << OPT_SYGUS_POINTS << " <N>            number of trace points (default: auto, based on state bitwidth)\n" <<
+        " " << OPT_SYGUS << " [file]                   generate SyGuS file using PBE (point-based enumeration)\n" <<
+        " " << OPT_SYGUS_TR << " [file]                generate SyGuS file using TR (transition relation)\n" <<
+        " " << OPT_SYGUS_POINTS << " <N>            number of trace points for PBE mode (default: 16)\n" <<
         " " << OPT_SYGUS_BITWIDTH << " <N>          bit-width for step parameter (default: auto)\n" <<
         " " << OPT_SYGUS_RUN << "                     also run CVC5 on the generated SyGuS file\n" <<
         " " << OPT_SYGUS_VALIDATE << "              synthesize and validate CEX inductively\n" <<
@@ -221,17 +223,22 @@ int main (int argc, char ** argv)
   bool ccexUnrolling = getBoolValueWithNegation("--use-ccex-unrolling", "--no-ccex-unrolling", false, argc, argv);
 
   // SyGuS counterexample synthesis options
-  // --sygus can be used alone (uses default filename) or with a custom filename
+  // --sygus (PBE mode) or --sygus-tr (TR mode)
   bool do_sygus = getBoolValue(OPT_SYGUS, false, argc, argv);
+  bool do_sygus_tr = getBoolValue(OPT_SYGUS_TR, false, argc, argv);
   string sygus_file = "counterexample.sygus";  // default
-  // Check if --sygus has a following argument that doesn't start with --
+  // Check if --sygus or --sygus-tr has a following argument that is a custom filename
+  // (not another option starting with '-' and not the input .smt2 file)
   for (int i = 1; i < argc - 1; i++)
   {
-    if (strcmp(argv[i], OPT_SYGUS) == 0)
+    if (strcmp(argv[i], OPT_SYGUS) == 0 || strcmp(argv[i], OPT_SYGUS_TR) == 0)
     {
-      if (argv[i+1][0] != '-')  // Next arg is not another option
+      string next_arg = string(argv[i+1]);
+      // Check it's not an option and not the input file (which ends in .smt2)
+      if (next_arg[0] != '-' && 
+          (next_arg.length() < 5 || next_arg.substr(next_arg.length() - 5) != ".smt2"))
       {
-        sygus_file = string(argv[i+1]);
+        sygus_file = next_arg;
       }
       break;
     }
@@ -267,8 +274,8 @@ int main (int argc, char ** argv)
     if(do_dl < 1) do_dl = 1;
   }
 
-  // Handle SyGuS counterexample synthesis mode
-  if (do_sygus)
+  // Handle SyGuS counterexample synthesis mode (PBE or TR)
+  if (do_sygus || do_sygus_tr)
   {
     ExprFactory efac;
     EZ3 z3(efac);
@@ -283,12 +290,25 @@ int main (int argc, char ** argv)
     // Set default output filename if not specified
     string output_file = (sygus_file != "") ? sygus_file : "counterexample.sygus";
     
-    bool success = ruleManager.generateCounterexampleSyGuS(
-      output_file, 
-      sygus_points, 
-      sygus_bitwidth, 
-      true  // include_bad_check
-    );
+    bool success;
+    if (do_sygus_tr)
+    {
+      // TR mode: use transition relation constraints
+      success = ruleManager.generateCounterexampleSyGuSTR(
+        output_file, 
+        sygus_bitwidth
+      );
+    }
+    else
+    {
+      // PBE mode: use point-based enumeration
+      success = ruleManager.generateCounterexampleSyGuS(
+        output_file, 
+        sygus_points, 
+        sygus_bitwidth, 
+        true  // include_bad_check
+      );
+    }
     
     if (!success)
     {

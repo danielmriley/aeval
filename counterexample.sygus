@@ -1,56 +1,42 @@
-; SyGuS file for counterexample synthesis
+; SyGuS file for counterexample synthesis (Transition Relation mode)
 ; Generated from CHC system
 ; Main relation: inv
-; Trace points collected: 16
 
 (set-logic BV)
 
 ; Function for variable _FH_0
-(synth-fun state_0 ((step (_ BitVec 32))) (_ BitVec 64)
-  ((Start (_ BitVec 64)) (Shift (_ BitVec 64)))
+(synth-fun f_0 ((i (_ BitVec 64))) (_ BitVec 64)
+  ((Start (_ BitVec 64)) (Amt (_ BitVec 64)))
   ((Start (_ BitVec 64) (
-    ((_ zero_extend 32) step)
+    i
     #x0000000000000000
     #x0000000000000001
-    (bvadd Start Start)
-    (bvsub Start Start)
-    (bvxor Start Start)
-    (bvand Start Start)
-    (bvor Start Start)
     (bvnot Start)
     (bvneg Start)
-    (bvlshr Start Shift)
-    (bvshl Start Shift)
+    (bvand Start Start)
+    (bvor Start Start)
+    (bvxor Start Start)
+    (bvadd Start Start)
+    (bvsub Start Start)
+    (bvlshr Start Amt)
+    (bvshl Start Amt)
   ))
-  (Shift (_ BitVec 64) (
+  (Amt (_ BitVec 64) (
     #x0000000000000000
     #x0000000000000001
     #x0000000000000002
     #x0000000000000003
     #x0000000000000004
-    #x0000000000000005
-    #x0000000000000006
-    #x0000000000000007
-    #x0000000000000008
   ))
 ))
 
-; Constraints from concrete trace
-(constraint (= (state_0 #x00000000) #x0000000000000000))
-(constraint (= (state_0 #x00000001) #x0000000000000001))
-(constraint (= (state_0 #x00000002) #x0000000000000002))
-(constraint (= (state_0 #x00000003) #x0000000000000003))
-(constraint (= (state_0 #x00000004) #x0000000000000004))
-(constraint (= (state_0 #x00000005) #x0000000000000005))
-(constraint (= (state_0 #x00000006) #x0000000000000006))
-(constraint (= (state_0 #x00000007) #x0000000000000007))
-(constraint (= (state_0 #x00000008) #x0000000000000008))
-(constraint (= (state_0 #x00000009) #x0000000000000009))
-(constraint (= (state_0 #x0000000a) #x000000000000000a))
-(constraint (= (state_0 #x0000000b) #x000000000000000b))
-(constraint (= (state_0 #x0000000c) #x000000000000000c))
-(constraint (= (state_0 #x0000000d) #x000000000000000d))
-(constraint (= (state_0 #x0000000e) #x000000000000000e))
-(constraint (= (state_0 #x0000000f) #x000000000000000f))
+; C1: Initialization constraint
+(constraint (= (f_0 #x0000000000000000) #x0000000000000000))
+
+; C2: Universal transition preservation
+(constraint (forall ((i (_ BitVec 64)))
+  (= (f_0 (bvadd i #x0000000000000001))
+     (bvadd (f_0 i) #x0000000000000001))
+))
 
 (check-synth)
