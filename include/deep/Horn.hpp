@@ -1939,22 +1939,17 @@ namespace ufo
       }
 
       // Auto-detect num_points if not specified (-1)
-      // Use 2^(max_state_bw) as upper bound, capped at reasonable limits
+      // Key insight: We don't need full state space coverage for synthesis.
+      // CVC5 can infer patterns from a small number of examples.
+      // Use a small fixed default that works well for pattern inference.
       if (num_points < 0)
       {
-        // For a single variable of width w, we need at most 2^w states
-        // For multiple variables, the combined state space is larger, but
-        // the trace length to reach bad is usually bounded by the smallest dimension
-        unsigned effective_bits = max_state_bw;
-        if (effective_bits <= 8)
-          num_points = (1 << effective_bits);  // Full state space for small widths
-        else if (effective_bits <= 16)
-          num_points = 256;  // Cap at 256 for medium widths
-        else
-          num_points = 512;  // Cap at 512 for large widths
+        // Default to 16 points - enough for most linear/polynomial patterns
+        // For very small state spaces, use the full space
+        unsigned max_states = (max_state_bw <= 4) ? (1u << max_state_bw) : 16;
+        num_points = max_states;
         
-        outs() << "  Auto-detected trace points: " << num_points 
-               << " (based on " << max_state_bw << "-bit state width)\n";
+        outs() << "  Auto-detected trace points: " << num_points << "\n";
       }
 
       // Auto-detect step_bitwidth if not specified (-1)

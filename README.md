@@ -40,8 +40,8 @@ freqhorn --sygus [file] --sygus-run --sygus-validate [options] <input.smt2>
 | Option | Description |
 |--------|-------------|
 | `--sygus [file]` | Generate a SyGuS file for CVC5 counterexample synthesis (default: `counterexample.sygus`) |
-| `--sygus-points <N>` | Number of trace points to collect (default: auto, based on state bitwidth) |
-| `--sygus-bitwidth <N>` | Bit-width for the step parameter (default: auto, based on state bitwidth) |
+| `--sygus-points <N>` | Number of trace points to collect (default: 16, enough for pattern inference) |
+| `--sygus-bitwidth <N>` | Bit-width for the step parameter (default: auto, matches state width) |
 | `--sygus-run` | Run CVC5 on the generated SyGuS file and display synthesized functions |
 | `--sygus-validate` | Synthesize, generate CCEX file, and validate inductively |
 | `--sygus-ccex <file>` | Output CCEX file from synthesis (for manual validation) |
