@@ -1,0 +1,81 @@
+========================================
+SyGuS TR Mode Benchmark Tests
+========================================
+
+[ 1] bvzext128_cex1                                     PASS
+[ 2] bvzext16_cex1                                      PASS
+[ 3] bvzext32_cex1                                      PASS
+[ 4] bvzext4_cex1                                       PASS
+[ 5] bvzext4_multi_fail                                 PASS
+[ 6] bvzext64_cex1                                      PASS
+[ 7] bvzext8_cex1                                       PASS
+[ 8] bvzext128_cex2                                     PASS
+[ 9] bvzext16_cex2                                      PASS
+[10] bvzext32_cex2                                      PASS
+[11] bvzext4_cex2                                       PASS
+[12] bvzext64_cex2                                      PASS
+[13] bvzext8_cex2                                       PASS
+[14] bvzext128_cex3                                     PASS
+[15] bvzext16_cex3                                      PASS
+[16] bvzext32_cex3                                      PASS
+[17] bvzext4_cex3                                       PASS
+[18] bvzext64_cex3                                      PASS
+[19] bvzext8_cex3                                       PASS
+[20] bvzext128_cex4                                     WRONG_TRANS: (_FH_0'=bvadd(_FH_0, 2:bv(128)))
+[21] bvzext16_cex4                                      WRONG_TRANS: (_FH_0'=bvadd(_FH_0, 2:bv(16)))
+[22] bvzext32_cex4                                      WRONG_TRANS: (_FH_0'=bvadd(_FH_0, 2:bv(32)))
+[23] bvzext4_cex4                                       WRONG_TRANS: (_FH_0'=bvadd(_FH_0, 2:bv(4)))
+[24] bvzext64_cex4                                      WRONG_TRANS: (_FH_0'=bvadd(_FH_0, 2:bv(64)))
+[25] bvzext8_cex4                                       WRONG_TRANS: (_FH_0'=bvadd(_FH_0, 2:bv(8)))
+[26] bvzext128_cex5                                     WRONG_TRANS: (_FH_1'=bvadd(_FH_1, 2:bv(128)))
+[27] bvzext16_cex5                                      WRONG_TRANS: (_FH_1'=bvadd(_FH_1, 2:bv(16)))
+[28] bvzext32_cex5                                      WRONG_TRANS: (_FH_1'=bvadd(_FH_1, 2:bv(32)))
+[29] bvzext4_cex5                                       WRONG_TRANS: (_FH_1'=bvadd(_FH_1, 2:bv(4)))
+[30] bvzext64_cex5                                      WRONG_TRANS: (_FH_1'=bvadd(_FH_1, 2:bv(64)))
+[31] bvzext8_cex5                                       WRONG_TRANS: (_FH_1'=bvadd(_FH_1, 2:bv(8)))
+[32] bvzext128_cex6                                     PARTIAL (cone-based validation)
+[33] bvzext16_cex6                                      PARTIAL (cone-based validation)
+[34] bvzext32_cex6                                      PARTIAL (cone-based validation)
+[35] bvzext4_cex6                                       PARTIAL (cone-based validation)
+[36] bvzext64_cex6                                      PARTIAL (cone-based validation)
+[37] bvzext8_cex6                                       PARTIAL (cone-based validation)
+[38] bvzext16_nd_branch                                 WRONG_TRANS: (((extract(0, 0, _FH_0)=(0:bv(1)))&&(_FH_0'=bvadd(_FH_0, 1:bv(16))))||((extract(0, 0, _FH_0)=(1:bv(1)))&&(_FH_0'=bvadd(_FH_0, 2:bv(16)))))
+[39] bvzext32_nd_branch                                 WRONG_TRANS: (((extract(0, 0, _FH_0)=(0:bv(1)))&&(_FH_0'=bvadd(_FH_0, 1:bv(32))))||((extract(0, 0, _FH_0)=(1:bv(1)))&&(_FH_0'=bvadd(_FH_0, 2:bv(32)))))
+[40] bvzext4_nd_branch                                  WRONG_TRANS: (((extract(0, 0, _FH_0)=(0:bv(1)))&&(_FH_0'=bvadd(_FH_0, 1:bv(4))))||((extract(0, 0, _FH_0)=(1:bv(1)))&&(_FH_0'=bvadd(_FH_0, 2:bv(4)))))
+[41] bvzext64_nd_branch                                 WRONG_TRANS: (((extract(0, 0, _FH_0)=(0:bv(1)))&&(_FH_0'=bvadd(_FH_0, 1:bv(64))))||((extract(0, 0, _FH_0)=(1:bv(1)))&&(_FH_0'=bvadd(_FH_0, 2:bv(64)))))
+[42] bvzext8_nd_branch                                  WRONG_TRANS: (((extract(0, 0, _FH_0)=(0:bv(1)))&&(_FH_0'=bvadd(_FH_0, 1:bv(8))))||((extract(0, 0, _FH_0)=(1:bv(1)))&&(_FH_0'=bvadd(_FH_0, 2:bv(8)))))
+[43] bvzext16_nd_cex1_zext                              WRONG_TRANS: (((_FH_0'=bvadd(_FH_0, 1:bv(16)))&&(_FH_1'=_FH_1))||((_FH_0'=_FH_0)&&(_FH_1'=bvadd(_FH_1, 1:bv(16)))))
+[44] bvzext32_nd_cex1_zext                              WRONG_TRANS: (((_FH_0'=bvadd(_FH_0, 1:bv(32)))&&(_FH_1'=_FH_1))||((_FH_0'=_FH_0)&&(_FH_1'=bvadd(_FH_1, 1:bv(32)))))
+[45] bvzext4_nd_cex1_zext                               WRONG_TRANS: (((_FH_0'=bvadd(_FH_0, 1:bv(4)))&&(_FH_1'=_FH_1))||((_FH_0'=_FH_0)&&(_FH_1'=bvadd(_FH_1, 1:bv(4)))))
+[46] bvzext64_nd_cex1_zext                              WRONG_TRANS: (((_FH_0'=bvadd(_FH_0, 1:bv(64)))&&(_FH_1'=_FH_1))||((_FH_0'=_FH_0)&&(_FH_1'=bvadd(_FH_1, 1:bv(64)))))
+[47] bvzext8_nd_cex1_zext                               WRONG_TRANS: (((_FH_0'=bvadd(_FH_0, 1:bv(8)))&&(_FH_1'=_FH_1))||((_FH_0'=_FH_0)&&(_FH_1'=bvadd(_FH_1, 1:bv(8)))))
+[48] bvzext16_nd_mixed                                  PASS
+[49] bvzext32_nd_mixed                                  PASS
+[50] bvzext4_nd_mixed                                   PASS
+[51] bvzext64_nd_mixed                                  PASS
+[52] bvzext8_nd_mixed                                   PASS
+[53] bvzext16_nd_random                                 PASS
+[54] bvzext32_nd_random                                 PASS
+[55] bvzext4_nd_random                                  PASS
+[56] bvzext64_nd_random                                 PASS
+[57] bvzext8_nd_random                                  PASS
+[58] bvzext16_nd_reset                                  PASS
+[59] bvzext32_nd_reset                                  PASS
+[60] bvzext4_nd_reset                                   PASS
+[61] bvzext64_nd_reset                                  PASS
+[62] bvzext8_nd_reset                                   PASS
+[63] bvzext4_nd_skip                                    PASS
+[64] bvzext16_nd_twophase                               WRONG_TRANS: ite(bvuge(_FH_0, 32768:bv(16)), _FH_1'=bvadd(_FH_1, 1:bv(16)), _FH_1'=_FH_1)
+[65] bvzext32_nd_twophase                               WRONG_TRANS: ite(bvuge(_FH_0, 2147483648:bv(32)), _FH_1'=bvadd(_FH_1, 1:bv(32)), _FH_1'=_FH_1)
+[66] bvzext4_nd_twophase                                WRONG_TRANS: ite(bvuge(_FH_0, 8:bv(4)), _FH_1'=bvadd(_FH_1, 1:bv(4)), _FH_1'=_FH_1)
+[67] bvzext64_nd_twophase                               WRONG_TRANS: ite(bvuge(_FH_0, 9223372036854775808:bv(64)), _FH_1'=bvadd(_FH_1, 1:bv(64)), _FH_1'=_FH_1)
+[68] bvzext8_nd_twophase                                WRONG_TRANS: ite(bvuge(_FH_0, 128:bv(8)), _FH_1'=bvadd(_FH_1, 1:bv(8)), _FH_1'=_FH_1)
+
+========================================
+Results Summary
+========================================
+Total:   68
+Passed:  35
+Failed:  27
+Timeout: 0
+========================================

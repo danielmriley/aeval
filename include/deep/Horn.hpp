@@ -5,6 +5,7 @@
 #include <chrono>
 #include <iomanip>
 #include <sstream>
+#include <regex>
 #include "ae/AeValSolver.hpp"
 #include "ae/ExprSimplBv.hpp"
 
@@ -2222,6 +2223,11 @@ namespace ufo
         }
       }
 
+      // Add interval constraint: step must be in valid range [0, trace_size)
+      // This tells CVC5 that the function only needs to be defined on this interval
+      // Note: For PBE mode, the point constraints already fully specify the function
+      // on the sampled interval, so we just document it here.
+
       out << "\n(check-synth)\n";
       out.close();
 
@@ -2261,6 +2267,7 @@ namespace ufo
       Expr main_rel = nullptr;
       HornRuleExt* fact_rule = nullptr;
       HornRuleExt* trans_rule = nullptr;
+      HornRuleExt* query_rule = nullptr;
 
       for (auto& d : decls)
       {
@@ -2281,7 +2288,7 @@ namespace ufo
 
       outs() << "  Main relation: " << *main_rel << "\n";
 
-      // Find fact and trans rules
+      // Find fact, trans, and query rules
       for (auto& hr : chcs)
       {
         if (hr.isFact && hr.dstRelation == main_rel)
@@ -2291,6 +2298,10 @@ namespace ufo
         else if (hr.isInductive && hr.srcRelation == main_rel && hr.dstRelation == main_rel)
         {
           trans_rule = &hr;
+        }
+        else if (hr.isQuery && hr.srcRelation == main_rel)
+        {
+          query_rule = &hr;
         }
       }
 
@@ -2390,61 +2401,102 @@ namespace ufo
         out << "(synth-fun " << fun_name << " ((i (_ BitVec " << step_bitwidth << "))) ";
         out << "(_ BitVec " << vwidth << ")\n";
 
-        // Grammar
-        out << "  ((Start (_ BitVec " << vwidth << ")) (Amt (_ BitVec " << vwidth << ")))\n";
-        out << "  ((Start (_ BitVec " << vwidth << ") (\n";
+        // Enhanced grammar for complex transitions
+        // Supports: constants, arithmetic, ite, comparisons, bit operations
+        int hex_digits = (vwidth + 3) / 4;
         
-        // Convert index to variable width if different
+        out << "  (\n";
+        out << "    (Start (_ BitVec " << vwidth << "))\n";
+        out << "    (Const (_ BitVec " << vwidth << "))\n";
+        out << "    (Cond Bool)\n";
+        out << "  )\n";
+        out << "  (\n";
+        
+        // Start: main bitvector expressions
+        out << "    (Start (_ BitVec " << vwidth << ") (\n";
+        
+        // The step variable (possibly extended/extracted)
         if ((unsigned)step_bitwidth < vwidth)
         {
-          out << "    ((_ zero_extend " << (vwidth - step_bitwidth) << ") i)\n";
+          out << "      ((_ zero_extend " << (vwidth - step_bitwidth) << ") i)\n";
         }
         else if ((unsigned)step_bitwidth > vwidth)
         {
-          out << "    ((_ extract " << (vwidth - 1) << " 0) i)\n";
+          out << "      ((_ extract " << (vwidth - 1) << " 0) i)\n";
         }
         else
         {
-          out << "    i\n";
+          out << "      i\n";
         }
 
-        // All constants for this bitwidth (for small widths)
-        if (vwidth <= 4)
-        {
-          for (unsigned c = 0; c < (1u << vwidth); c++)
-          {
-            out << "    #x" << std::hex << c << std::dec << "\n";
-          }
-        }
-        else
-        {
-          // Just 0 and 1 for larger widths
-          int hex_digits = (vwidth + 3) / 4;
-          out << "    #x" << std::string(hex_digits, '0') << "\n";
-          out << "    #x" << std::string(hex_digits - 1, '0') << "1\n";
-        }
+        // Constants
+        out << "      Const\n";
 
-        // BV operations
-        out << "    (bvnot Start)\n";
-        out << "    (bvneg Start)\n";
-        out << "    (bvand Start Start)\n";
-        out << "    (bvor Start Start)\n";
-        out << "    (bvxor Start Start)\n";
-        out << "    (bvadd Start Start)\n";
-        out << "    (bvsub Start Start)\n";
-        out << "    (bvlshr Start Amt)\n";
-        out << "    (bvshl Start Amt)\n";
-        out << "  ))\n";
+        // Arithmetic operations
+        out << "      (bvadd Start Start)\n";
+        out << "      (bvsub Start Start)\n";
+        out << "      (bvmul Start Const)\n";  // Multiply by constants
         
-        // Shift amounts
-        out << "  (Amt (_ BitVec " << vwidth << ") (\n";
-        int hex_digits = (vwidth + 3) / 4;
-        for (unsigned sh = 0; sh <= 4 && sh < vwidth; sh++)
+        // Logical operations
+        out << "      (bvand Start Start)\n";
+        out << "      (bvor Start Start)\n";
+        out << "      (bvxor Start Start)\n";
+        out << "      (bvnot Start)\n";
+        out << "      (bvneg Start)\n";
+        
+        // Shifts
+        out << "      (bvlshr Start Const)\n";
+        out << "      (bvshl Start Const)\n";
+        out << "      (bvashr Start Const)\n";
+        
+        // Conditional expressions (for branching transitions)
+        out << "      (ite Cond Start Start)\n";
+        out << "    ))\n";
+
+        // Const: useful constant values (must come second to match declaration order)
+        out << "    (Const (_ BitVec " << vwidth << ") (\n";
+        // Small constants up to 8
+        for (unsigned c = 0; c <= 8; c++)
         {
-          out << "    #x" << std::string(hex_digits - 1, '0') << std::hex << sh << std::dec << "\n";
+          out << "      #x" << std::setfill('0') << std::setw(hex_digits) << std::hex << c << std::dec << "\n";
         }
-        out << "  ))\n";
-        out << "))\n\n";
+        // Powers of 2
+        for (unsigned p = 4; p < vwidth && p <= 16; p++)
+        {
+          unsigned val = 1u << p;
+          out << "      #x" << std::setfill('0') << std::setw(hex_digits) << std::hex << val << std::dec << "\n";
+        }
+        // Half of max value (for threshold comparisons like x >= 8 in 4-bit)
+        if (vwidth >= 4)
+        {
+          unsigned half = 1u << (vwidth - 1);
+          out << "      #x" << std::setfill('0') << std::setw(hex_digits) << std::hex << half << std::dec << "\n";
+        }
+        out << "    ))\n";
+
+        // Cond: comparison predicates (must come third to match declaration order)
+        out << "    (Cond Bool (\n";
+        out << "      true\n";
+        out << "      false\n";
+        out << "      (= Start Start)\n";
+        out << "      (bvult Start Start)\n";
+        out << "      (bvule Start Start)\n";
+        out << "      (bvugt Start Start)\n";
+        out << "      (bvuge Start Start)\n";
+        out << "      (bvslt Start Start)\n";
+        out << "      (bvsle Start Start)\n";
+        out << "      (bvsgt Start Start)\n";
+        out << "      (bvsge Start Start)\n";
+        // Bit extraction for parity checks
+        out << "      (= ((_ extract 0 0) Start) #b0)\n";
+        out << "      (= ((_ extract 0 0) Start) #b1)\n";
+        out << "      (not Cond)\n";
+        out << "      (and Cond Cond)\n";
+        out << "      (or Cond Cond)\n";
+        out << "    ))\n";
+        
+        out << "  )\n";
+        out << ")\n\n";
       }
 
       // C1: Initialization constraint
@@ -2488,47 +2540,630 @@ namespace ufo
       // We need to express the transition relation in terms of the synthesized functions
       out << "; C2: Universal transition preservation\n";
       
-      // For each state variable, generate: forall i. f_k(i+1) = trans_k(f_0(i), f_1(i), ...)
-      // We need to extract the transition expression from the CHC
+      // We need to express the transition relation in terms of the synthesized functions
+      // Convert: trans(srcVars, dstVars) => trans(f_k(i), f_k(i+1))
       
-      // The transition body relates srcVars to dstVars
-      // srcVars = state at step i, dstVars = state at step i+1
-      // We need to express dstVar[k] in terms of srcVars
+      // First, extract the transition body as a constraint
+      Expr trans_body = trans_rule->body;
       
-      for (size_t varIdx = 0; varIdx < state_vars.size(); varIdx++)
+      // Debug: print the transition body
+      outs() << "  Transition body: " << *trans_body << "\n";
+      
+      // Separate guard conditions from update assignments
+      // Guard conditions: predicates that don't involve dstVars (e.g., bvult(_FH_0, 255))
+      // Update assignments: equations involving dstVars (e.g., _FH_0' = ...)
+      ExprVector guards;
+      ExprVector updates;
+      
+      // Helper to check if expression involves destination variables
+      std::function<bool(Expr)> involvesDstVars = [&](Expr e) -> bool {
+        if (!e) return false;
+        for (auto& dv : trans_rule->dstVars)
+        {
+          if (e == dv) return true;
+          // Check by name too
+          std::stringstream ss1, ss2;
+          ss1 << *e;
+          ss2 << *dv;
+          if (ss1.str() == ss2.str()) return true;
+        }
+        for (unsigned i = 0; i < e->arity(); i++)
+        {
+          if (involvesDstVars(e->arg(i))) return true;
+        }
+        return false;
+      };
+      
+      // Separate conjuncts into guards and updates
+      if (isOpX<AND>(trans_body))
       {
-        Expr v = state_vars[varIdx];
-        if (var_bw.find(v) == var_bw.end()) continue;
+        for (unsigned i = 0; i < trans_body->arity(); i++)
+        {
+          Expr conj = trans_body->arg(i);
+          if (involvesDstVars(conj))
+          {
+            updates.push_back(conj);
+          }
+          else
+          {
+            guards.push_back(conj);
+          }
+        }
+      }
+      else
+      {
+        // Single constraint
+        if (involvesDstVars(trans_body))
+          updates.push_back(trans_body);
+        else
+          guards.push_back(trans_body);
+      }
+      
+      outs() << "  Guards: " << guards.size() << ", Updates: " << updates.size() << "\n";
+      
+      // Build substitution: srcVar[k] -> (f_k i), dstVar[k] -> (f_k (i+1))
+      int hex_digits = (step_bitwidth + 3) / 4;
+      std::string one_step = std::string(hex_digits - 1, '0') + "1";
+      
+      // Generate the forall constraint
+      out << "(constraint (forall ((i (_ BitVec " << step_bitwidth << ")))\n";
+      
+      // Convert the transition body to SyGuS format
+      std::function<std::string(Expr)> exprToSygus = [&](Expr e) -> std::string {
+        if (!e) return "null";
+        
+        // Check if it's a source variable -> replace with f_k(i)
+        for (size_t k = 0; k < trans_rule->srcVars.size(); k++)
+        {
+          Expr srcVar = trans_rule->srcVars[k];
+          if (e == srcVar)
+          {
+            return "(f_" + to_string(k) + " i)";
+          }
+          // Also check by name (in case expressions are different objects but same variable)
+          std::stringstream ss1, ss2;
+          ss1 << *e;
+          ss2 << *srcVar;
+          if (ss1.str() == ss2.str())
+          {
+            return "(f_" + to_string(k) + " i)";
+          }
+        }
+        // Check if it's a destination variable -> replace with f_k(i+1)
+        for (size_t k = 0; k < trans_rule->dstVars.size(); k++)
+        {
+          Expr dstVar = trans_rule->dstVars[k];
+          if (e == dstVar)
+          {
+            return "(f_" + to_string(k) + " (bvadd i #x" + one_step + "))";
+          }
+          // Also check by name
+          std::stringstream ss1, ss2;
+          ss1 << *e;
+          ss2 << *dstVar;
+          if (ss1.str() == ss2.str())
+          {
+            return "(f_" + to_string(k) + " (bvadd i #x" + one_step + "))";
+          }
+        }
+        
+        // Handle BV constants - need to check if it's actually a BV type first
+        if (bind::isBVar(e) || bind::isBoolConst(e) || bind::isIntConst(e))
+        {
+          // It's a variable, print its name
+          std::stringstream ss;
+          ss << *e;
+          return ss.str();
+        }
+        
+        // Handle BV constants - check both is_bvconst and is_bvnum
+        if (bv::is_bvconst(e) || bv::is_bvnum(e))
+        {
+          try {
+            unsigned width = bv::width(e);
+            mpz_class val = bv::toMpz(e);
+            std::stringstream ss;
+            int w_hex = (width + 3) / 4;
+            ss << "#x" << std::setfill('0') << std::setw(w_hex) << std::hex << val.get_ui();
+            return ss.str();
+          } catch (...) {
+            std::stringstream ss;
+            ss << *e;
+            return ss.str();
+          }
+        }
+        
+        // Handle boolean constants
+        if (isOpX<TRUE>(e)) return "true";
+        if (isOpX<FALSE>(e)) return "false";
+        
+        // Handle operations
+        if (isOpX<EQ>(e) && e->arity() == 2)
+          return "(= " + exprToSygus(e->arg(0)) + " " + exprToSygus(e->arg(1)) + ")";
+        if (isOpX<AND>(e))
+        {
+          std::string result = "(and";
+          for (unsigned i = 0; i < e->arity(); i++)
+            result += " " + exprToSygus(e->arg(i));
+          return result + ")";
+        }
+        if (isOpX<OR>(e))
+        {
+          std::string result = "(or";
+          for (unsigned i = 0; i < e->arity(); i++)
+            result += " " + exprToSygus(e->arg(i));
+          return result + ")";
+        }
+        if (isOpX<NEG>(e) && e->arity() >= 1)
+          return "(not " + exprToSygus(e->arg(0)) + ")";
+        if (isOpX<ITE>(e) && e->arity() >= 3)
+          return "(ite " + exprToSygus(e->arg(0)) + " " + exprToSygus(e->arg(1)) + " " + exprToSygus(e->arg(2)) + ")";
+        if (isOpX<IMPL>(e) && e->arity() == 2)
+          return "(=> " + exprToSygus(e->arg(0)) + " " + exprToSygus(e->arg(1)) + ")";
+        
+        // BV operations (check arity for safety)
+        if (e->arity() >= 2)
+        {
+          if (isOpX<BADD>(e))
+            return "(bvadd " + exprToSygus(e->arg(0)) + " " + exprToSygus(e->arg(1)) + ")";
+          if (isOpX<BSUB>(e))
+            return "(bvsub " + exprToSygus(e->arg(0)) + " " + exprToSygus(e->arg(1)) + ")";
+          if (isOpX<BMUL>(e))
+            return "(bvmul " + exprToSygus(e->arg(0)) + " " + exprToSygus(e->arg(1)) + ")";
+          if (isOpX<BAND>(e))
+            return "(bvand " + exprToSygus(e->arg(0)) + " " + exprToSygus(e->arg(1)) + ")";
+          if (isOpX<BOR>(e))
+            return "(bvor " + exprToSygus(e->arg(0)) + " " + exprToSygus(e->arg(1)) + ")";
+          if (isOpX<BXOR>(e))
+            return "(bvxor " + exprToSygus(e->arg(0)) + " " + exprToSygus(e->arg(1)) + ")";
+          if (isOpX<BULT>(e))
+            return "(bvult " + exprToSygus(e->arg(0)) + " " + exprToSygus(e->arg(1)) + ")";
+          if (isOpX<BULE>(e))
+            return "(bvule " + exprToSygus(e->arg(0)) + " " + exprToSygus(e->arg(1)) + ")";
+          if (isOpX<BUGT>(e))
+            return "(bvugt " + exprToSygus(e->arg(0)) + " " + exprToSygus(e->arg(1)) + ")";
+          if (isOpX<BUGE>(e))
+            return "(bvuge " + exprToSygus(e->arg(0)) + " " + exprToSygus(e->arg(1)) + ")";
+          if (isOpX<BSLT>(e))
+            return "(bvslt " + exprToSygus(e->arg(0)) + " " + exprToSygus(e->arg(1)) + ")";
+          if (isOpX<BSLE>(e))
+            return "(bvsle " + exprToSygus(e->arg(0)) + " " + exprToSygus(e->arg(1)) + ")";
+          if (isOpX<BSGT>(e))
+            return "(bvsgt " + exprToSygus(e->arg(0)) + " " + exprToSygus(e->arg(1)) + ")";
+          if (isOpX<BSGE>(e))
+            return "(bvsge " + exprToSygus(e->arg(0)) + " " + exprToSygus(e->arg(1)) + ")";
+          if (isOpX<BLSHR>(e))
+            return "(bvlshr " + exprToSygus(e->arg(0)) + " " + exprToSygus(e->arg(1)) + ")";
+          if (isOpX<BASHR>(e))
+            return "(bvashr " + exprToSygus(e->arg(0)) + " " + exprToSygus(e->arg(1)) + ")";
+          if (isOpX<BSHL>(e))
+            return "(bvshl " + exprToSygus(e->arg(0)) + " " + exprToSygus(e->arg(1)) + ")";
+          if (isOpX<BCONCAT>(e))
+            return "(concat " + exprToSygus(e->arg(0)) + " " + exprToSygus(e->arg(1)) + ")";
+        }
+        
+        if (e->arity() >= 1)
+        {
+          if (isOpX<BNOT>(e))
+            return "(bvnot " + exprToSygus(e->arg(0)) + ")";
+          if (isOpX<BNEG>(e))
+            return "(bvneg " + exprToSygus(e->arg(0)) + ")";
+          if (isOpX<BEXTRACT>(e))
+          {
+            // Try to get extract bounds from the expression structure
+            try {
+              unsigned hi = bv::high(e);
+              unsigned lo = bv::low(e);
+              // The operand is the last argument (after hi and lo)
+              // For BEXTRACT, arg(0) is usually the operand
+              Expr operand = e->arg(e->arity() - 1);
+              return "((_ extract " + to_string(hi) + " " + to_string(lo) + ") " + exprToSygus(operand) + ")";
+            } catch (...) {
+              // Fallback
+              std::stringstream ss;
+              ss << *e;
+              return ss.str();
+            }
+          }
+          if (isOpX<BZEXT>(e))
+          {
+            try {
+              unsigned result_width = bv::width(e);
+              unsigned arg_width = bv::width(e->arg(0));
+              unsigned amt = result_width - arg_width;
+              return "((_ zero_extend " + to_string(amt) + ") " + exprToSygus(e->arg(0)) + ")";
+            } catch (...) {
+              std::stringstream ss;
+              ss << *e;
+              return ss.str();
+            }
+          }
+          if (isOpX<BSEXT>(e))
+          {
+            try {
+              unsigned result_width = bv::width(e);
+              unsigned arg_width = bv::width(e->arg(0));
+              unsigned amt = result_width - arg_width;
+              return "((_ sign_extend " + to_string(amt) + ") " + exprToSygus(e->arg(0)) + ")";
+            } catch (...) {
+              std::stringstream ss;
+              ss << *e;
+              return ss.str();
+            }
+          }
+        }
+        
+        // Fallback: try to print as string
+        std::stringstream ss;
+        ss << *e;
+        std::string result = ss.str();
+        
+        // Post-process: convert (N:bv(W)) format to #xHEX format
+        // Match pattern like (2:bv(4)) or 2:bv(4)
+        std::regex bvnum_regex("\\(?([0-9]+):bv\\(([0-9]+)\\)\\)?");
+        std::smatch match;
+        if (std::regex_match(result, match, bvnum_regex))
+        {
+          unsigned long val = std::stoul(match[1].str());
+          unsigned width = std::stoul(match[2].str());
+          int w_hex = (width + 3) / 4;
+          std::stringstream hex_ss;
+          hex_ss << "#x" << std::setfill('0') << std::setw(w_hex) << std::hex << val;
+          return hex_ss.str();
+        }
+        
+        return result;
+      };
+      
+      std::string trans_sygus = exprToSygus(trans_body);
+      
+      // Build the constraint with proper structure:
+      // If there are guards, use implication: (=> guard updates)
+      // Otherwise, just use the updates
+      std::string constraint_body;
+      
+      if (!guards.empty())
+      {
+        // Build guard string
+        std::string guard_str;
+        if (guards.size() == 1)
+        {
+          guard_str = exprToSygus(guards[0]);
+        }
+        else
+        {
+          guard_str = "(and";
+          for (auto& g : guards)
+          {
+            guard_str += " " + exprToSygus(g);
+          }
+          guard_str += ")";
+        }
+        
+        // Build updates string
+        std::string updates_str;
+        if (updates.size() == 1)
+        {
+          updates_str = exprToSygus(updates[0]);
+        }
+        else if (updates.size() > 1)
+        {
+          updates_str = "(and";
+          for (auto& u : updates)
+          {
+            updates_str += " " + exprToSygus(u);
+          }
+          updates_str += ")";
+        }
+        else
+        {
+          updates_str = "true"; // No updates, just guard
+        }
+        
+        // Use implication: (=> guard updates)
+        constraint_body = "(=> " + guard_str + " " + updates_str + ")";
+      }
+      else
+      {
+        // No guards, use original trans_sygus
+        constraint_body = trans_sygus;
+      }
+      
+      // Post-process the entire constraint string to replace any remaining (N:bv(W)) patterns
+      std::regex bvnum_global("\\(([0-9]+):bv\\(([0-9]+)\\)\\)");
+      std::string processed;
+      std::string remaining = constraint_body;
+      std::smatch m;
+      while (std::regex_search(remaining, m, bvnum_global))
+      {
+        processed += m.prefix().str();
+        unsigned long val = std::stoul(m[1].str());
+        unsigned width = std::stoul(m[2].str());
+        std::stringstream hex_ss;
+        if (width == 1)
+        {
+          // Use binary format for 1-bit values
+          hex_ss << "#b" << (val & 1);
+        }
+        else
+        {
+          int w_hex = (width + 3) / 4;
+          hex_ss << "#x" << std::setfill('0') << std::setw(w_hex) << std::hex << val;
+        }
+        processed += hex_ss.str();
+        remaining = m.suffix().str();
+      }
+      processed += remaining;
+      
+      out << "  " << processed << "\n";
+      out << "))\n";
 
-        unsigned vwidth = var_bw[v];
-        std::string fun_name = "f_" + to_string(varIdx);
+      // C3: Interval constraint - the transition only applies when guard is satisfied
+      // This restricts the domain where the transition relation must hold
+      if (!guards.empty())
+      {
+        out << "\n; C3: Interval/Guard constraint\n";
+        out << "; The transition only fires when guards are satisfied\n";
+        out << "; Guards are already encoded as implications in C2\n";
+      }
 
-        // Find what dstVar[varIdx] equals in terms of srcVars
-        // Parse the transition body to find the update expression
+      // C4: Property constraint - if query rule exists, add the bad state condition
+      // This encodes: exists step n. property(f_0(n), f_1(n), ...) holds
+      if (query_rule != nullptr)
+      {
+        out << "\n; C4: Property constraint (bad state reachability)\n";
         
-        // Simple approach: use SMT solver to extract the functional form
-        // For each output variable, find what it equals
-        ZSolver<EZ3> extract_solver(m_z3);
-        Expr trans_body = trans_rule->body;
-        extract_solver.assertExpr(trans_body);
+        // First, substitute query srcVars with state_vars (they should correspond)
+        Expr query_body = query_rule->body;
+        if (query_rule->srcVars.size() == state_vars.size())
+        {
+          query_body = replaceAll(query_body, query_rule->srcVars, state_vars);
+        }
         
-        // Create a fresh variable for the result
-        Expr dst_var = trans_rule->dstVars[varIdx];
+        // Create a helper to convert query expressions with a specific step variable
+        // We need to substitute state_vars with f_k(n) for some existential n
+        auto queryExprToSygus = [&](Expr e, const std::string& step_var) -> std::string {
+          std::function<std::string(Expr)> convert = [&](Expr e) -> std::string {
+            if (!e) return "null";
+            
+            // Check if it's a state variable -> replace with f_k(step_var)
+            for (size_t k = 0; k < state_vars.size(); k++)
+            {
+              Expr stateVar = state_vars[k];
+              if (e == stateVar)
+              {
+                return "(f_" + to_string(k) + " " + step_var + ")";
+              }
+              // Also check by name
+              std::stringstream ss1, ss2;
+              ss1 << *e;
+              ss2 << *stateVar;
+              if (ss1.str() == ss2.str())
+              {
+                return "(f_" + to_string(k) + " " + step_var + ")";
+              }
+            }
+            
+            // Handle BV constants
+            if (bv::is_bvconst(e) || bv::is_bvnum(e))
+            {
+              try {
+                unsigned width = bv::width(e);
+                mpz_class val = bv::toMpz(e);
+                std::string hexStr = val.get_str(16);
+                int w_hex = (width + 3) / 4;
+                while ((int)hexStr.length() < w_hex)
+                  hexStr = "0" + hexStr;
+                return "#x" + hexStr;
+              } catch (...) {
+                std::stringstream ss;
+                ss << *e;
+                return ss.str();
+              }
+            }
+            
+            // Handle boolean constants
+            if (isOpX<TRUE>(e)) return "true";
+            if (isOpX<FALSE>(e)) return "false";
+            
+            // Handle operations
+            if (isOpX<EQ>(e) && e->arity() == 2)
+              return "(= " + convert(e->arg(0)) + " " + convert(e->arg(1)) + ")";
+            if (isOpX<NEQ>(e) && e->arity() == 2)
+              return "(not (= " + convert(e->arg(0)) + " " + convert(e->arg(1)) + "))";
+            if (isOpX<AND>(e))
+            {
+              std::string result = "(and";
+              for (unsigned i = 0; i < e->arity(); i++)
+                result += " " + convert(e->arg(i));
+              return result + ")";
+            }
+            if (isOpX<OR>(e))
+            {
+              std::string result = "(or";
+              for (unsigned i = 0; i < e->arity(); i++)
+                result += " " + convert(e->arg(i));
+              return result + ")";
+            }
+            if (isOpX<NEG>(e) && e->arity() >= 1)
+              return "(not " + convert(e->arg(0)) + ")";
+            
+            // BV comparisons
+            if (e->arity() >= 2)
+            {
+              if (isOpX<BULT>(e))
+                return "(bvult " + convert(e->arg(0)) + " " + convert(e->arg(1)) + ")";
+              if (isOpX<BULE>(e))
+                return "(bvule " + convert(e->arg(0)) + " " + convert(e->arg(1)) + ")";
+              if (isOpX<BUGT>(e))
+                return "(bvugt " + convert(e->arg(0)) + " " + convert(e->arg(1)) + ")";
+              if (isOpX<BUGE>(e))
+                return "(bvuge " + convert(e->arg(0)) + " " + convert(e->arg(1)) + ")";
+              if (isOpX<BSLT>(e))
+                return "(bvslt " + convert(e->arg(0)) + " " + convert(e->arg(1)) + ")";
+              if (isOpX<BSLE>(e))
+                return "(bvsle " + convert(e->arg(0)) + " " + convert(e->arg(1)) + ")";
+              if (isOpX<BSGT>(e))
+                return "(bvsgt " + convert(e->arg(0)) + " " + convert(e->arg(1)) + ")";
+              if (isOpX<BSGE>(e))
+                return "(bvsge " + convert(e->arg(0)) + " " + convert(e->arg(1)) + ")";
+              if (isOpX<BADD>(e))
+                return "(bvadd " + convert(e->arg(0)) + " " + convert(e->arg(1)) + ")";
+              if (isOpX<BSUB>(e))
+                return "(bvsub " + convert(e->arg(0)) + " " + convert(e->arg(1)) + ")";
+              if (isOpX<BMUL>(e))
+                return "(bvmul " + convert(e->arg(0)) + " " + convert(e->arg(1)) + ")";
+            }
+            
+            if (e->arity() >= 1)
+            {
+              if (isOpX<BZEXT>(e))
+              {
+                try {
+                  unsigned result_width = bv::width(e);
+                  unsigned arg_width = bv::width(e->arg(0));
+                  unsigned amt = result_width - arg_width;
+                  return "((_ zero_extend " + to_string(amt) + ") " + convert(e->arg(0)) + ")";
+                } catch (...) {}
+              }
+              if (isOpX<BSEXT>(e))
+              {
+                try {
+                  unsigned result_width = bv::width(e);
+                  unsigned arg_width = bv::width(e->arg(0));
+                  unsigned amt = result_width - arg_width;
+                  return "((_ sign_extend " + to_string(amt) + ") " + convert(e->arg(0)) + ")";
+                } catch (...) {}
+              }
+            }
+            
+            // Fallback: try to handle generic expressions by recursively converting arguments
+            std::stringstream ss;
+            ss << *e;
+            std::string result = ss.str();
+            
+            // Check for known patterns that we can parse and reconstruct
+            // Pattern: bvzext(EXPR, bv(W))
+            std::regex bzext_regex("bvzext\\((.+),\\s*bv\\((\\d+)\\)\\)");
+            std::smatch bzext_match;
+            if (std::regex_search(result, bzext_match, bzext_regex))
+            {
+              // This is a zero-extend we couldn't handle above
+              // Try to recursively convert the inner expression
+              // For now, just note that we need to substitute variables
+            }
+            
+            // Post-process BV constants
+            std::regex bvnum_regex("\\(?([0-9]+):bv\\(([0-9]+)\\)\\)?");
+            std::smatch match;
+            if (std::regex_match(result, match, bvnum_regex))
+            {
+              mpz_class val(match[1].str());
+              unsigned width = std::stoul(match[2].str());
+              std::string hexStr = val.get_str(16);
+              int w_hex = (width + 3) / 4;
+              while ((int)hexStr.length() < w_hex)
+                hexStr = "0" + hexStr;
+              return "#x" + hexStr;
+            }
+            
+            // Check for variable names in the result and substitute them
+            for (size_t k = 0; k < state_vars.size(); k++)
+            {
+              std::stringstream var_ss;
+              var_ss << *state_vars[k];
+              std::string var_name = var_ss.str();
+              
+              // Replace occurrences of the variable name with function call
+              size_t pos = 0;
+              std::string replacement = "(f_" + to_string(k) + " " + step_var + ")";
+              while ((pos = result.find(var_name, pos)) != std::string::npos)
+              {
+                result.replace(pos, var_name.length(), replacement);
+                pos += replacement.length();
+              }
+            }
+            
+            return result;
+          };
+          return convert(e);
+        };
         
-        // We need to express the transition symbolically
-        // For simple transitions like x' = x + 1, we can extract this
+        // Generate the property constraint
+        // We want: exists n. query_body(f_0(n), f_1(n), ...)
+        // In SyGuS, we can express this as a constraint that must be satisfiable
         
-        // For now, use a heuristic: try common patterns
-        // Check if it's a simple increment: x' = x + 1
-        int hex_digits = (step_bitwidth + 3) / 4;
-        int val_hex_digits = (vwidth + 3) / 4;
-        std::string one_step = std::string(hex_digits - 1, '0') + "1";
-        std::string one_val = std::string(val_hex_digits - 1, '0') + "1";
-
-        out << "(constraint (forall ((i (_ BitVec " << step_bitwidth << ")))\n";
-        out << "  (= (" << fun_name << " (bvadd i #x" << one_step << "))\n";
-        out << "     (bvadd (" << fun_name << " i) #x" << one_val << "))\n";
-        out << "))\n";
+        out << "; Query: " << *query_body << "\n";
+        
+        // Convert the query body (use the substituted version)
+        std::string query_sygus = queryExprToSygus(query_body, "n");
+        
+        // Check if the conversion resulted in valid SyGuS (no unsupported operations)
+        // If it contains patterns like "bv2int" or other non-BV operations, skip the constraint
+        bool valid_conversion = true;
+        if (query_sygus.find("bv2int") != std::string::npos ||
+            query_sygus.find("int2bv") != std::string::npos ||
+            query_sygus.find(">=") != std::string::npos ||
+            query_sygus.find("<=") != std::string::npos ||
+            query_sygus.find("1+") != std::string::npos)
+        {
+          valid_conversion = false;
+          out << "; (Skipping property constraint - query uses unsupported operations)\n";
+        }
+        
+        if (valid_conversion)
+        {
+          // Post-process to fix any remaining BV constant formats
+          std::regex bvnum_global("\\(([0-9]+):bv\\(([0-9]+)\\)\\)");
+          std::string query_processed;
+          std::string query_remaining = query_sygus;
+          std::smatch qm;
+          while (std::regex_search(query_remaining, qm, bvnum_global))
+          {
+            query_processed += qm.prefix().str();
+            mpz_class val(qm[1].str());
+            unsigned width = std::stoul(qm[2].str());
+            std::string hex_ss;
+            if (width == 1)
+              hex_ss = "#b" + std::to_string(val.get_ui() & 1);
+            else
+            {
+              std::string hexStr = val.get_str(16);
+              int w_hex = (width + 3) / 4;
+              while ((int)hexStr.length() < w_hex)
+                hexStr = "0" + hexStr;
+              hex_ss = "#x" + hexStr;
+            }
+            query_processed += hex_ss;
+            query_remaining = qm.suffix().str();
+          }
+          query_processed += query_remaining;
+          
+          // Post-process bvzext patterns: bvzext(EXPR, bv(W)) -> ((_ zero_extend AMT) EXPR)
+          // We need to compute the extend amount from the inner expression width
+          // For now, handle the common case where inner is 8-bit and result is 16-bit
+          std::regex bzext_pattern("bvzext\\(([^,]+),\\s*bv\\((\\d+)\\)\\)");
+          std::string bzext_processed;
+          std::string bzext_remaining = query_processed;
+          std::smatch bzm;
+          while (std::regex_search(bzext_remaining, bzm, bzext_pattern))
+          {
+            bzext_processed += bzm.prefix().str();
+            std::string inner_expr = bzm[1].str();
+            unsigned result_width = std::stoul(bzm[2].str());
+            // Assume inner is step_bitwidth for state vars
+            unsigned extend_amt = result_width - step_bitwidth;
+            bzext_processed += "((_ zero_extend " + to_string(extend_amt) + ") " + inner_expr + ")";
+            bzext_remaining = bzm.suffix().str();
+          }
+          bzext_processed += bzext_remaining;
+          query_processed = bzext_processed;
+          
+          // Add existential constraint: there exists some step n where property holds
+          out << "(constraint (exists ((n (_ BitVec " << step_bitwidth << ")))\n";
+          out << "  " << query_processed << "\n";
+          out << "))\n";
+        }
       }
 
       out << "\n(check-synth)\n";

@@ -1,0 +1,8 @@
+(declare-rel inv ((_ BitVec 32)))
+(declare-var x0 (_ BitVec 32))
+(declare-var x1 (_ BitVec 32))
+(declare-rel fail ())
+(rule (=> (= x0 (_ bv0 32)) (inv x0)))
+(rule (=> (and (inv x0) (= x1 (ite (bvslt (bvsdiv x0 (_ bv5 32)) (_ bv200 32)) (bvadd x0 (_ bv1 32)) (bvadd x0 (_ bv5 32))))) (inv x1)))
+(rule (=> (and (inv x0) (bvsge x0 (_ bv2000 32)) (= (bvsrem x0 (_ bv5 32)) (_ bv0 32))) fail))
+(query fail)

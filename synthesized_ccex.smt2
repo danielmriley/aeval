@@ -3,15 +3,15 @@
 ; Number of state variables: 1
 
 ; Synthesized closed-form functions for state evolution
-(define-fun var_0_at_i ((i (_ BitVec 64))) (_ BitVec 64) i)
+(define-fun var_0_at_i ((i (_ BitVec 4))) (_ BitVec 4) i)
 
 ; Trace arrays (one per state variable)
-(declare-const trace_0 (Array (_ BitVec 64) (_ BitVec 64)))
+(declare-const trace_0 (Array (_ BitVec 4) (_ BitVec 4)))
 
 ; Assert that trace arrays follow the synthesized functions
 (assert
-  (forall ((i (_ BitVec 64)))
-    (=> (and (bvule #x0000000000000000 i) (bvule i #xffffffffffffffff))
+  (forall ((i (_ BitVec 4)))
+    (=> (and (bvule #x0 i) (bvule i #xf))
         (and
           (= (select trace_0 i) (var_0_at_i i))
         )

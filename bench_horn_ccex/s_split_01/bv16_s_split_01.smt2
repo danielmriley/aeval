@@ -17,6 +17,6 @@
     (inv x1 y1)))
 
 (rule (=> (and (inv x0 y0) (= x0 #x2710)
-    (= y0 x0)) fail))
+    (not (= y0 x0))) fail))
 
 (query fail)
