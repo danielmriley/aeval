@@ -11,6 +11,8 @@
 #include <chrono>
 #include <sstream>
 #include <cctype>
+#include <fstream>
+#include <iomanip>
 
 using namespace std;
 using namespace boost;
@@ -1763,6 +1765,460 @@ namespace ufo
         if (!found)
           return false;
       }
+      
+      return true;
+    }
+
+    /**
+     * Extract a concrete counterexample trace using solver-verified execution.
+     * 
+     * This method:
+     * 1. Finds a valid trace path to the bad state using bounded exploration
+     * 2. Builds the SSA formula for the trace
+     * 3. Checks satisfiability and extracts concrete values from the model
+     * 4. Returns a vector of (variable -> concrete_value) maps for each step
+     * 
+     * @param max_steps      Maximum number of steps to explore
+     * @param outTrace       Output: vector of state maps, one per step
+     * @param outStateVars   Output: the state variables (in order)
+     * @param sparse_factor  Optional: sample every Nth point (1 = all points)
+     * @return true if a valid trace was found and extracted
+     */
+    bool extractConcreteTrace(
+        int64_t max_steps,
+        std::vector<std::map<Expr, Expr>>& outTrace,
+        ExprVector& outStateVars,
+        int sparse_factor = 1)
+    {
+      outTrace.clear();
+      outStateVars.clear();
+      
+      if (debug)
+        outs() << "\n=== Extracting Concrete Trace (BndExpl) ===\n";
+      
+      // Check if ruleManager has valid failDecl
+      if (ruleManager.failDecl == nullptr)
+      {
+        if (debug)
+          outs() << "  Error: No fail declaration found\n";
+        return false;
+      }
+      
+      // Model to be populated after SAT check
+      ExprMap extractedModel;
+      
+      // Step 1: Find a trace path to the bad state
+      vector<int> trace;
+      bool found = false;
+      
+      // Try to find a trace of increasing length
+      for (int64_t len = 2; len <= max_steps; len++)
+      {
+        if (!getSingleTrace(mk<TRUE>(m_efac), ruleManager.failDecl, len, trace))
+        {
+          continue;
+        }
+        
+        // Build SSA and check satisfiability
+        ExprVector ssa;
+        getSSA(trace, ssa);
+        
+        tribool satResult = u.isSat(ssa);
+        
+        // Update progress in place (single line that gets overwritten)
+        if (debug)
+        {
+          outs() << "\r  Trying length " << len << " ... " 
+                 << (satResult == true ? "SAT   " : (satResult == false ? "UNSAT " : "UNKNOWN")) 
+                 << "          ";
+          outs().flush();
+        }
+        
+        if (satResult == true)
+        {
+          found = true;
+          if (debug)
+            outs() << "\n  Found satisfiable trace of length " << len << "\n";
+          
+          // Collect all variables from bindVars into a set for model extraction
+          ExprSet allVars;
+          for (const auto& stepVars : bindVars)
+          {
+            for (const auto& var : stepVars)
+            {
+              if (var != nullptr) allVars.insert(var);
+            }
+          }
+          
+          // Extract the model for all variables now (while the SAT context is still valid)
+          u.getModel(allVars, extractedModel);
+          
+          if (debug)
+          {
+            outs() << "  Extracted model has " << extractedModel.size() << " entries\n";
+            for (const auto& kv : extractedModel)
+            {
+              outs() << "    " << *kv.first << " = " << *kv.second << "\n";
+            }
+          }
+          
+          break;
+        }
+      }
+      
+      if (!found)
+      {
+        if (debug)
+          outs() << "\n  No satisfiable trace found within " << max_steps << " steps\n";
+        return false;
+      }
+      
+      // Step 2: Identify state variables from the first inductive CHC
+      for (auto& chc : ruleManager.chcs)
+      {
+        if (chc.isInductive)
+        {
+          outStateVars = chc.srcVars;
+          break;
+        }
+      }
+      
+      if (outStateVars.empty())
+      {
+        outs() << "  Error: Could not identify state variables\n";
+        return false;
+      }
+      
+      if (debug)
+        outs() << "  State variables: " << outStateVars.size() << "\n";
+      
+      // Step 3: Extract concrete values from bindVars at each step
+      // bindVars[step] contains the SSA-renamed variables for that step
+      // We need to get the model value for each
+      
+      if (bindVars.empty())
+      {
+        if (debug)
+          outs() << "  Warning: bindVars is empty, cannot extract trace values\n";
+        // Still return true with empty trace values - the trace structure was found
+        return true;
+      }
+      
+      for (size_t step = 0; step < bindVars.size(); step++)
+      {
+        // Apply sparse sampling
+        if (sparse_factor > 1 && step % sparse_factor != 0 && step != bindVars.size() - 1)
+          continue;
+          
+        std::map<Expr, Expr> stepState;
+        const ExprVector& stepVars = bindVars[step];
+        
+        if (debug)
+        {
+          outs() << "  Step " << step << ": bindVars has " << stepVars.size() << " vars, outStateVars has " << outStateVars.size() << "\n";
+        }
+        
+        for (size_t i = 0; i < stepVars.size() && i < outStateVars.size(); i++)
+        {
+          Expr var = stepVars[i];
+          if (var == nullptr) continue;
+          
+          // Look up the value in our extracted model
+          Expr val = nullptr;
+          auto it = extractedModel.find(var);
+          if (it != extractedModel.end())
+          {
+            val = it->second;
+            if (debug)
+              outs() << "    Found value for " << *var << " = " << *val << "\n";
+          }
+          
+          if (val == nullptr || val == var)
+          {
+            // No model value, try to infer from constraints or use 0
+            Expr vtype = bind::typeOf(var);
+            if (vtype != nullptr && bv::is_bvsort(vtype))
+            {
+              val = bv::bvnum(mpz_class(0), bv::width(vtype), m_efac);
+            }
+            else
+            {
+              val = mkTerm(mpz_class(0), m_efac);
+            }
+            if (debug)
+              outs() << "    Warning: Using default 0 for " << *var << " at step " << step << "\n";
+          }
+          
+          // Store with original variable name (not SSA-renamed)
+          stepState[outStateVars[i]] = val;
+        }
+        
+        outTrace.push_back(stepState);
+        
+        if (debug && step % 100 == 0)
+          outs() << "    Extracted step " << step << "\n";
+      }
+      
+      if (debug)
+        outs() << "  Extracted " << outTrace.size() << " trace points\n";
+      
+      return true;
+    }
+
+    /**
+     * Write a SyGuS file from a concrete trace.
+     * 
+     * @param filename       Output filename
+     * @param trace          Vector of (variable -> value) maps per step
+     * @param state_vars     State variables in order
+     * @param step_bitwidth  Bit-width for the step parameter
+     * @param seedConstants  Optional set of constants to include in grammar
+     * @param mbpGuards      Optional MBP guards for boolean production
+     * @return true if successful
+     */
+    bool writeSyGuSFromTrace(
+        const std::string& filename,
+        const std::vector<std::map<Expr, Expr>>& trace,
+        const ExprVector& state_vars,
+        int step_bitwidth,
+        const ExprSet& seedConstants = ExprSet(),
+        const ExprVector& mbpGuards = ExprVector())
+    {
+      if (trace.empty() || state_vars.empty())
+      {
+        outs() << "Error: Empty trace or no state variables\n";
+        return false;
+      }
+      
+      std::ofstream out(filename);
+      if (!out.is_open())
+      {
+        outs() << "Error: Could not open file " << filename << " for writing\n";
+        return false;
+      }
+      
+      // Determine variable bit-widths
+      std::map<Expr, unsigned> var_bw;
+      for (auto& v : state_vars)
+      {
+        Expr vtype = bind::typeOf(v);
+        if (bv::is_bvsort(vtype))
+        {
+          var_bw[v] = bv::width(vtype);
+        }
+        else
+        {
+          // For non-BV types (Int), compute required bit-width from max value in trace
+          mpz_class maxVal = 0;
+          for (auto& stepState : trace)
+          {
+            auto it = stepState.find(v);
+            if (it != stepState.end())
+            {
+              mpz_class val = 0;
+              if (bv::is_bvnum(it->second))
+              {
+                val = bv::toMpz(it->second);
+              }
+              else if (isOpX<MPZ>(it->second))
+              {
+                val = lexical_cast<mpz_class>(it->second);
+              }
+              if (val < 0) val = -val;  // abs value
+              if (val > maxVal) maxVal = val;
+            }
+          }
+          
+          // Compute bits needed to represent maxVal + 1 for sign bit
+          unsigned bits_needed = 8;  // minimum
+          while ((mpz_class(1) << bits_needed) <= maxVal && bits_needed < 64)
+          {
+            bits_needed += 8;
+          }
+          var_bw[v] = bits_needed;
+          
+          if (debug)
+            outs() << "  Variable " << *v << " max value: " << maxVal << ", using " << bits_needed << " bits\n";
+        }
+      }
+      
+      // Collect constants from trace values
+      std::set<mpz_class> traceConstants;
+      for (auto& stepState : trace)
+      {
+        for (auto& kv : stepState)
+        {
+          if (bv::is_bvnum(kv.second))
+          {
+            traceConstants.insert(bv::toMpz(kv.second));
+          }
+          else if (isOpX<MPZ>(kv.second))
+          {
+            traceConstants.insert(lexical_cast<mpz_class>(kv.second));
+          }
+        }
+      }
+      
+      // Add seed constants
+      for (auto& c : seedConstants)
+      {
+        if (bv::is_bvnum(c))
+        {
+          traceConstants.insert(bv::toMpz(c));
+        }
+        else if (isOpX<MPZ>(c))
+        {
+          traceConstants.insert(lexical_cast<mpz_class>(c));
+        }
+      }
+      
+      // Header
+      out << "; SyGuS file generated from BndExpl concrete trace\n";
+      out << "; Trace points: " << trace.size() << "\n";
+      out << "; State variables: " << state_vars.size() << "\n";
+      out << "\n(set-logic BV)\n\n";
+      
+      // Generate synth-fun for each state variable
+      for (size_t varIdx = 0; varIdx < state_vars.size(); varIdx++)
+      {
+        Expr v = state_vars[varIdx];
+        if (var_bw.find(v) == var_bw.end()) continue;
+        
+        unsigned vwidth = var_bw[v];
+        std::string fun_name = "f" + lexical_cast<string>(v);
+        // Clean up function name (remove special chars)
+        for (char& c : fun_name)
+        {
+          if (!isalnum(c) && c != '_') c = '_';
+        }
+        
+        out << "; Function for variable " << *v << "\n";
+        out << "(synth-fun " << fun_name << " ((n (_ BitVec " << step_bitwidth << "))) ";
+        out << "(_ BitVec " << vwidth << ")\n";
+        
+        // Grammar
+        out << "  ((Start (_ BitVec " << vwidth << ")) (MyBool Bool))\n";
+        out << "  ((Start (_ BitVec " << vwidth << ") (\n";
+        
+        // Step variable (with extraction if needed)
+        if ((unsigned)step_bitwidth > vwidth)
+        {
+          out << "    ((_ extract " << (vwidth - 1) << " 0) n)\n";
+        }
+        else if ((unsigned)step_bitwidth < vwidth)
+        {
+          out << "    ((_ zero_extend " << (vwidth - step_bitwidth) << ") n)\n";
+        }
+        else
+        {
+          out << "    n\n";
+        }
+        
+        // Constants
+        std::set<std::string> seenHex;
+        for (auto& c : traceConstants)
+        {
+          // Convert to hex with proper width
+          std::stringstream ss;
+          ss << std::hex << std::setfill('0') << std::setw(vwidth / 4);
+          mpz_class masked = c & ((mpz_class(1) << vwidth) - 1);
+          ss << masked;
+          std::string hexStr = ss.str();
+          
+          if (seenHex.find(hexStr) == seenHex.end())
+          {
+            out << "    #x" << hexStr << "\n";
+            seenHex.insert(hexStr);
+          }
+        }
+        
+        // BV operations
+        out << "    (bvadd Start Start)\n";
+        out << "    (bvsub Start Start)\n";
+        out << "    (bvmul Start Start)\n";
+        out << "    (bvshl Start Start)\n";
+        out << "    (bvlshr Start Start)\n";
+        out << "    (ite MyBool Start Start)\n";
+        out << "  ))\n";
+        
+        // Boolean production
+        out << "  (MyBool Bool (\n";
+        if (!mbpGuards.empty())
+        {
+          // Use provided MBP guards
+          for (auto& guard : mbpGuards)
+          {
+            out << "    " << *guard << "\n";
+          }
+        }
+        else
+        {
+          // Generic boolean comparisons
+          out << "    (bvult Start Start)\n";
+          out << "    (bvuge Start Start)\n";
+          out << "    (= Start Start)\n";
+        }
+        out << "  ))))\n\n";
+      }
+      
+      // Generate constraints from trace
+      out << "; Constraints from concrete trace\n";
+      size_t stepIdx = 0;
+      for (auto& stepState : trace)
+      {
+        for (size_t varIdx = 0; varIdx < state_vars.size(); varIdx++)
+        {
+          Expr v = state_vars[varIdx];
+          if (var_bw.find(v) == var_bw.end()) continue;
+          
+          auto it = stepState.find(v);
+          if (it == stepState.end()) continue;
+          
+          unsigned vwidth = var_bw[v];
+          std::string fun_name = "f" + lexical_cast<string>(v);
+          for (char& c : fun_name)
+          {
+            if (!isalnum(c) && c != '_') c = '_';
+          }
+          
+          // Step hex
+          std::stringstream step_ss;
+          step_ss << std::hex << std::setfill('0') << std::setw(step_bitwidth / 4) << stepIdx;
+          
+          // Value hex
+          std::string val_hex;
+          if (bv::is_bvnum(it->second))
+          {
+            mpz_class valMpz = bv::toMpz(it->second);
+            mpz_class masked = valMpz & ((mpz_class(1) << vwidth) - 1);
+            std::stringstream val_ss;
+            val_ss << std::hex << std::setfill('0') << std::setw(vwidth / 4) << masked;
+            val_hex = val_ss.str();
+          }
+          else if (isOpX<MPZ>(it->second))
+          {
+            // Integer value - convert to bitvector representation
+            mpz_class valMpz = lexical_cast<mpz_class>(it->second);
+            mpz_class masked = valMpz & ((mpz_class(1) << vwidth) - 1);
+            std::stringstream val_ss;
+            val_ss << std::hex << std::setfill('0') << std::setw(vwidth / 4) << masked;
+            val_hex = val_ss.str();
+          }
+          else
+          {
+            val_hex = std::string(vwidth / 4, '0');
+          }
+          
+          out << "(constraint (= (" << fun_name << " #x" << step_ss.str() << ") #x" << val_hex << "))\n";
+        }
+        stepIdx++;
+      }
+      
+      out << "\n(check-synth)\n";
+      out.close();
+      
+      if (debug)
+        outs() << "  Wrote SyGuS file: " << filename << "\n";
       
       return true;
     }

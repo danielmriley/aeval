@@ -101,13 +101,15 @@ int main (int argc, char ** argv)
   const char *OPT_HORN = "--horn";
   const char *OPT_SYGUS = "--sygus";
   const char *OPT_SYGUS_TR = "--sygus-tr";
+  const char *OPT_SYGUS_FULL = "--sygus-full";
+  const char *OPT_SYGUS_FULL_BOUND = "--sygus-full-bound";
+  const char *OPT_SYGUS_SPARSE = "--sygus-sparse";
   const char *OPT_SYGUS_POINTS = "--sygus-points";
   const char *OPT_SYGUS_BITWIDTH = "--sygus-bitwidth";
   const char *OPT_SYGUS_RUN = "--sygus-run";
   const char *OPT_SYGUS_VALIDATE = "--sygus-validate";
   const char *OPT_SYGUS_CCEX = "--sygus-ccex";
   const char *OPT_DEBUG = "--debug";
-
   if (getBoolValue(OPT_HELP, false, argc, argv) || argc == 1){
     outs () <<
         "* * *                                 FreqHorn v.0.6 - Copyright (C) 2021                                 * * *\n" <<
@@ -158,6 +160,9 @@ int main (int argc, char ** argv)
         "SyGuS counterexample synthesis options (for BV):\n" <<
         " " << OPT_SYGUS << " [file]                   generate SyGuS file using PBE (point-based enumeration)\n" <<
         " " << OPT_SYGUS_TR << " [file]                generate SyGuS file using TR (transition relation)\n" <<
+        " " << OPT_SYGUS_FULL << "                generate SyGuS file from full BndExpl trace\n" <<
+        " " << OPT_SYGUS_FULL_BOUND << " <N>       max steps to explore for full trace (default: 1000)\n" <<
+        " " << OPT_SYGUS_SPARSE << " <N>           sample every Nth point (default: 1 = all)\n" <<
         " " << OPT_SYGUS_POINTS << " <N>            number of trace points for PBE mode (default: 16)\n" <<
         " " << OPT_SYGUS_BITWIDTH << " <N>          bit-width for step parameter (default: auto)\n" <<
         " " << OPT_SYGUS_RUN << "                     also run CVC5 on the generated SyGuS file\n" <<
@@ -223,15 +228,18 @@ int main (int argc, char ** argv)
   bool ccexUnrolling = getBoolValueWithNegation("--use-ccex-unrolling", "--no-ccex-unrolling", false, argc, argv);
 
   // SyGuS counterexample synthesis options
-  // --sygus (PBE mode) or --sygus-tr (TR mode)
+  // --sygus (PBE mode) or --sygus-tr (TR mode) or --sygus-full (BndExpl mode)
   bool do_sygus = getBoolValue(OPT_SYGUS, false, argc, argv);
   bool do_sygus_tr = getBoolValue(OPT_SYGUS_TR, false, argc, argv);
+  bool do_sygus_full = getBoolValue(OPT_SYGUS_FULL, false, argc, argv);
+  int sygus_full_bound = getIntValue(OPT_SYGUS_FULL_BOUND, 1000, argc, argv);
+  int sygus_sparse = getIntValue(OPT_SYGUS_SPARSE, 1, argc, argv);  // 1 = all points
   string sygus_file = "counterexample.sygus";  // default
-  // Check if --sygus or --sygus-tr has a following argument that is a custom filename
+  // Check if --sygus or --sygus-tr or --sygus-full has a following argument that is a custom filename
   // (not another option starting with '-' and not the input .smt2 file)
   for (int i = 1; i < argc - 1; i++)
   {
-    if (strcmp(argv[i], OPT_SYGUS) == 0 || strcmp(argv[i], OPT_SYGUS_TR) == 0)
+    if (strcmp(argv[i], OPT_SYGUS) == 0 || strcmp(argv[i], OPT_SYGUS_TR) == 0 || strcmp(argv[i], OPT_SYGUS_FULL) == 0)
     {
       string next_arg = string(argv[i+1]);
       // Check it's not an option and not the input file (which ends in .smt2)
@@ -272,6 +280,77 @@ int main (int argc, char ** argv)
   {
     d2 = true;
     if(do_dl < 1) do_dl = 1;
+  }
+
+  // Handle SyGuS Full mode (BndExpl-based concrete trace extraction)
+  if (do_sygus_full)
+  {
+    outs() << "[DEBUG] Entering sygus-full mode\n";
+    outs() << "[DEBUG] Input file: " << string(argv[argc - 1]) << "\n";
+    outs() << "[DEBUG] Creating ExprFactory...\n";
+    ExprFactory efac;
+    outs() << "[DEBUG] Creating EZ3...\n";
+    EZ3 z3(efac);
+    outs() << "[DEBUG] Creating CHCs...\n";
+    CHCs ruleManager(efac, z3, debug);
+    
+    outs() << "[DEBUG] Parsing file...\n";
+    if (!ruleManager.parse(string(argv[argc - 1]), do_elim, do_arithm))
+    {
+      outs() << "Error parsing input file\n";
+      return 1;
+    }
+    outs() << "[DEBUG] Parse successful\n";
+    
+    if (debug)
+      outs() << "\n=== SyGuS Full Mode (BndExpl Trace Extraction) ===\n";
+    
+    // Instantiate BndExpl
+    BndExpl bndExpl(ruleManager, to, debug);
+    
+    // Extract concrete trace
+    std::vector<std::map<Expr, Expr>> trace;
+    ExprVector stateVars;
+    
+    if (!bndExpl.extractConcreteTrace(sygus_full_bound, trace, stateVars, sygus_sparse))
+    {
+      outs() << "Failed to extract concrete trace\n";
+      return 1;
+    }
+    
+    outs() << "  Extracted " << trace.size() << " trace points\n";
+    outs() << "  State variables: " << stateVars.size() << "\n";
+    
+    // Determine step bitwidth
+    int step_bw = sygus_bitwidth;
+    if (step_bw < 0)
+    {
+      // Auto-detect: enough bits to represent trace size
+      int bits_needed = 1;
+      int64_t temp = trace.size() - 1;
+      while (temp > 1) { temp >>= 1; bits_needed++; }
+      if (bits_needed <= 8) step_bw = 8;
+      else if (bits_needed <= 16) step_bw = 16;
+      else step_bw = 32;
+    }
+    
+    // Set default output filename
+    string output_file = (sygus_file != "counterexample.sygus") ? sygus_file : "full_trace.sygus";
+    
+    // Write SyGuS file
+    ExprSet seedConstants;  // TODO: extract from CHC bodies
+    ExprVector mbpGuards;   // TODO: extract from MBP analysis
+    
+    if (!bndExpl.writeSyGuSFromTrace(output_file, trace, stateVars, step_bw, seedConstants, mbpGuards))
+    {
+      outs() << "Failed to write SyGuS file\n";
+      return 1;
+    }
+    
+    outs() << "  Generated SyGuS file: " << output_file << "\n";
+    outs() << "  Run with: cvc5 --lang=sygus2 " << output_file << "\n";
+    
+    return 0;
   }
 
   // Handle SyGuS counterexample synthesis mode (PBE or TR)
