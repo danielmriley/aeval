@@ -8,5 +8,5 @@
 (declare-rel fail ())
 (rule (=> (and (= x0 (_ bv0 32)) (= y0 z0) (= z0 (_ bv0 32))) (inv x0 y0 z0)))
 (rule (=> (and (inv x0 y0 z0) (= x1 (bvadd x0 (_ bv1 32))) (= y1 (ite (bvsge x0 (_ bv1765 32)) (bvadd y0 (_ bv2 32)) (bvadd y0 (_ bv1 32)))) (= z1 (ite (bvsge y0 (_ bv5765 32)) (bvadd z0 (_ bv3 32)) (bvadd z0 (_ bv2 32))))) (inv x1 y1 z1)))
-(rule (=> (and (inv x0 y0 z0) (bvsgt x0 (_ bv17650 32)) (not (bvsgt z0 (_ bv27650 32)))) fail))
+(rule (=> (and (inv x0 y0 z0) (bvsgt x0 (_ bv17650 32)) (bvsgt z0 (_ bv27650 32))) fail))
 (query fail)

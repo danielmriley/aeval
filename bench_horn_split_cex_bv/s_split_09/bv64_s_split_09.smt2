@@ -4,5 +4,5 @@
 (declare-rel fail ())
 (rule (=> (= x0 (_ bv0 64)) (inv x0)))
 (rule (=> (and (inv x0) (= x1 (ite (= x0 (_ bv9998 64)) (_ bv1 64) (bvadd x0 (_ bv2 64))))) (inv x1)))
-(rule (=> (and (inv x0) (= (_ bv0 64) (bvsrem x0 (_ bv4 64))) (not (bvsle x0 (_ bv9996 64)))) fail))
+(rule (=> (and (inv x0) (= (_ bv0 64) (bvsrem x0 (_ bv4 64))) (bvsle x0 (_ bv9996 64))) fail))
 (query fail)

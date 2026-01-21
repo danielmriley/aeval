@@ -6,5 +6,5 @@
 (declare-rel fail ())
 (rule (=> (and (= x0 (_ bv50000 64)) (= y0 (_ bv0 64))) (inv x0 y0)))
 (rule (=> (and (inv x0 y0) (= x1 (ite (bvsge y0 x0) (bvadd x0 (_ bv5 64)) x0)) (= y1 (ite (bvsge y0 x0) y0 (bvadd y0 (_ bv1 64))))) (inv x1 y1)))
-(rule (=> (and (inv x0 y0) (bvsgt y0 (_ bv50000 64)) (not (bvsle (bvsub x0 y0) (_ bv5 64)))) fail))
+(rule (=> (and (inv x0 y0) (bvsgt y0 (_ bv50000 64)) (bvsle (bvsub x0 y0) (_ bv5 64))) fail))
 (query fail)

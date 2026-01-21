@@ -1,0 +1,318 @@
+Analyzing 32 successful benchmarks
+============================================================
+
+=== s_split_03 ===
+Path: bench_horn_split_cex_bv/s_split_03/bv16_s_split_03.smt2
+Synthesized functions:
+  state_0: (define-fun state_0 ((step (_ BitVec 16))) (_ BitVec 16) step)
+  state_1: (define-fun state_1 ((step (_ BitVec 16))) (_ BitVec 16) #b0000000000000001)
+  state_2: (define-fun state_2 ((step (_ BitVec 16))) (_ BitVec 16) #b0000000000000000)
+  state_3: (define-fun state_3 ((step (_ BitVec 16))) (_ BitVec 16) (bvneg (bvshl step #b0000000000000001)))
+
+
+----------------------------------------
+
+=== s_split_05 ===
+Path: bench_horn_split_cex_bv/s_split_05/bv16_s_split_05.smt2
+Synthesized functions:
+  state_0: (define-fun state_0 ((step (_ BitVec 16))) (_ BitVec 16) (bvadd step #b0000000000000001))
+  state_1: (define-fun state_1 ((step (_ BitVec 16))) (_ BitVec 16) (bvnot (bvlshr (bvnot (bvshl step #b0000000000000010)) #b0000000000000001)))
+  state_2: (define-fun state_2 ((step (_ BitVec 16))) (_ BitVec 16) #b0000000000000001)
+
+
+----------------------------------------
+
+=== s_split_06 ===
+Path: bench_horn_split_cex_bv/s_split_06/bv16_s_split_06.smt2
+Synthesized functions:
+  state_0: (define-fun state_0 ((step (_ BitVec 16))) (_ BitVec 16) (bvsub (bvxor step #b0000000000000001) step))
+  state_1: (define-fun state_1 ((step (_ BitVec 16))) (_ BitVec 16) (bvlshr (bvadd step #b0000000000000001) #b0000000000000001))
+  state_2: (define-fun state_2 ((step (_ BitVec 16))) (_ BitVec 16) (bvlshr step #b0000000000000001))
+
+
+----------------------------------------
+
+=== s_split_07 ===
+Path: bench_horn_split_cex_bv/s_split_07/bv16_s_split_07.smt2
+Synthesized functions:
+  state_0: (define-fun state_0 ((step (_ BitVec 16))) (_ BitVec 16) (bvsub step (bvnot #b0000000000000001)))
+  state_1: (define-fun state_1 ((step (_ BitVec 16))) (_ BitVec 16) (bvsub step (bvnot (bvshl step #b0000000000000001))))
+  state_2: (define-fun state_2 ((step (_ BitVec 16))) (_ BitVec 16) (bvshl step #b0000000000000001))
+  state_3: (define-fun state_3 ((step (_ BitVec 16))) (_ BitVec 16) (bvlshr (bvsub (bvshl step #b0000000000000100) step) #b0000000000000100))
+
+
+----------------------------------------
+
+=== s_split_08 ===
+Path: bench_horn_split_cex_bv/s_split_08/bv16_s_split_08.smt2
+Synthesized functions:
+  state_0: (define-fun state_0 ((step (_ BitVec 16))) (_ BitVec 16) step)
+  state_1: (define-fun state_1 ((step (_ BitVec 16))) (_ BitVec 16) (bvlshr (bvadd step #b0000000000000001) #b0000000000000001))
+
+
+----------------------------------------
+
+=== s_split_09 ===
+Path: bench_horn_split_cex_bv/s_split_09/bv16_s_split_09.smt2
+Synthesized functions:
+  state_0: (define-fun state_0 ((step (_ BitVec 16))) (_ BitVec 16) (bvshl step #b0000000000000001))
+
+
+----------------------------------------
+
+=== s_split_10 ===
+Path: bench_horn_split_cex_bv/s_split_10/bv16_s_split_10.smt2
+Synthesized functions:
+  state_0: (define-fun state_0 ((step (_ BitVec 16))) (_ BitVec 16) step)
+
+
+----------------------------------------
+
+=== s_split_11 ===
+Path: bench_horn_split_cex_bv/s_split_11/bv16_s_split_11.smt2
+Synthesized functions:
+  state_0: (define-fun state_0 ((step (_ BitVec 16))) (_ BitVec 16) (bvor step (bvshl (bvshl #b0000000000000001 #b0000000000000111) #b0000000000001000)))
+  state_1: (define-fun state_1 ((step (_ BitVec 16))) (_ BitVec 16) (bvor #b0000000000000001 (bvadd step #b0000000000000001)))
+  state_2: (define-fun state_2 ((step (_ BitVec 16))) (_ BitVec 16) #b0000000000000000)
+
+
+----------------------------------------
+
+=== s_split_12 ===
+Path: bench_horn_split_cex_bv/s_split_12/bv16_s_split_12.smt2
+Synthesized functions:
+  state_0: (define-fun state_0 ((step (_ BitVec 16))) (_ BitVec 16) step)
+  state_1: (define-fun state_1 ((step (_ BitVec 16))) (_ BitVec 16) (bvlshr (bvadd step #b0000000000000001) #b0000000000000001))
+  state_2: (define-fun state_2 ((step (_ BitVec 16))) (_ BitVec 16) (bvlshr step #b0000000000000001))
+
+
+----------------------------------------
+
+=== s_split_13 ===
+Path: bench_horn_split_cex_bv/s_split_13/bv16_s_split_13.smt2
+Synthesized functions:
+  state_0: (define-fun state_0 ((step (_ BitVec 16))) (_ BitVec 16) (bvsub (bvxor step #b0000000000000001) step))
+  state_1: (define-fun state_1 ((step (_ BitVec 16))) (_ BitVec 16) step)
+
+
+----------------------------------------
+
+=== s_split_15 ===
+Path: bench_horn_split_cex_bv/s_split_15/bv16_s_split_15.smt2
+Synthesized functions:
+  state_0: (define-fun state_0 ((step (_ BitVec 16))) (_ BitVec 16) step)
+  state_1: (define-fun state_1 ((step (_ BitVec 16))) (_ BitVec 16) step)
+  state_2: (define-fun state_2 ((step (_ BitVec 16))) (_ BitVec 16) (bvshl step #b0000000000000001))
+
+
+----------------------------------------
+
+=== s_split_16 ===
+Path: bench_horn_split_cex_bv/s_split_16/bv16_s_split_16.smt2
+Synthesized functions:
+  state_0: (define-fun state_0 ((step (_ BitVec 16))) (_ BitVec 16) step)
+  state_1: (define-fun state_1 ((step (_ BitVec 16))) (_ BitVec 16) step)
+  state_2: (define-fun state_2 ((step (_ BitVec 16))) (_ BitVec 16) step)
+  state_3: (define-fun state_3 ((step (_ BitVec 16))) (_ BitVec 16) #b0000000000000000)
+
+
+----------------------------------------
+
+=== s_split_20 ===
+Path: bench_horn_split_cex_bv/s_split_20/bv16_s_split_20.smt2
+Synthesized functions:
+  state_0: (define-fun state_0 ((step (_ BitVec 16))) (_ BitVec 16) step)
+  state_1: (define-fun state_1 ((step (_ BitVec 16))) (_ BitVec 16) (bvneg (bvlshr step #b0000000000000001)))
+  state_2: (define-fun state_2 ((step (_ BitVec 16))) (_ BitVec 16) (bvnot (bvsub (bvlshr step #b0000000000000001) step)))
+
+
+----------------------------------------
+
+=== s_split_21 ===
+Path: bench_horn_split_cex_bv/s_split_21/bv16_s_split_21.smt2
+Synthesized functions:
+  state_0: (define-fun state_0 ((step (_ BitVec 16))) (_ BitVec 16) step)
+  state_1: (define-fun state_1 ((step (_ BitVec 16))) (_ BitVec 16) (bvsub step (bvnot step)))
+  state_2: (define-fun state_2 ((step (_ BitVec 16))) (_ BitVec 16) step)
+  state_3: (define-fun state_3 ((step (_ BitVec 16))) (_ BitVec 16) (bvxor step (bvor step #b0000000000000001)))
+
+
+----------------------------------------
+
+=== s_split_24 ===
+Path: bench_horn_split_cex_bv/s_split_24/bv16_s_split_24.smt2
+Synthesized functions:
+  state_0: (define-fun state_0 ((step (_ BitVec 16))) (_ BitVec 16) (bvshl step #b0000000000000001))
+  state_1: (define-fun state_1 ((step (_ BitVec 16))) (_ BitVec 16) (bvadd step (bvshl step #b0000000000000001)))
+  state_2: (define-fun state_2 ((step (_ BitVec 16))) (_ BitVec 16) (bvlshr (bvadd step #b0000000000000001) #b0000000000000001))
+
+
+----------------------------------------
+
+=== s_split_26 ===
+Path: bench_horn_split_cex_bv/s_split_26/bv16_s_split_26.smt2
+Synthesized functions:
+  state_0: (define-fun state_0 ((step (_ BitVec 16))) (_ BitVec 16) step)
+  state_1: (define-fun state_1 ((step (_ BitVec 16))) (_ BitVec 16) (bvshl #b0000000000000001 #b0000000000000101))
+  state_2: (define-fun state_2 ((step (_ BitVec 16))) (_ BitVec 16) step)
+
+
+----------------------------------------
+
+=== s_split_27 ===
+Path: bench_horn_split_cex_bv/s_split_27/bv16_s_split_27.smt2
+Synthesized functions:
+  state_0: (define-fun state_0 ((step (_ BitVec 16))) (_ BitVec 16) step)
+  state_1: (define-fun state_1 ((step (_ BitVec 16))) (_ BitVec 16) #b0000000000000000)
+  state_2: (define-fun state_2 ((step (_ BitVec 16))) (_ BitVec 16) step)
+
+
+----------------------------------------
+
+=== s_split_28 ===
+Path: bench_horn_split_cex_bv/s_split_28/bv16_s_split_28.smt2
+Synthesized functions:
+  state_0: (define-fun state_0 ((step (_ BitVec 16))) (_ BitVec 16) step)
+  state_1: (define-fun state_1 ((step (_ BitVec 16))) (_ BitVec 16) (bvsub (bvshl #b0000000000000001 #b0000000000000111) step))
+  state_2: (define-fun state_2 ((step (_ BitVec 16))) (_ BitVec 16) #b0000000000000000)
+
+
+----------------------------------------
+
+=== s_split_33 ===
+Path: bench_horn_split_cex_bv/s_split_33/bv16_s_split_33.smt2
+Synthesized functions:
+  state_0: (define-fun state_0 ((step (_ BitVec 16))) (_ BitVec 16) step)
+  state_1: (define-fun state_1 ((step (_ BitVec 16))) (_ BitVec 16) step)
+  state_2: (define-fun state_2 ((step (_ BitVec 16))) (_ BitVec 16) #b0000000000000000)
+
+
+----------------------------------------
+
+=== s_split_34 ===
+Path: bench_horn_split_cex_bv/s_split_34/bv16_s_split_34.smt2
+Synthesized functions:
+  state_0: (define-fun state_0 ((step (_ BitVec 16))) (_ BitVec 16) step)
+  state_1: (define-fun state_1 ((step (_ BitVec 16))) (_ BitVec 16) #b0000000000000001)
+
+
+----------------------------------------
+
+=== s_split_35 ===
+Path: bench_horn_split_cex_bv/s_split_35/bv16_s_split_35.smt2
+Synthesized functions:
+  state_0: (define-fun state_0 ((step (_ BitVec 16))) (_ BitVec 16) (bvadd step (bvshl step #b0000000000000010)))
+  state_1: (define-fun state_1 ((step (_ BitVec 16))) (_ BitVec 16) (bvsub step (bvnot (bvshl step #b0000000000000001))))
+  state_2: (define-fun state_2 ((step (_ BitVec 16))) (_ BitVec 16) step)
+  state_3: (define-fun state_3 ((step (_ BitVec 16))) (_ BitVec 16) (bvneg step))
+
+
+----------------------------------------
+
+=== s_split_42 ===
+Path: bench_horn_split_cex_bv/s_split_42/bv16_s_split_42.smt2
+Synthesized functions:
+  state_0: (define-fun state_0 ((step (_ BitVec 16))) (_ BitVec 16) step)
+  state_1: (define-fun state_1 ((step (_ BitVec 16))) (_ BitVec 16) step)
+  state_2: (define-fun state_2 ((step (_ BitVec 16))) (_ BitVec 16) (bvshl step #b0000000000000001))
+
+
+----------------------------------------
+
+=== s_split_43 ===
+Path: bench_horn_split_cex_bv/s_split_43/bv16_s_split_43.smt2
+Synthesized functions:
+  state_0: (define-fun state_0 ((step (_ BitVec 16))) (_ BitVec 16) step)
+  state_1: (define-fun state_1 ((step (_ BitVec 16))) (_ BitVec 16) #b0000000000000000)
+
+
+----------------------------------------
+
+=== s_split_45 ===
+Path: bench_horn_split_cex_bv/s_split_45/bv16_s_split_45.smt2
+Synthesized functions:
+  state_0: (define-fun state_0 ((step (_ BitVec 16))) (_ BitVec 16) step)
+  state_1: (define-fun state_1 ((step (_ BitVec 16))) (_ BitVec 16) step)
+  state_2: (define-fun state_2 ((step (_ BitVec 16))) (_ BitVec 16) #b0000000000000000)
+
+
+----------------------------------------
+
+=== s_split_46 ===
+Path: bench_horn_split_cex_bv/s_split_46/bv16_s_split_46.smt2
+Synthesized functions:
+  state_0: (define-fun state_0 ((step (_ BitVec 16))) (_ BitVec 16) step)
+  state_1: (define-fun state_1 ((step (_ BitVec 16))) (_ BitVec 16) #b0000000000000000)
+
+
+----------------------------------------
+
+=== s_split_47 ===
+Path: bench_horn_split_cex_bv/s_split_47/bv16_s_split_47.smt2
+Synthesized functions:
+  state_0: (define-fun state_0 ((step (_ BitVec 16))) (_ BitVec 16) step)
+  state_1: (define-fun state_1 ((step (_ BitVec 16))) (_ BitVec 16) #b0000000000000000)
+  state_2: (define-fun state_2 ((step (_ BitVec 16))) (_ BitVec 16) step)
+
+
+----------------------------------------
+
+=== s_split_48 ===
+Path: bench_horn_split_cex_bv/s_split_48/bv16_s_split_48.smt2
+Synthesized functions:
+  state_0: (define-fun state_0 ((step (_ BitVec 16))) (_ BitVec 16) step)
+  state_1: (define-fun state_1 ((step (_ BitVec 16))) (_ BitVec 16) step)
+
+
+----------------------------------------
+
+=== s_split_49 ===
+Path: bench_horn_split_cex_bv/s_split_49/bv16_s_split_49.smt2
+Synthesized functions:
+  state_0: (define-fun state_0 ((step (_ BitVec 16))) (_ BitVec 16) step)
+  state_1: (define-fun state_1 ((step (_ BitVec 16))) (_ BitVec 16) (bvneg (bvshl step #b0000000000000001)))
+
+
+----------------------------------------
+
+=== s_split_50 ===
+Path: bench_horn_split_cex_bv/s_split_50/bv16_s_split_50.smt2
+Synthesized functions:
+  state_0: (define-fun state_0 ((step (_ BitVec 16))) (_ BitVec 16) step)
+  state_1: (define-fun state_1 ((step (_ BitVec 16))) (_ BitVec 16) step)
+  state_2: (define-fun state_2 ((step (_ BitVec 16))) (_ BitVec 16) step)
+  state_3: (define-fun state_3 ((step (_ BitVec 16))) (_ BitVec 16) #b0000000000000000)
+
+
+----------------------------------------
+
+=== s_split_55 ===
+Path: bench_horn_split_cex_bv/s_split_55/bv16_s_split_55.smt2
+Synthesized functions:
+  state_0: (define-fun state_0 ((step (_ BitVec 16))) (_ BitVec 16) step)
+  state_1: (define-fun state_1 ((step (_ BitVec 16))) (_ BitVec 16) step)
+  state_2: (define-fun state_2 ((step (_ BitVec 16))) (_ BitVec 16) #b0000000000000001)
+
+
+----------------------------------------
+
+=== s_split_56 ===
+Path: bench_horn_split_cex_bv/s_split_56/bv16_s_split_56.smt2
+Synthesized functions:
+  state_0: (define-fun state_0 ((step (_ BitVec 16))) (_ BitVec 16) step)
+  state_1: (define-fun state_1 ((step (_ BitVec 16))) (_ BitVec 16) #b0000000000000001)
+  state_2: (define-fun state_2 ((step (_ BitVec 16))) (_ BitVec 16) (bvlshr (bvlshr (bvneg (bvxor step #b0000000000000001)) #b0000000000000111) #b0000000000001000))
+
+
+----------------------------------------
+
+=== s_split_58 ===
+Path: bench_horn_split_cex_bv/s_split_58/bv16_s_split_58.smt2
+Synthesized functions:
+  state_0: (define-fun state_0 ((step (_ BitVec 16))) (_ BitVec 16) step)
+  state_1: (define-fun state_1 ((step (_ BitVec 16))) (_ BitVec 16) #b0000000000000000)
+  state_2: (define-fun state_2 ((step (_ BitVec 16))) (_ BitVec 16) step)
+
+
+----------------------------------------
+
