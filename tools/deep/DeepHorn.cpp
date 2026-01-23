@@ -109,6 +109,10 @@ int main (int argc, char ** argv)
   const char *OPT_SYGUS_RUN = "--sygus-run";
   const char *OPT_SYGUS_VALIDATE = "--sygus-validate";
   const char *OPT_SYGUS_CCEX = "--sygus-ccex";
+  const char *OPT_SYGUS_MBP = "--sygus-mbp";
+  const char *OPT_NO_SYGUS_MBP = "--no-sygus-mbp";
+  const char *OPT_SYGUS_INVARIANTS = "--sygus-invariants";
+  const char *OPT_NO_SYGUS_INVARIANTS = "--no-sygus-invariants";
   const char *OPT_DEBUG = "--debug";
   if (getBoolValue(OPT_HELP, false, argc, argv) || argc == 1){
     outs () <<
@@ -167,7 +171,9 @@ int main (int argc, char ** argv)
         " " << OPT_SYGUS_BITWIDTH << " <N>          bit-width for step parameter (default: auto)\n" <<
         " " << OPT_SYGUS_RUN << "                     also run CVC5 on the generated SyGuS file\n" <<
         " " << OPT_SYGUS_VALIDATE << "              synthesize and validate CEX inductively\n" <<
-        " " << OPT_SYGUS_CCEX << " <file>           output CCEX file from synthesis (for validation)\n";
+        " " << OPT_SYGUS_CCEX << " <file>           output CCEX file from synthesis (for validation)\n" <<
+        " " << OPT_SYGUS_MBP << ", " << OPT_NO_SYGUS_MBP << "    seed grammar with MBP guards (default: enabled)\n" <<
+        " " << OPT_SYGUS_INVARIANTS << ", " << OPT_NO_SYGUS_INVARIANTS << "  seed grammar with bootstrap invariants (default: disabled)\n";
 
     return 0;
   }
@@ -255,6 +261,8 @@ int main (int argc, char ** argv)
   int sygus_bitwidth = getIntValue(OPT_SYGUS_BITWIDTH, -1, argc, argv);  // -1 = auto-detect
   bool sygus_run = getBoolValue(OPT_SYGUS_RUN, false, argc, argv);
   bool sygus_validate = getBoolValue(OPT_SYGUS_VALIDATE, false, argc, argv);
+  bool sygus_mbp = getBoolValueWithNegation(OPT_SYGUS_MBP, OPT_NO_SYGUS_MBP, true, argc, argv);  // Default: enabled
+  bool sygus_invariants = getBoolValueWithNegation(OPT_SYGUS_INVARIANTS, OPT_NO_SYGUS_INVARIANTS, false, argc, argv);  // Default: disabled
   string sygus_ccex_file = getStrValue(OPT_SYGUS_CCEX, "", argc, argv);
 
   if (d_m || d_p || d_d || d_s) do_disj = true;
@@ -337,18 +345,111 @@ int main (int argc, char ** argv)
     // Set default output filename
     string output_file = (sygus_file != "counterexample.sygus") ? sygus_file : "full_trace.sygus";
     
-    // Write SyGuS file
+    // Extract MBP guards for grammar seeding if enabled
     ExprSet seedConstants;  // TODO: extract from CHC bodies
-    ExprVector mbpGuards;   // TODO: extract from MBP analysis
+    ExprVector mbpGuards;
+    ExprVector bootstrapInvariants;
     
-    if (!bndExpl.writeSyGuSFromTrace(output_file, trace, stateVars, step_bw, seedConstants, mbpGuards))
+    if (sygus_mbp)
+    {
+      if (debug)
+        outs() << "\n=== Extracting MBP Guards for Grammar ===\n";
+      
+      if (bndExpl.extractMBPGuards(mbpGuards))
+      {
+        outs() << "  Extracted " << mbpGuards.size() << " MBP guards for grammar\n";
+      }
+      else
+      {
+        if (debug)
+          outs() << "  No MBP guards extracted (using generic grammar)\n";
+      }
+    }
+    
+    if (sygus_invariants)
+    {
+      if (debug)
+        outs() << "\n=== Extracting Bootstrap Invariants for Grammar ===\n";
+      
+      if (bndExpl.extractBootstrapInvariants(bootstrapInvariants))
+      {
+        outs() << "  Extracted " << bootstrapInvariants.size() << " bootstrap invariants for grammar\n";
+      }
+      else
+      {
+        if (debug)
+          outs() << "  No invariants extracted (using generic grammar)\n";
+      }
+    }
+    
+    if (!bndExpl.writeSyGuSFromTrace(output_file, trace, stateVars, step_bw, seedConstants, mbpGuards, bootstrapInvariants))
     {
       outs() << "Failed to write SyGuS file\n";
       return 1;
     }
     
     outs() << "  Generated SyGuS file: " << output_file << "\n";
-    outs() << "  Run with: cvc5 --lang=sygus2 " << output_file << "\n";
+    
+    // Optionally run CVC5 to synthesize closed-form functions
+    if (sygus_run)
+    {
+      outs() << "  Running CVC5 on " << output_file << "...\n";
+      auto result = ruleManager.runCVC5SyGuS(output_file, 60);
+      if (result.empty())
+      {
+        outs() << "CVC5 did not find a solution\n";
+        return 1;
+      }
+      outs() << "\nSynthesized functions:\n";
+      for (const auto& kv : result)
+      {
+        outs() << "  " << kv.first << ": " << kv.second << "\n";
+      }
+      
+      // Generate CCEX file if requested
+      if (sygus_ccex_file != "" || sygus_validate)
+      {
+        string ccex_output = (sygus_ccex_file != "") ? sygus_ccex_file : "synthesized_ccex.smt2";
+        bool ccex_ok = ruleManager.generateCCEXFromSynthesis(result, ccex_output, trace.size() - 1, sygus_bitwidth);
+        if (!ccex_ok)
+        {
+          outs() << "Failed to generate CCEX file\n";
+          return 1;
+        }
+        outs() << "Generated CCEX file: " << ccex_output << "\n";
+        
+        // Validate if requested
+        if (sygus_validate)
+        {
+          outs() << "\nValidating counterexample inductively...\n";
+          
+          // Load the CCEX file
+          ZSolver<EZ3> solver(z3);
+          ExprVector ccexExprs = solver.loadFromFile(ccex_output);
+          
+          // Create BndExpl for validation
+          BndExpl bnd(ruleManager, 0, debug);
+          tribool inductiveResult = bnd.validateCEXInductive(ccexExprs);
+          
+          if (inductiveResult == true)
+          {
+            outs() << "✓ Counterexample is INDUCTIVE - property is FALSE\n";
+          }
+          else if (inductiveResult == false)
+          {
+            outs() << "✗ Counterexample is NOT inductive\n";
+          }
+          else
+          {
+            outs() << "? Counterexample validation is UNKNOWN\n";
+          }
+        }
+      }
+    }
+    else
+    {
+      outs() << "  Run with: cvc5 --lang=sygus2 " << output_file << "\n";
+    }
     
     return 0;
   }
@@ -414,7 +515,7 @@ int main (int argc, char ** argv)
       if (sygus_ccex_file != "" || sygus_validate)
       {
         string ccex_output = (sygus_ccex_file != "") ? sygus_ccex_file : "synthesized_ccex.smt2";
-        bool ccex_ok = ruleManager.generateCCEXFromSynthesis(result, ccex_output, sygus_bitwidth);
+        bool ccex_ok = ruleManager.generateCCEXFromSynthesis(result, ccex_output, -1, sygus_bitwidth);
         if (!ccex_ok)
         {
           outs() << "Failed to generate CCEX file\n";

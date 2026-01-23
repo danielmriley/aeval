@@ -3255,6 +3255,7 @@ namespace ufo
     bool generateCCEXFromSynthesis(
         const std::map<std::string, std::string>& synthesized_funcs,
         const std::string& ccex_filename = "synthesized_ccex.smt2",
+        int max_step = -1,
         int step_bitwidth = -1)  // -1 means auto-detect from synthesized functions
     {
       if (synthesized_funcs.empty())
@@ -3339,9 +3340,10 @@ namespace ufo
       out << "; Synthesized closed-form functions for state evolution\n";
       for (size_t i = 0; i < state_vars.size(); i++)
       {
-        // Look for both naming conventions: state_X (PBE mode) and f_X (TR mode)
+        // Look for all naming conventions: state_X (PBE mode), f_X (TR mode), f_FH_X (full trace mode)
         std::string synth_name_pbe = "state_" + std::to_string(i);
         std::string synth_name_tr = "f_" + std::to_string(i);
+        std::string synth_name_full = "f_FH_" + std::to_string(i);
         std::string synth_name;
         
         auto it = synthesized_funcs.find(synth_name_pbe);
@@ -3358,7 +3360,15 @@ namespace ufo
           }
           else
           {
-            continue;  // Function not found in either format
+            it = synthesized_funcs.find(synth_name_full);
+            if (it != synthesized_funcs.end())
+            {
+              synth_name = synth_name_full;
+            }
+            else
+            {
+              continue;  // Function not found in any format
+            }
           }
         }
 
@@ -3397,11 +3407,13 @@ namespace ufo
       {
         if (var_bw.find(i) == var_bw.end()) continue;
         
-        // Check if we have a synthesized function for this variable
+        // Check if we have a synthesized function for this variable (any naming convention)
         std::string synth_pbe = "state_" + std::to_string(i);
         std::string synth_tr = "f_" + std::to_string(i);
+        std::string synth_full = "f_FH_" + std::to_string(i);
         if (synthesized_funcs.find(synth_pbe) == synthesized_funcs.end() &&
-            synthesized_funcs.find(synth_tr) == synthesized_funcs.end())
+            synthesized_funcs.find(synth_tr) == synthesized_funcs.end() &&
+            synthesized_funcs.find(synth_full) == synthesized_funcs.end())
           continue;
         
         unsigned vwidth = var_bw[i];
@@ -3418,17 +3430,35 @@ namespace ufo
       // Generate hex constants properly for any bitwidth
       // For step_bitwidth bits, we need (step_bitwidth + 3) / 4 hex digits
       int hex_digits = (step_bitwidth + 3) / 4;
+      
+      // Determine max bound
+      std::string max_bound_hex;
+      if (max_step >= 0)
+      {
+        std::stringstream ss;
+        ss << std::hex << max_step;
+        max_bound_hex = ss.str();
+        // pad with zeros
+        while (max_bound_hex.length() < hex_digits) max_bound_hex = "0" + max_bound_hex;
+      }
+      else
+      {
+        max_bound_hex = std::string(hex_digits, 'f');
+      }
+      
       out << "    (=> (and (bvule #x" << std::string(hex_digits, '0') << " i) ";
-      out << "(bvule i #x" << std::string(hex_digits, 'f') << "))\n";
+      out << "(bvule i #x" << max_bound_hex << "))\n";
       out << "        (and\n";
       
       for (size_t i = 0; i < state_vars.size(); i++)
       {
-        // Check for both naming conventions
+        // Check for all naming conventions
         std::string synth_pbe = "state_" + std::to_string(i);
         std::string synth_tr = "f_" + std::to_string(i);
+        std::string synth_full = "f_FH_" + std::to_string(i);
         if (synthesized_funcs.find(synth_pbe) == synthesized_funcs.end() &&
-            synthesized_funcs.find(synth_tr) == synthesized_funcs.end())
+            synthesized_funcs.find(synth_tr) == synthesized_funcs.end() &&
+            synthesized_funcs.find(synth_full) == synthesized_funcs.end())
           continue;
         
         out << "          (= (select trace_" << i << " i) (var_" << i << "_at_i i))\n";

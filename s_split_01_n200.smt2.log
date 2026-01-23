@@ -1,0 +1,55 @@
+[DEBUG] Entering sygus-full mode
+[DEBUG] Input file: /home/daniel/Projects/aeval/bench_horn_split_cex_bv/s_split_01_gen/s_split_01_n200.smt2
+[DEBUG] Creating ExprFactory...
+[DEBUG] Creating EZ3...
+[DEBUG] Creating CHCs...
+[DEBUG] Parsing file...
+[Parse Timing] Load: 2ms, Process: 0ms, Setup: 0ms, Elim: 5ms, DeclElim: 0ms, Cycles: 0ms, Total: 8ms
+[DEBUG] Parse successful
+  Extracted 801 trace points
+  State variables: 2
+  Extracted 2 MBP guards for grammar
+  Extracted 2 bootstrap invariants for grammar
+  Generated SyGuS file: full_trace.sygus
+  Running CVC5 on full_trace.sygus...
+  Running: timeout 60s cvc5 --lang=sygus2 full_trace.sygus
+CVC5 output:
+(
+(define-fun f_FH_0 ((n (_ BitVec 16))) (_ BitVec 16) n)
+(define-fun f_FH_1 ((n (_ BitVec 16))) (_ BitVec 16) (ite (bvult n #b0000000110001111) #b0000000110010000 (ite (= n #b0000000110001111) #b0000000110010000 n)))
+)
+
+
+Synthesized functions:
+  f_FH_0: (define-fun f_FH_0 ((n (_ BitVec 16))) (_ BitVec 16) n)
+  f_FH_1: (define-fun f_FH_1 ((n (_ BitVec 16))) (_ BitVec 16) (ite (bvult n #b0000000110001111) #b0000000110010000 (ite (= n #b0000000110001111) #b0000000110010000 n)))
+
+=== Generating CCEX from Synthesized Functions ===
+  CCEX file generated: synthesized_ccex.smt2
+Generated CCEX file: synthesized_ccex.smt2
+
+Validating counterexample inductively...
+  [Inductive] Init: PASS (f(0) satisfies init)
+  [Inductive] Transition: FAIL (f(i) => f(i+1) is not valid)
+    Failing step i = (32927:bv(16))
+  [Detailed Transition Report]
+    Failing constraint: (_FH_1'=ite(bvsge(_FH_0, 400:bv(16)), bvadd(_FH_1, 1:bv(16)), _FH_1))
+    -> Potentially incorrect variable: _FH_0
+    -> Potentially incorrect variable: _FH_1
+    -> Potentially incorrect variable: _FH_1'
+  [End Report]
+  [Inductive] Property: FAIL (f(N) does not reach error)
+  [Detailed Property Report]
+    Failing constraint: (_FH_0=(800:bv(16)))
+    -> Potentially incorrect variable: _FH_0
+  [End Report]
+  [Inductive Timing] Parse: 0.023ms, Setup: 2.152ms, Init: 0.152ms, Trans: 3.3ms, Prop: 0.271ms, Total: 13.221ms
+  [Slicing] Trace covers cone of influence, attempting partial validation...
+
+=== Partial CEX Validation (Cone of Influence) ===
+  [Partial] Validating with cone: {0 1 }
+  [Partial] Transition: FAIL (cone constraints not valid)
+  [Partial] CEX INVALID: Partial trace does not satisfy cone constraints
+  [Inductive] CEX INVALID: One or more checks failed
+✗ Counterexample is NOT inductive
+

@@ -1,0 +1,39 @@
+[DEBUG] Entering sygus-full mode
+[DEBUG] Input file: bench_horn_ccex/nd_mixed/bvzext16_nd_mixed.smt2
+[DEBUG] Creating ExprFactory...
+[DEBUG] Creating EZ3...
+[DEBUG] Creating CHCs...
+[DEBUG] Parsing file...
+[Parse Timing] Load: 10ms, Process: 0ms, Setup: 0ms, Elim: 1ms, DeclElim: 0ms, Cycles: 0ms, Total: 12ms
+[DEBUG] Parse successful
+  Extracted 3 trace points
+  State variables: 1
+  Extracted 1 bootstrap invariants for grammar
+  Generated SyGuS file: full_trace.sygus
+  Running CVC5 on full_trace.sygus...
+  Running: timeout 60s cvc5 --lang=sygus2 full_trace.sygus
+CVC5 output:
+(
+(define-fun f_FH_0 ((n (_ BitVec 8))) (_ BitVec 16) (let ((_let_1 ((_ zero_extend 8) n))) (ite (= #b0000000000000000 _let_1) _let_1 #b1111111111111111)))
+)
+
+
+Synthesized functions:
+  f_FH_0: (define-fun f_FH_0 ((n (_ BitVec 8))) (_ BitVec 16) (let ((_let_1 ((_ zero_extend 8) n))) (ite (= #b0000000000000000 _let_1) _let_1 #b1111111111111111)))
+
+=== Generating CCEX from Synthesized Functions ===
+  CCEX file generated: synthesized_ccex.smt2
+Generated CCEX file: synthesized_ccex.smt2
+
+Validating counterexample inductively...
+  [Inductive] Init: PASS (f(0) satisfies init)
+  [Inductive] Transition: PASS (simplified to TRUE)
+  [Inductive] Property: PASS (f(N) reaches error state)
+  [Error State Variable Report]
+    Constraint: (!bvult(bvadd(bvzext(_FH_0, bv(32)), 1:bv(32)), 65536:bv(32)))
+      -> Variable: _FH_0 = ite((0:bv(16))=bvzext(255:bv(8), bv(16)), bvzext(255:bv(8), bv(16)), 65535:bv(16))
+  [End Report]
+  [Inductive Timing] Parse: 0.027ms, Setup: 2.427ms, Init: 0.171ms, Trans: 0.078ms, Prop: 0.124ms, Total: 2.908ms
+  [Inductive] CEX VALID: All 3 checks passed
+✓ Counterexample is INDUCTIVE - property is FALSE
+

@@ -1,0 +1,19 @@
+[DEBUG] Entering sygus-full mode
+[DEBUG] Input file: /home/daniel/Projects/aeval/bench_horn_split_cex_bv/s_split_01_gen/s_split_01_n1000.smt2
+[DEBUG] Creating ExprFactory...
+[DEBUG] Creating EZ3...
+[DEBUG] Creating CHCs...
+[DEBUG] Parsing file...
+[Parse Timing] Load: 2ms, Process: 0ms, Setup: 0ms, Elim: 5ms, DeclElim: 0ms, Cycles: 0ms, Total: 8ms
+[DEBUG] Parse successful
+  Extracted 4001 trace points
+  State variables: 2
+  Extracted 2 MBP guards for grammar
+  Extracted 2 bootstrap invariants for grammar
+  Generated SyGuS file: full_trace.sygus
+  Running CVC5 on full_trace.sygus...
+  Running: timeout 60s cvc5 --lang=sygus2 full_trace.sygus
+CVC5 exited with status 31744
+CVC5 did not find a solution
+
+cvc5 interrupted by SIGTERM.

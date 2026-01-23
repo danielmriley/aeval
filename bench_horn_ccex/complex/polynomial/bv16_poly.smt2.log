@@ -1,0 +1,53 @@
+[DEBUG] Entering sygus-full mode
+[DEBUG] Input file: bench_horn_ccex/complex/polynomial/bv16_poly.smt2
+[DEBUG] Creating ExprFactory...
+[DEBUG] Creating EZ3...
+[DEBUG] Creating CHCs...
+[DEBUG] Parsing file...
+[Parse Timing] Load: 9ms, Process: 0ms, Setup: 0ms, Elim: 4ms, DeclElim: 0ms, Cycles: 0ms, Total: 15ms
+[DEBUG] Parse successful
+  Extracted 257 trace points
+  State variables: 2
+  Extracted 1 MBP guards for grammar
+  Extracted 2 bootstrap invariants for grammar
+  Generated SyGuS file: full_trace.sygus
+  Running CVC5 on full_trace.sygus...
+  Running: timeout 60s cvc5 --lang=sygus2 full_trace.sygus
+CVC5 output:
+(
+(define-fun f_FH_0 ((n (_ BitVec 16))) (_ BitVec 16) n)
+(define-fun f_FH_1 ((n (_ BitVec 16))) (_ BitVec 16) (bvmul n n))
+)
+
+
+Synthesized functions:
+  f_FH_0: (define-fun f_FH_0 ((n (_ BitVec 16))) (_ BitVec 16) n)
+  f_FH_1: (define-fun f_FH_1 ((n (_ BitVec 16))) (_ BitVec 16) (bvmul n n))
+
+=== Generating CCEX from Synthesized Functions ===
+  CCEX file generated: synthesized_ccex.smt2
+Generated CCEX file: synthesized_ccex.smt2
+
+Validating counterexample inductively...
+  [Inductive] Init: PASS (f(0) satisfies init)
+  [Inductive] Transition: FAIL (f(i) => f(i+1) is not valid)
+    Failing step i = (3896:bv(16))
+  [Detailed Transition Report]
+  [End Report]
+  [Inductive] Property: FAIL (f(N) does not reach error)
+  [Detailed Property Report]
+    Failing constraint: (_FH_1=(65025:bv(16)))
+    -> Potentially incorrect variable: _FH_1
+  [End Report]
+  [Inductive Timing] Parse: 0.022ms, Setup: 2.048ms, Init: 0.108ms, Trans: 3.213ms, Prop: 0.226ms, Total: 11.601ms
+  [Slicing] Trace covers cone of influence, attempting partial validation...
+
+=== Partial CEX Validation (Cone of Influence) ===
+  [Partial] Validating with cone: {0 1 }
+
+ASSERTION VIOLATION
+File: ../src/ast/ast.cpp
+Line: 432
+UNEXPECTED CODE WAS REACHED.
+Z3 4.8.10.0
+Please file an issue with this message and more detail about how you encountered it at https://github.com/Z3Prover/z3/issues/new

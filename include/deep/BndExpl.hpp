@@ -5,6 +5,7 @@
 #include "Distribution.hpp"
 #include "ae/AeValSolver.hpp"
 #include "simpl/Bv2Lia.hpp"
+#include "simpl/Lia2Bv.hpp"
 #include "ufo/ExprBv.hh"
 #include <algorithm>
 #include <limits>
@@ -60,6 +61,177 @@ namespace ufo
 
       asDouble = asInt.convert_to<double>();
       return mkMPZ(asInt, m_efac);
+    }
+
+    /**
+     * Convert an Expr to SyGuS-compatible string for grammar production.
+     * Handles BV comparisons and arithmetic expressions.
+     */
+    std::string exprToSyGuS(Expr e, unsigned varWidth, int stepWidth)
+    {
+      if (!e) return "";
+      
+      // For AND/OR, recursively process
+      if (isOpX<AND>(e))
+      {
+        std::vector<std::string> parts;
+        for (auto it = e->args_begin(); it != e->args_end(); ++it)
+        {
+          std::string part = exprToSyGuS(*it, varWidth, stepWidth);
+          if (!part.empty()) parts.push_back(part);
+        }
+        if (parts.empty()) return "";
+        if (parts.size() == 1) return parts[0];
+        std::string result = "(and";
+        for (auto& p : parts) result += " " + p;
+        result += ")";
+        return result;
+      }
+      
+      if (isOpX<OR>(e))
+      {
+        std::vector<std::string> parts;
+        for (auto it = e->args_begin(); it != e->args_end(); ++it)
+        {
+          std::string part = exprToSyGuS(*it, varWidth, stepWidth);
+          if (!part.empty()) parts.push_back(part);
+        }
+        if (parts.empty()) return "";
+        if (parts.size() == 1) return parts[0];
+        std::string result = "(or";
+        for (auto& p : parts) result += " " + p;
+        result += ")";
+        return result;
+      }
+      
+      if (isOpX<NEG>(e))
+      {
+        std::string inner = exprToSyGuS(e->left(), varWidth, stepWidth);
+        if (inner.empty()) return "";
+        return "(not " + inner + ")";
+      }
+      
+      // BV comparisons
+      if (isOpX<BULT>(e))
+      {
+        std::string lhs = exprToSyGuS(e->left(), varWidth, stepWidth);
+        std::string rhs = exprToSyGuS(e->right(), varWidth, stepWidth);
+        if (lhs.empty() || rhs.empty()) return "(bvult Start Start)";
+        return "(bvult " + lhs + " " + rhs + ")";
+      }
+      
+      if (isOpX<BULE>(e))
+      {
+        std::string lhs = exprToSyGuS(e->left(), varWidth, stepWidth);
+        std::string rhs = exprToSyGuS(e->right(), varWidth, stepWidth);
+        if (lhs.empty() || rhs.empty()) return "(bvule Start Start)";
+        return "(bvule " + lhs + " " + rhs + ")";
+      }
+      
+      if (isOpX<BUGT>(e))
+      {
+        std::string lhs = exprToSyGuS(e->left(), varWidth, stepWidth);
+        std::string rhs = exprToSyGuS(e->right(), varWidth, stepWidth);
+        if (lhs.empty() || rhs.empty()) return "(bvugt Start Start)";
+        return "(bvugt " + lhs + " " + rhs + ")";
+      }
+      
+      if (isOpX<BUGE>(e))
+      {
+        std::string lhs = exprToSyGuS(e->left(), varWidth, stepWidth);
+        std::string rhs = exprToSyGuS(e->right(), varWidth, stepWidth);
+        if (lhs.empty() || rhs.empty()) return "(bvuge Start Start)";
+        return "(bvuge " + lhs + " " + rhs + ")";
+      }
+      
+      if (isOpX<BSLT>(e))
+      {
+        std::string lhs = exprToSyGuS(e->left(), varWidth, stepWidth);
+        std::string rhs = exprToSyGuS(e->right(), varWidth, stepWidth);
+        if (lhs.empty() || rhs.empty()) return "(bvslt Start Start)";
+        return "(bvslt " + lhs + " " + rhs + ")";
+      }
+      
+      if (isOpX<BSLE>(e))
+      {
+        std::string lhs = exprToSyGuS(e->left(), varWidth, stepWidth);
+        std::string rhs = exprToSyGuS(e->right(), varWidth, stepWidth);
+        if (lhs.empty() || rhs.empty()) return "(bvsle Start Start)";
+        return "(bvsle " + lhs + " " + rhs + ")";
+      }
+      
+      // LIA comparisons (if not translated back to BV)
+      if (isOpX<LT>(e) || isOpX<LEQ>(e))
+      {
+        return "(bvslt Start Start)";
+      }
+      
+      if (isOpX<GT>(e) || isOpX<GEQ>(e))
+      {
+        return "(bvsgt Start Start)";
+      }
+      
+      if (isOpX<EQ>(e))
+      {
+        std::string lhs = exprToSyGuS(e->left(), varWidth, stepWidth);
+        std::string rhs = exprToSyGuS(e->right(), varWidth, stepWidth);
+        if (lhs.empty() || rhs.empty()) return "(= Start Start)";
+        return "(= " + lhs + " " + rhs + ")";
+      }
+      
+      // BV arithmetic
+      if (isOpX<BADD>(e))
+      {
+        std::string lhs = exprToSyGuS(e->left(), varWidth, stepWidth);
+        std::string rhs = exprToSyGuS(e->right(), varWidth, stepWidth);
+        if (lhs.empty() || rhs.empty()) return "(bvadd Start Start)";
+        return "(bvadd " + lhs + " " + rhs + ")";
+      }
+      
+      if (isOpX<BSUB>(e))
+      {
+        std::string lhs = exprToSyGuS(e->left(), varWidth, stepWidth);
+        std::string rhs = exprToSyGuS(e->right(), varWidth, stepWidth);
+        if (lhs.empty() || rhs.empty()) return "(bvsub Start Start)";
+        return "(bvsub " + lhs + " " + rhs + ")";
+      }
+      
+      if (isOpX<BMUL>(e))
+      {
+        std::string lhs = exprToSyGuS(e->left(), varWidth, stepWidth);
+        std::string rhs = exprToSyGuS(e->right(), varWidth, stepWidth);
+        if (lhs.empty() || rhs.empty()) return "(bvmul Start Start)";
+        return "(bvmul " + lhs + " " + rhs + ")";
+      }
+      
+      // BV constants
+      if (bv::is_bvnum(e))
+      {
+        mpz_class val = bv::toMpz(e);
+        mpz_class masked = val & ((mpz_class(1) << varWidth) - 1);
+        std::stringstream ss;
+        ss << std::hex << std::setfill('0') << std::setw(varWidth / 4) << masked;
+        return "#x" + ss.str();
+      }
+      
+      // Integer constants (from LIA)
+      if (isOpX<MPZ>(e))
+      {
+        mpz_class val = lexical_cast<mpz_class>(e);
+        mpz_class masked = val & ((mpz_class(1) << varWidth) - 1);
+        std::stringstream ss;
+        ss << std::hex << std::setfill('0') << std::setw(varWidth / 4) << masked;
+        return "#x" + ss.str();
+      }
+      
+      // Variables - use Start as placeholder
+      if (bind::IsConst()(e) || isOpX<FAPP>(e))
+      {
+        return "Start";
+      }
+      
+      // Default: return empty (skip this guard)
+      return "";
     }
 
   public:
@@ -1780,6 +1952,69 @@ namespace ufo
      * 
      * @param max_steps      Maximum number of steps to explore
      * @param outTrace       Output: vector of state maps, one per step
+    /**
+     * Incrementally add one step to the SSA and update bindVars.
+     * This appends to ssa and bindVars rather than rebuilding from scratch.
+     * 
+     * @param step        The CHC rule index for this step
+     * @param bindVars1   Current variable bindings (input/output - updated to dstVars)
+     * @param ssa         SSA formulas (appended to)
+     * @param bindVar_index  Counter for unique variable names (input/output)
+     * @param locVar_index   Counter for local variable names (input/output)
+     */
+    void appendSSAStep(int step, ExprVector& bindVars1, ExprVector& ssa, 
+                       int64_t& bindVar_index, int64_t& locVar_index)
+    {
+      ExprVector bindVars2;
+      HornRuleExt &hr = ruleManager.chcs[step];
+      
+      Expr body = hr.body;
+      if (!hr.isFact && extraLemmas != NULL)
+        body = mk<AND>(extraLemmas, body);
+      body = replaceAll(body, hr.srcVars, bindVars1);
+      
+      for (int i = 0; i < hr.dstVars.size(); i++)
+      {
+        bool kept = false;
+        for (int j = 0; j < hr.srcVars.size(); j++)
+        {
+          if (hr.dstVars[i] == hr.srcVars[j])
+          {
+            bindVars2.push_back(bindVars1[i]);
+            kept = true;
+          }
+        }
+        if (!kept)
+        {
+          Expr new_name = mkTerm<string>("__bnd_var_" + to_string(bindVar_index++), m_efac);
+          bindVars2.push_back(cloneVar(hr.dstVars[i], new_name));
+        }
+        
+        body = replaceAll(body, hr.dstVars[i], bindVars2[i]);
+      }
+      
+      for (int i = 0; i < hr.locVars.size(); i++)
+      {
+        Expr new_name = mkTerm<string>("__loc_var_" + to_string(locVar_index++), m_efac);
+        Expr var = cloneVar(hr.locVars[i], new_name);
+        body = replaceAll(body, hr.locVars[i], var);
+      }
+      
+      ssa.push_back(body);
+      bindVars.push_back(bindVars2);
+      bindVars1 = bindVars2;
+    }
+
+    /**
+     * Extract a concrete counterexample trace using incremental SAT solving.
+     * 
+     * This optimized method:
+     * 1. Uses push/pop to avoid resetting the solver between length checks
+     * 2. Incrementally adds transition constraints without rebuilding SSA
+     * 3. Pushes the property constraint, checks SAT, then pops for next iteration
+     * 
+     * @param max_steps      Maximum number of steps to explore
+     * @param outTrace       Output: vector of state maps, one per step
      * @param outStateVars   Output: the state variables (in order)
      * @param sparse_factor  Optional: sample every Nth point (1 = all points)
      * @return true if a valid trace was found and extracted
@@ -1792,9 +2027,10 @@ namespace ufo
     {
       outTrace.clear();
       outStateVars.clear();
+      bindVars.clear();
       
       if (debug)
-        outs() << "\n=== Extracting Concrete Trace (BndExpl) ===\n";
+        outs() << "\n=== Extracting Concrete Trace (Incremental) ===\n";
       
       // Check if ruleManager has valid failDecl
       if (ruleManager.failDecl == nullptr)
@@ -1804,28 +2040,205 @@ namespace ufo
         return false;
       }
       
-      // Model to be populated after SAT check
-      ExprMap extractedModel;
+      // Identify the CHC rules we need:
+      // - initRule: fact (isFact=true) that establishes initial state
+      // - loopRule: inductive (isInductive=true) transition
+      // - queryRule: query (isQuery=true) that reaches fail state
+      int initRule = -1, loopRule = -1, queryRule = -1;
       
-      // Step 1: Find a trace path to the bad state
+      for (size_t i = 0; i < ruleManager.chcs.size(); i++)
+      {
+        auto& chc = ruleManager.chcs[i];
+        if (chc.isFact) initRule = i;
+        if (chc.isInductive) loopRule = i;
+        if (chc.isQuery) queryRule = i;
+      }
+      
+      if (initRule < 0 || loopRule < 0 || queryRule < 0)
+      {
+        if (debug)
+          outs() << "  Warning: Could not identify all CHC types, falling back to non-incremental\n";
+        return extractConcreteTraceNonIncremental(max_steps, outTrace, outStateVars, sparse_factor);
+      }
+      
+      // Get state variables from the loop rule
+      outStateVars = ruleManager.chcs[loopRule].srcVars;
+      if (outStateVars.empty())
+      {
+        outs() << "  Error: Could not identify state variables\n";
+        return false;
+      }
+      
+      if (debug)
+        outs() << "  State variables: " << outStateVars.size() << "\n";
+      
+      // Incremental solving with push/pop:
+      // We build: Init /\ Trans^k and use push/pop to temporarily check Query
+      // This avoids O(L^2) solver resets
+      
+      ExprVector ssa;
+      ExprMap extractedModel;
+      bool found = false;
+      
+      // Initialize with the init rule
+      ExprVector currentVars = ruleManager.chcs[initRule].srcVars;
+      int64_t bindVar_index = 0;
+      int64_t locVar_index = 0;
+      
+      // Add init constraint to SSA (and bindVars tracking)
+      appendSSAStep(initRule, currentVars, ssa, bindVar_index, locVar_index);
+      
+      // Reset solver and assert init constraint (this stays permanently)
+      u.reset();
+      u.assertExpr(ssa[0]);
+      
+      // Now incrementally add loop steps and check with query
+      for (int64_t len = 2; len <= max_steps; len++)
+      {
+        // Add one more loop iteration
+        appendSSAStep(loopRule, currentVars, ssa, bindVar_index, locVar_index);
+        
+        // Assert the new transition constraint (stays in solver permanently)
+        u.assertExpr(ssa.back());
+        
+        // Build the query constraint: substitute currentVars into queryRule's srcVars
+        HornRuleExt& qr = ruleManager.chcs[queryRule];
+        Expr queryBody = qr.body;
+        queryBody = replaceAll(queryBody, qr.srcVars, currentVars);
+        
+        // Use push/pop to temporarily check the query
+        u.push();
+        u.assertExpr(queryBody);
+        tribool satResult = u.solve();
+        
+        if (debug)
+        {
+          outs() << "\r  Trying length " << len << " ... " 
+                 << (satResult == true ? "SAT   " : (satResult == false ? "UNSAT " : "UNKNOWN")) 
+                 << "          ";
+          outs().flush();
+        }
+        
+        if (satResult == true)
+        {
+          // Found a satisfying trace - extract model before popping
+          found = true;
+          if (debug)
+            outs() << "\n  Found satisfiable trace of length " << len << "\n";
+          
+          // Collect all variables for model extraction
+          ExprSet allVars;
+          for (const auto& stepVars : bindVars)
+          {
+            for (const auto& var : stepVars)
+            {
+              if (var != nullptr) allVars.insert(var);
+            }
+          }
+          
+          u.getModel(allVars, extractedModel);
+          
+          if (debug)
+            outs() << "  Extracted model has " << extractedModel.size() << " entries\n";
+          
+          u.pop();  // Clean up
+          break;
+        }
+        
+        // UNSAT or UNKNOWN: pop to remove the query constraint
+        // The transition constraints remain in the solver
+        u.pop();
+      }
+      
+      if (!found)
+      {
+        if (debug)
+          outs() << "\n  No satisfiable trace found within " << max_steps << " steps\n";
+        return false;
+      }
+      
+      // Extract trace values from bindVars
+      for (size_t step = 0; step < bindVars.size(); step++)
+      {
+        if (sparse_factor > 1 && step % sparse_factor != 0 && step != bindVars.size() - 1)
+          continue;
+          
+        std::map<Expr, Expr> stepState;
+        const ExprVector& stepVars = bindVars[step];
+        
+        if (debug)
+          outs() << "  Step " << step << ": bindVars has " << stepVars.size() << " vars\n";
+        
+        for (size_t i = 0; i < stepVars.size() && i < outStateVars.size(); i++)
+        {
+          Expr var = stepVars[i];
+          if (var == nullptr) continue;
+          
+          Expr val = nullptr;
+          auto it = extractedModel.find(var);
+          if (it != extractedModel.end())
+          {
+            val = it->second;
+            if (debug)
+              outs() << "    Found value for " << *var << " = " << *val << "\n";
+          }
+          
+          if (val == nullptr || val == var)
+          {
+            Expr vtype = bind::typeOf(var);
+            if (vtype != nullptr && bv::is_bvsort(vtype))
+              val = bv::bvnum(mpz_class(0), bv::width(vtype), m_efac);
+            else
+              val = mkTerm(mpz_class(0), m_efac);
+            if (debug)
+              outs() << "    Warning: Using default 0 for " << *var << "\n";
+          }
+          
+          stepState[outStateVars[i]] = val;
+        }
+        
+        outTrace.push_back(stepState);
+        
+        if (debug && step % 100 == 0)
+          outs() << "    Extracted step " << step << "\n";
+      }
+      
+      if (debug)
+        outs() << "  Extracted " << outTrace.size() << " trace points\n";
+      
+      return true;
+    }
+    
+    /**
+     * Non-incremental version of extractConcreteTrace (fallback).
+     * Used when the CHC structure doesn't fit the simple init/loop/query pattern.
+     */
+    bool extractConcreteTraceNonIncremental(
+        int64_t max_steps,
+        std::vector<std::map<Expr, Expr>>& outTrace,
+        ExprVector& outStateVars,
+        int sparse_factor = 1)
+    {
+      outTrace.clear();
+      outStateVars.clear();
+      
+      if (debug)
+        outs() << "\n=== Extracting Concrete Trace (Non-Incremental Fallback) ===\n";
+      
+      ExprMap extractedModel;
       vector<int> trace;
       bool found = false;
       
-      // Try to find a trace of increasing length
       for (int64_t len = 2; len <= max_steps; len++)
       {
         if (!getSingleTrace(mk<TRUE>(m_efac), ruleManager.failDecl, len, trace))
-        {
           continue;
-        }
         
-        // Build SSA and check satisfiability
         ExprVector ssa;
         getSSA(trace, ssa);
         
         tribool satResult = u.isSat(ssa);
         
-        // Update progress in place (single line that gets overwritten)
         if (debug)
         {
           outs() << "\r  Trying length " << len << " ... " 
@@ -1840,7 +2253,6 @@ namespace ufo
           if (debug)
             outs() << "\n  Found satisfiable trace of length " << len << "\n";
           
-          // Collect all variables from bindVars into a set for model extraction
           ExprSet allVars;
           for (const auto& stepVars : bindVars)
           {
@@ -1850,17 +2262,10 @@ namespace ufo
             }
           }
           
-          // Extract the model for all variables now (while the SAT context is still valid)
           u.getModel(allVars, extractedModel);
           
           if (debug)
-          {
             outs() << "  Extracted model has " << extractedModel.size() << " entries\n";
-            for (const auto& kv : extractedModel)
-            {
-              outs() << "    " << *kv.first << " = " << *kv.second << "\n";
-            }
-          }
           
           break;
         }
@@ -1873,7 +2278,6 @@ namespace ufo
         return false;
       }
       
-      // Step 2: Identify state variables from the first inductive CHC
       for (auto& chc : ruleManager.chcs)
       {
         if (chc.isInductive)
@@ -1889,80 +2293,513 @@ namespace ufo
         return false;
       }
       
-      if (debug)
-        outs() << "  State variables: " << outStateVars.size() << "\n";
-      
-      // Step 3: Extract concrete values from bindVars at each step
-      // bindVars[step] contains the SSA-renamed variables for that step
-      // We need to get the model value for each
-      
-      if (bindVars.empty())
-      {
-        if (debug)
-          outs() << "  Warning: bindVars is empty, cannot extract trace values\n";
-        // Still return true with empty trace values - the trace structure was found
-        return true;
-      }
-      
       for (size_t step = 0; step < bindVars.size(); step++)
       {
-        // Apply sparse sampling
         if (sparse_factor > 1 && step % sparse_factor != 0 && step != bindVars.size() - 1)
           continue;
           
         std::map<Expr, Expr> stepState;
         const ExprVector& stepVars = bindVars[step];
         
-        if (debug)
-        {
-          outs() << "  Step " << step << ": bindVars has " << stepVars.size() << " vars, outStateVars has " << outStateVars.size() << "\n";
-        }
-        
         for (size_t i = 0; i < stepVars.size() && i < outStateVars.size(); i++)
         {
           Expr var = stepVars[i];
           if (var == nullptr) continue;
           
-          // Look up the value in our extracted model
           Expr val = nullptr;
           auto it = extractedModel.find(var);
           if (it != extractedModel.end())
-          {
             val = it->second;
-            if (debug)
-              outs() << "    Found value for " << *var << " = " << *val << "\n";
-          }
           
           if (val == nullptr || val == var)
           {
-            // No model value, try to infer from constraints or use 0
             Expr vtype = bind::typeOf(var);
             if (vtype != nullptr && bv::is_bvsort(vtype))
-            {
               val = bv::bvnum(mpz_class(0), bv::width(vtype), m_efac);
-            }
             else
-            {
               val = mkTerm(mpz_class(0), m_efac);
-            }
-            if (debug)
-              outs() << "    Warning: Using default 0 for " << *var << " at step " << step << "\n";
           }
           
-          // Store with original variable name (not SSA-renamed)
           stepState[outStateVars[i]] = val;
         }
         
         outTrace.push_back(stepState);
-        
-        if (debug && step % 100 == 0)
-          outs() << "    Extracted step " << step << "\n";
       }
       
       if (debug)
         outs() << "  Extracted " << outTrace.size() << " trace points\n";
       
       return true;
+    }
+
+    /**
+     * Extract Model-Based Projection (MBP) guards from CHC cycles.
+     * MBPs represent phase conditions that distinguish different behaviors.
+     * These can be used to seed the SyGuS grammar with meaningful conditionals.
+     * 
+     * For BV CHCs, translates to LIA, computes MBPs, then translates back.
+     * 
+     * @param outGuards  Output vector of guard expressions (in BV if input was BV)
+     * @return true if any guards were extracted
+     */
+    bool extractMBPGuards(ExprVector& outGuards)
+    {
+      outGuards.clear();
+      
+      // Skip if no cycles in the CHC system
+      if (!ruleManager.hasCycles())
+      {
+        if (debug)
+          outs() << "  [MBP] No cycles found, skipping MBP extraction\n";
+        return false;
+      }
+      
+      if (debug)
+        outs() << "\n=== Extracting MBP Guards ===\n";
+      
+      // For BV CHCs, we need to translate to LIA first since MBP works on LIA
+      bool needsTranslation = ruleManager.hasBV;
+      unsigned originalBvWidth = 0;
+      
+      // Determine BV width if we have bitvectors
+      if (needsTranslation)
+      {
+        for (auto& chc : ruleManager.chcs)
+        {
+          for (auto& v : chc.srcVars)
+          {
+            Expr vtype = bind::typeOf(v);
+            if (bv::is_bvsort(vtype))
+            {
+              originalBvWidth = std::max(originalBvWidth, bv::width(vtype));
+            }
+          }
+        }
+        if (originalBvWidth == 0) originalBvWidth = 32;
+        
+        if (debug)
+          outs() << "  [MBP] BV CHCs detected, width=" << originalBvWidth << ", translating to LIA\n";
+      }
+      
+      try
+      {
+        // Get a reference to working CHCs (translated if needed)
+        CHCs* workingCHCs = &ruleManager;
+        std::unique_ptr<Bv2LiaTranslator> bv2lia;
+        CHCs liaCHCs(m_efac, ruleManager.m_z3, debug ? 1 : 0);
+        
+        if (needsTranslation)
+        {
+          bv2lia.reset(new Bv2LiaTranslator(m_efac, ruleManager.m_z3, originalBvWidth, debug ? 1 : 0));
+          liaCHCs = bv2lia->translate(ruleManager, false);
+          workingCHCs = &liaCHCs;
+          
+          if (debug)
+            outs() << "  [MBP] Translated to LIA, " << liaCHCs.chcs.size() << " CHCs\n";
+        }
+        
+        // Process each cycle to extract MBPs
+        ExprVector liaGuards;
+        
+        for (auto& dcl : workingCHCs->wtoDecls)
+        {
+          if (workingCHCs->cycles.find(dcl) == workingCHCs->cycles.end())
+            continue;
+          
+          for (size_t cycleNum = 0; cycleNum < workingCHCs->cycles[dcl].size(); cycleNum++)
+          {
+            std::vector<int>& cycle = workingCHCs->cycles[dcl][cycleNum];
+            if (cycle.empty()) continue;
+            
+            if (debug)
+              outs() << "  [MBP] Processing cycle " << cycleNum << " for " << *dcl << "\n";
+            
+            // Build SSA formula for the cycle
+            BndExpl cycleBnd(*workingCHCs, debug);
+            Expr ssa = cycleBnd.toExpr(cycle);
+            
+            if (debug)
+              outs() << "  [MBP] SSA: " << *ssa << "\n";
+            
+            // Get source and destination variables
+            ExprVector& srcVars = workingCHCs->chcs[cycle[0]].srcVars;
+            ExprVector& dstVars = workingCHCs->chcs[cycle.back()].dstVars;
+            
+            // Variables to keep in projection (source vars)
+            ExprVector vars2keep;
+            for (auto& v : srcVars)
+            {
+              vars2keep.push_back(v);
+            }
+            
+            // Use SMTUtils to compute MBPs via lazy DNF
+            SMTUtils mbpUtils(m_efac);
+            ExprVector prjcts;
+            
+            // Identity function for QE (no quantifier elimination, just projection)
+            auto identityQE = [](Expr a, ExprVector& vars) { return a; };
+            
+            bool flattenOk = mbpUtils.flatten(ssa, prjcts, false, vars2keep, identityQE);
+            
+            if (!flattenOk || prjcts.empty())
+            {
+              if (debug)
+                outs() << "  [MBP] No projections found for cycle " << cycleNum << "\n";
+              continue;
+            }
+            
+            if (debug)
+              outs() << "  [MBP] Found " << prjcts.size() << " projections\n";
+            
+            // Process each projection
+            for (auto& prj : prjcts)
+            {
+              // Weaken by removing constraints that only mention destination vars
+              ExprSet cnjs;
+              getConj(prj, cnjs);
+              
+              ExprSet srcVarSet(srcVars.begin(), srcVars.end());
+              ExprSet filteredCnjs;
+              
+              for (auto& cnj : cnjs)
+              {
+                // Check if this conjunct mentions any source variable
+                ExprSet vars;
+                filter(cnj, bind::IsConst(), std::inserter(vars, vars.begin()));
+                
+                bool mentionsSrc = false;
+                for (auto& v : vars)
+                {
+                  if (srcVarSet.count(v) > 0)
+                  {
+                    mentionsSrc = true;
+                    break;
+                  }
+                }
+                
+                if (mentionsSrc)
+                  filteredCnjs.insert(cnj);
+              }
+              
+              // Extract atomic predicates (comparisons) from the filtered conjuncts
+              // instead of using the full conjunction
+              for (auto& cnj : filteredCnjs)
+              {
+                // Only keep atomic comparison predicates, not complex formulas
+                // Check if this is an atomic comparison (not an AND/OR/etc)
+                bool isAtomicComparison = 
+                    isOpX<LT>(cnj) || isOpX<LEQ>(cnj) || isOpX<GT>(cnj) || isOpX<GEQ>(cnj) ||
+                    isOpX<EQ>(cnj) || isOpX<NEQ>(cnj) ||
+                    isOpX<BULT>(cnj) || isOpX<BULE>(cnj) || isOpX<BUGT>(cnj) || isOpX<BUGE>(cnj) ||
+                    isOpX<BSLT>(cnj) || isOpX<BSLE>(cnj) || isOpX<BSGT>(cnj) || isOpX<BSGE>(cnj);
+                
+                if (!isAtomicComparison) continue;
+                
+                // Skip trivial comparisons like x = x or x < x
+                if (cnj->arity() == 2 && cnj->left() == cnj->right()) continue;
+                
+                // Check we haven't already added this guard
+                bool isDuplicate = false;
+                for (auto& existing : liaGuards)
+                {
+                  if (cnj == existing)
+                  {
+                    isDuplicate = true;
+                    break;
+                  }
+                }
+                
+                if (!isDuplicate)
+                {
+                  liaGuards.push_back(cnj);
+                  if (debug)
+                    outs() << "  [MBP] Atomic guard: " << *cnj << "\n";
+                }
+              }
+            }
+          }
+        }
+        
+        if (liaGuards.empty())
+        {
+          if (debug)
+            outs() << "  [MBP] No guards extracted\n";
+          return false;
+        }
+        
+        // Translate guards back to BV if needed
+        if (needsTranslation)
+        {
+          if (debug)
+            outs() << "  [MBP] Translating " << liaGuards.size() << " guards back to BV\n";
+          
+          Lia2BvTranslator lia2bv(m_efac, ruleManager.m_z3, originalBvWidth, debug ? 1 : 0);
+          
+          for (auto& guard : liaGuards)
+          {
+            Expr bvGuard = lia2bv.translateExpr(guard);
+            if (bvGuard != nullptr)
+            {
+              outGuards.push_back(bvGuard);
+              if (debug)
+                outs() << "  [MBP] BV Guard: " << *bvGuard << "\n";
+            }
+          }
+        }
+        else
+        {
+          outGuards = liaGuards;
+        }
+        
+        if (debug)
+          outs() << "  [MBP] Extracted " << outGuards.size() << " MBP guards\n";
+        
+        return !outGuards.empty();
+      }
+      catch (const std::exception& e)
+      {
+        if (debug)
+          outs() << "  [MBP] Error during extraction: " << e.what() << "\n";
+        return false;
+      }
+    }
+
+    /**
+     * Extract invariants via Houdini-style bootstrapping on LIA-translated CHCs.
+     * For BV CHCs, translates to LIA, runs lightweight invariant learning,
+     * then translates learned invariants back to BV.
+     * 
+     * These invariants can be used to seed the SyGuS grammar with meaningful
+     * relational constraints that hold at the loop head.
+     * 
+     * @param outInvariants  Output vector of invariant expressions (in BV if input was BV)
+     * @return true if any invariants were learned
+     */
+    bool extractBootstrapInvariants(ExprVector& outInvariants)
+    {
+      outInvariants.clear();
+      
+      // Skip if no cycles in the CHC system
+      if (!ruleManager.hasCycles())
+      {
+        if (debug)
+          outs() << "  [Bootstrap] No cycles found, skipping invariant extraction\n";
+        return false;
+      }
+      
+      if (debug)
+        outs() << "\n=== Extracting Bootstrap Invariants ===\n";
+      
+      // For BV CHCs, we need to translate to LIA first since invariant learning works on LIA
+      bool needsTranslation = ruleManager.hasBV;
+      unsigned originalBvWidth = 0;
+      
+      // Determine BV width if we have bitvectors
+      if (needsTranslation)
+      {
+        for (auto& chc : ruleManager.chcs)
+        {
+          for (auto& v : chc.srcVars)
+          {
+            Expr vtype = bind::typeOf(v);
+            if (bv::is_bvsort(vtype))
+            {
+              originalBvWidth = std::max(originalBvWidth, bv::width(vtype));
+            }
+          }
+        }
+        if (originalBvWidth == 0) originalBvWidth = 32;
+        
+        if (debug)
+          outs() << "  [Bootstrap] BV CHCs detected, width=" << originalBvWidth << ", translating to LIA\n";
+      }
+      
+      try
+      {
+        // Get a reference to working CHCs (translated if needed)
+        CHCs* workingCHCs = &ruleManager;
+        std::unique_ptr<Bv2LiaTranslator> bv2lia;
+        CHCs liaCHCs(m_efac, ruleManager.m_z3, debug ? 1 : 0);
+        
+        if (needsTranslation)
+        {
+          bv2lia.reset(new Bv2LiaTranslator(m_efac, ruleManager.m_z3, originalBvWidth, debug ? 1 : 0));
+          liaCHCs = bv2lia->translate(ruleManager, false);
+          workingCHCs = &liaCHCs;
+          
+          if (debug)
+            outs() << "  [Bootstrap] Translated to LIA, " << liaCHCs.chcs.size() << " CHCs\n";
+        }
+        
+        // Collect candidate invariants from CHC bodies (seed mining style)
+        ExprVector liaInvariants;
+        
+        for (auto& dcl : workingCHCs->wtoDecls)
+        {
+          if (debug)
+            outs() << "  [Bootstrap] Processing declaration: " << *dcl << "\n";
+          
+          ExprVector& invVarVec = workingCHCs->invVars[dcl];
+          
+          // Collect constraints from CHC bodies that only mention invariant variables
+          for (auto& chc : workingCHCs->chcs)
+          {
+            if (chc.dstRelation != dcl) continue;
+            
+            ExprSet cnjs;
+            getConj(chc.body, cnjs);
+            
+            for (auto& cnj : cnjs)
+            {
+              // Check if conjunct only mentions destination variables
+              ExprSet vars;
+              filter(cnj, bind::IsConst(), std::inserter(vars, vars.begin()));
+              
+              bool onlyDstVars = true;
+              for (auto& v : vars)
+              {
+                bool foundInDst = false;
+                for (auto& dv : chc.dstVars)
+                {
+                  if (v == dv)
+                  {
+                    foundInDst = true;
+                    break;
+                  }
+                }
+                if (!foundInDst)
+                {
+                  onlyDstVars = false;
+                  break;
+                }
+              }
+              
+              if (onlyDstVars && !vars.empty())
+              {
+                // Rename to canonical invariant variables
+                Expr inv = cnj;
+                for (size_t i = 0; i < chc.dstVars.size() && i < workingCHCs->invVars[dcl].size(); i++)
+                {
+                  inv = replaceAll(inv, chc.dstVars[i], workingCHCs->invVars[dcl][i]);
+                }
+                
+                // Only add comparison constraints (likely invariants)
+                if (isOp<ComparissonOp>(inv) || isOpX<EQ>(inv))
+                {
+                  // Check for duplicates
+                  bool isDup = false;
+                  for (auto& existing : liaInvariants)
+                  {
+                    if (inv == existing)
+                    {
+                      isDup = true;
+                      break;
+                    }
+                  }
+                  if (!isDup)
+                  {
+                    liaInvariants.push_back(inv);
+                    if (debug)
+                      outs() << "  [Bootstrap] Candidate: " << *inv << "\n";
+                  }
+                }
+              }
+            }
+          }
+          
+          // Also extract from transition relations (inductive candidates)
+          for (auto& chc : workingCHCs->chcs)
+          {
+            if (chc.srcRelation != dcl || chc.dstRelation != dcl) continue;
+            
+            ExprSet cnjs;
+            getConj(chc.body, cnjs);
+            
+            for (auto& cnj : cnjs)
+            {
+              // Look for equality constraints that relate src to dst
+              if (!isOpX<EQ>(cnj)) continue;
+              
+              Expr lhs = cnj->left();
+              Expr rhs = cnj->right();
+              
+              // Check if this is a "variable unchanged" constraint: v' = v
+              for (size_t i = 0; i < chc.srcVars.size() && i < chc.dstVars.size(); i++)
+              {
+                if ((lhs == chc.dstVars[i] && rhs == chc.srcVars[i]) ||
+                    (rhs == chc.dstVars[i] && lhs == chc.srcVars[i]))
+                {
+                  // This variable is preserved - not useful as invariant seed
+                  continue;
+                }
+                
+                // Check for incremental patterns: v' = v + c or v' = v - c
+                if (lhs == chc.dstVars[i])
+                {
+                  if (isOpX<PLUS>(rhs) || isOpX<MINUS>(rhs))
+                  {
+                    Expr base = rhs->left();
+                    Expr delta = rhs->right();
+                    if (base == chc.srcVars[i] && isOpX<MPZ>(delta))
+                    {
+                      // Found incremental variable - extract sign constraint as invariant seed
+                      // e.g., if delta > 0, then v grows, so "v >= initial" might be invariant
+                      if (debug)
+                        outs() << "  [Bootstrap] Incremental: " << *chc.srcVars[i] 
+                               << (isOpX<PLUS>(rhs) ? " +=" : " -=") << " " << *delta << "\n";
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+        
+        if (liaInvariants.empty())
+        {
+          if (debug)
+            outs() << "  [Bootstrap] No invariant candidates found\n";
+          return false;
+        }
+        
+        if (debug)
+          outs() << "  [Bootstrap] Found " << liaInvariants.size() << " candidate invariants\n";
+        
+        // Translate invariants back to BV if needed
+        if (needsTranslation)
+        {
+          if (debug)
+            outs() << "  [Bootstrap] Translating " << liaInvariants.size() << " invariants back to BV\n";
+          
+          Lia2BvTranslator lia2bv(m_efac, ruleManager.m_z3, originalBvWidth, debug ? 1 : 0);
+          
+          for (auto& inv : liaInvariants)
+          {
+            Expr bvInv = lia2bv.translateExpr(inv);
+            if (bvInv != nullptr)
+            {
+              outInvariants.push_back(bvInv);
+              if (debug)
+                outs() << "  [Bootstrap] BV Invariant: " << *bvInv << "\n";
+            }
+          }
+        }
+        else
+        {
+          outInvariants = liaInvariants;
+        }
+        
+        if (debug)
+          outs() << "  [Bootstrap] Extracted " << outInvariants.size() << " invariants\n";
+        
+        return !outInvariants.empty();
+      }
+      catch (const std::exception& e)
+      {
+        if (debug)
+          outs() << "  [Bootstrap] Error during extraction: " << e.what() << "\n";
+        return false;
+      }
     }
 
     /**
@@ -1974,6 +2811,7 @@ namespace ufo
      * @param step_bitwidth  Bit-width for the step parameter
      * @param seedConstants  Optional set of constants to include in grammar
      * @param mbpGuards      Optional MBP guards for boolean production
+     * @param bootstrapInvariants Optional invariants to seed the grammar
      * @return true if successful
      */
     bool writeSyGuSFromTrace(
@@ -1982,7 +2820,8 @@ namespace ufo
         const ExprVector& state_vars,
         int step_bitwidth,
         const ExprSet& seedConstants = ExprSet(),
-        const ExprVector& mbpGuards = ExprVector())
+        const ExprVector& mbpGuards = ExprVector(),
+        const ExprVector& bootstrapInvariants = ExprVector())
     {
       if (trace.empty() || state_vars.empty())
       {
@@ -2132,12 +2971,53 @@ namespace ufo
           }
         }
         
+        // Add constants from bootstrap invariants
+        for (auto& inv : bootstrapInvariants)
+        {
+          ExprVector consts;
+          filter(inv, bind::IsConst(), std::inserter(consts, consts.begin()));
+          
+          for (auto& c : consts)
+          {
+            if (bv::is_bvnum(c))
+            {
+              mpz_class val = bv::toMpz(c);
+              mpz_class masked = val & ((mpz_class(1) << vwidth) - 1);
+              std::stringstream ss;
+              ss << std::hex << std::setfill('0') << std::setw(vwidth / 4) << masked;
+              std::string hexStr = ss.str();
+              if (seenHex.find(hexStr) == seenHex.end())
+              {
+                out << "    #x" << hexStr << "  ; from invariant\n";
+                seenHex.insert(hexStr);
+              }
+            }
+            else if (isOpX<MPZ>(c))
+            {
+              mpz_class val = lexical_cast<mpz_class>(c);
+              mpz_class masked = val & ((mpz_class(1) << vwidth) - 1);
+              std::stringstream ss;
+              ss << std::hex << std::setfill('0') << std::setw(vwidth / 4) << masked;
+              std::string hexStr = ss.str();
+              if (seenHex.find(hexStr) == seenHex.end())
+              {
+                out << "    #x" << hexStr << "  ; from invariant\n";
+                seenHex.insert(hexStr);
+              }
+            }
+          }
+        }
+        
         // BV operations
         out << "    (bvadd Start Start)\n";
         out << "    (bvsub Start Start)\n";
         out << "    (bvmul Start Start)\n";
         out << "    (bvshl Start Start)\n";
         out << "    (bvlshr Start Start)\n";
+        // Power-of-2 patterns (useful for exponential growth)
+        std::stringstream one_ss;
+        one_ss << std::hex << std::setfill('0') << std::setw(vwidth / 4) << 1;
+        out << "    (bvshl #x" << one_ss.str() << " Start)\n";  // 1 << Start = 2^Start
         out << "    (ite MyBool Start Start)\n";
         out << "  ))\n";
         
@@ -2145,11 +3025,45 @@ namespace ufo
         out << "  (MyBool Bool (\n";
         if (!mbpGuards.empty())
         {
-          // Use provided MBP guards
+          // Use provided MBP guards - convert to SyGuS format
           for (auto& guard : mbpGuards)
           {
-            out << "    " << *guard << "\n";
+            // Convert the guard expression to SyGuS-compatible string
+            std::string guardStr = exprToSyGuS(guard, vwidth, step_bitwidth);
+            if (!guardStr.empty())
+            {
+              out << "    " << guardStr << "\n";
+            }
           }
+          // Add bootstrap invariants as boolean conditions
+          for (auto& inv : bootstrapInvariants)
+          {
+            std::string invStr = exprToSyGuS(inv, vwidth, step_bitwidth);
+            if (!invStr.empty())
+            {
+              out << "    " << invStr << "  ; invariant\n";
+            }
+          }
+          // Also add generic comparisons as fallback
+          out << "    (bvult Start Start)\n";
+          out << "    (bvuge Start Start)\n";
+          out << "    (= Start Start)\n";
+        }
+        else if (!bootstrapInvariants.empty())
+        {
+          // Only bootstrap invariants, no MBP
+          for (auto& inv : bootstrapInvariants)
+          {
+            std::string invStr = exprToSyGuS(inv, vwidth, step_bitwidth);
+            if (!invStr.empty())
+            {
+              out << "    " << invStr << "  ; invariant\n";
+            }
+          }
+          // Also add generic comparisons
+          out << "    (bvult Start Start)\n";
+          out << "    (bvuge Start Start)\n";
+          out << "    (= Start Start)\n";
         }
         else
         {

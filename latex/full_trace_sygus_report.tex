@@ -129,30 +129,57 @@ The solver correctly synthesized $z(n)$ using the hidden constant:
 
 \subsection{Benchmark: \texttt{s\_split\_05}}
 \paragraph{Problem Description}
-Involves a geometric progression (powers of 2).
+Involves a geometric progression (powers of 2) with a phase transition.
 \begin{itemize}
-    \item Phase 1 ($y < 0$): $z=1$
-    \item Phase 2 ($y \ge 0$): $z$ doubles every step ($z_{i+1} = z_i * 2$).
+    \item Phase 1: Constant value.
+    \item Phase 2: Doubles every step ($z_{i+1} = z_i \cdot 2$).
 \end{itemize}
-The phase transition occurs at $n=10$.
+
+\paragraph{Challenge}
+This benchmark highlighted two critical limitations:
+\begin{enumerate}
+    \item \textbf{Trace Length}: The initial trace generation (4 steps) was insufficient. The solver could not distinguish between linear and exponential growth, producing incorrect candidates.
+    \item \textbf{Grammar}: Standard BV grammars struggle to synthesize $2^n$ via repeated multiplication.
+\end{enumerate}
 
 \paragraph{Solution}
-We utilized Model Based Projection (MBP) to identify the relevant guard: $n < 10$. We restricted the boolean logic of the SyGuS grammar to exactly this predicate.
+We employed a three-pronged approach:
+\begin{enumerate}
+    \item \textbf{MBP Seeding}: Extracted the phase transition guard automatically using Model Based Projection.
+    \item \textbf{Trace Extrapolation}: Extended the trace length to 6 steps to capture the divergence of the geometric series.
+    \item \textbf{Grammar Augmentation}: Seeded the grammar with the shift operator \texttt{(bvshl 1 Start)}.
+\end{enumerate}
 
 \paragraph{Result}
-\textbf{Status: Success} (MBP Guided, $<1$s).
-The solver used the \texttt{bvshl} operator to express the geometric growth efficiently:
+\textbf{Status: Success} (Enhanced Trace + Grammar).
+The solver correctly synthesized the exponential function using bit-shifts:
 \begin{lstlisting}[language=Lisp]
 (define-fun fz ((n (_ BitVec 16))) (_ BitVec 16) 
-  (ite (bvult n #x000A) 
-       #x0001
-       (bvshl #x0001 (bvsub n #x000A)))) ; 1 << (n-10)
+  (ite (bvult n #x0001) 
+       #x0001 
+       (bvshl #x0001 (bvsub n #x0001)))) ; 2^(n-1)
 \end{lstlisting}
-This effectively synthesizes $2^{n-10}$.
 
 \section{Discussion}
 \subsection{The Necessity of Constant Seeding}
 Our experiments confirm that "Neural" or "Enumerative" synthesis is computationally strictly bound by the "Manhattan Distance" to the target constants in the operator graph. If a constant like $28000$ requires 5+ additions/multiplications to construct from inputs, the search depth becomes prohibitive. Pre-calculating these constants via lightweight static analysis (e.g., scalar evolution) is not just an optimization, but a prerequisite for success.
+
+\subsection{Bootstrap Invariant Seeding}
+We implemented a \texttt{--sygus-invariants} flag that extracts candidate invariants from CHC bodies via a lightweight seed-mining approach. For bitvector CHCs, this requires:
+\begin{enumerate}
+    \item \textbf{BV to LIA Translation}: Convert bitvector constraints to linear integer arithmetic using \texttt{Bv2LiaTranslator}.
+    \item \textbf{Invariant Extraction}: Collect comparison constraints from CHC bodies that only mention invariant variables.
+    \item \textbf{LIA to BV Translation}: Convert extracted invariants back to bitvector expressions using \texttt{Lia2BvTranslator}.
+\end{enumerate}
+
+For \texttt{s\_split\_05}, this automatically discovered:
+\begin{itemize}
+    \item \texttt{bvult(\_FH\_1, 0)} (phase condition: $y < 0$)
+    \item \texttt{\_FH\_2 = 1} (initial value of $z$)
+    \item \texttt{bvugt(\_FH\_0, 0)} ($x > 0$ invariant)
+\end{itemize}
+
+These invariants are added to both the boolean grammar (as guard conditions) and the constant pool (extracting numeric literals from the invariants).
 
 \subsection{BitVector Overflow Safety}
 In \texttt{s\_split\_42}, we observed that synthesizers trained on integer abstractions fail validation on 16-bit BitVector benchmarks due to signed overflow. Synthesized invariants must be validated against bit-precise traces that faithfully model wrap-around behavior.

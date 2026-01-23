@@ -126,6 +126,37 @@ namespace ufo
       can_get_model = res ? true : false;
       return res;
     }
+    
+    /**
+     * Push the solver state (for incremental solving)
+     */
+    void push() { smt.push(); }
+    
+    /**
+     * Pop the solver state (for incremental solving)
+     */
+    void pop(unsigned n = 1) { smt.pop(n); }
+    
+    /**
+     * Assert an expression without resetting
+     */
+    void assertExpr(Expr e) { smt.assertExpr(e); }
+    
+    /**
+     * Reset the solver
+     */
+    void reset() { smt.reset(); if (m != NULL) { free(m); m = NULL; } }
+    
+    /**
+     * Solve without adding any new constraints
+     */
+    boost::tribool solve()
+    {
+      if (m != NULL) { free(m); m = NULL; }
+      boost::tribool res = smt.solve();
+      can_get_model = res ? true : false;
+      return res;
+    }
 
     /**
      * SMT-check
@@ -172,6 +203,8 @@ namespace ufo
       getConj(a, cnjs);
       return isSat(cnjs, reset);
     }
+
+    // isSatBMC
 
     /**
      * Incremental SMT-check

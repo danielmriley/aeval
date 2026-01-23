@@ -1,0 +1,44 @@
+[
+  {
+    "benchmark": "s_split_01_n25.smt2",
+    "status": "VALIDATED",
+    "time": 0.9738709926605225,
+    "notes": "Sol found & validated",
+    "n": 25
+  },
+  {
+    "benchmark": "s_split_01_n50.smt2",
+    "status": "VALIDATED",
+    "time": 3.6792526245117188,
+    "notes": "Sol found & validated",
+    "n": 50
+  },
+  {
+    "benchmark": "s_split_01_n100.smt2",
+    "status": "SYNTH_ONLY",
+    "time": 16.392969608306885,
+    "notes": "Not inductive",
+    "n": 100
+  },
+  {
+    "benchmark": "s_split_01_n200.smt2",
+    "status": "SYNTH_ONLY",
+    "time": 81.10328650474548,
+    "notes": "Not inductive",
+    "n": 200
+  },
+  {
+    "benchmark": "s_split_01_n500.smt2",
+    "status": "TIMEOUT",
+    "time": 180.0,
+    "notes": "Timed out",
+    "n": 500
+  },
+  {
+    "benchmark": "s_split_01_n1000.smt2",
+    "status": "TIMEOUT",
+    "time": 180.0,
+    "notes": "Timed out",
+    "n": 1000
+  }
+]

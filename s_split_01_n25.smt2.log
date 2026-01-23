@@ -1,0 +1,48 @@
+[DEBUG] Entering sygus-full mode
+[DEBUG] Input file: /home/daniel/Projects/aeval/bench_horn_split_cex_bv/s_split_01_gen/s_split_01_n25.smt2
+[DEBUG] Creating ExprFactory...
+[DEBUG] Creating EZ3...
+[DEBUG] Creating CHCs...
+[DEBUG] Parsing file...
+[Parse Timing] Load: 5ms, Process: 1ms, Setup: 0ms, Elim: 12ms, DeclElim: 1ms, Cycles: 0ms, Total: 20ms
+[DEBUG] Parse successful
+  Extracted 101 trace points
+  State variables: 2
+  Extracted 2 MBP guards for grammar
+  Extracted 2 bootstrap invariants for grammar
+  Generated SyGuS file: full_trace.sygus
+  Running CVC5 on full_trace.sygus...
+  Running: timeout 60s cvc5 --lang=sygus2 full_trace.sygus
+CVC5 output:
+(
+(define-fun f_FH_0 ((n (_ BitVec 8))) (_ BitVec 16) ((_ zero_extend 8) n))
+(define-fun f_FH_1 ((n (_ BitVec 8))) (_ BitVec 16) (let ((_let_1 ((_ zero_extend 8) n))) (ite (bvult _let_1 #b0000000000110001) #b0000000000110010 (ite (= _let_1 #b0000000000110001) #b0000000000110010 _let_1))))
+)
+
+
+Synthesized functions:
+  f_FH_0: (define-fun f_FH_0 ((n (_ BitVec 8))) (_ BitVec 16) ((_ zero_extend 8) n))
+  f_FH_1: (define-fun f_FH_1 ((n (_ BitVec 8))) (_ BitVec 16) (let ((_let_1 ((_ zero_extend 8) n))) (ite (bvult _let_1 #b0000000000110001) #b0000000000110010 (ite (= _let_1 #b0000000000110001) #b0000000000110010 _let_1))))
+
+=== Generating CCEX from Synthesized Functions ===
+  CCEX file generated: synthesized_ccex.smt2
+Generated CCEX file: synthesized_ccex.smt2
+
+Validating counterexample inductively...
+  [Inductive] Init: PASS (f(0) satisfies init)
+  [Inductive] Transition: PASS (f(i) => f(i+1) is valid)
+  [Inductive] Property: FAIL (f(N) does not reach error)
+  [Detailed Property Report]
+    Failing constraint: (_FH_0=(100:bv(16)))
+    -> Potentially incorrect variable: _FH_0
+  [End Report]
+  [Inductive Timing] Parse: 0.08ms, Setup: 6.326ms, Init: 0.478ms, Trans: 6.53ms, Prop: 0.513ms, Total: 25.529ms
+  [Slicing] Trace covers cone of influence, attempting partial validation...
+
+=== Partial CEX Validation (Cone of Influence) ===
+  [Partial] Validating with cone: {0 1 }
+  [Partial] Transition: PASS (cone constraints valid)
+  [Partial] CEX VALID: Partial trace covers cone of influence
+  [Inductive] CEX VALID (Partial): Trace covers cone of influence
+✓ Counterexample is INDUCTIVE - property is FALSE
+
