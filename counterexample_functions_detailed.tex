@@ -1,0 +1,66 @@
+\begin{table*}[t]
+\centering
+\caption{Detailed Counterexample Functions Synthesized by Our Tool}
+\label{tab:ccex_functions_detailed}
+\scriptsize
+\begin{tabular}{@{}lllp{6cm}l@{}}
+\toprule
+\textbf{Category} & \textbf{Variable} & \textbf{Function Definition} & \textbf{Description} & \textbf{Example File} \\
+\midrule
+
+% Identity patterns
+\multirow{3}{*}{Identity} 
+& \texttt{x\_at\_i} & \texttt{((\_ int2bv 4) i)} & Direct identity mapping & \texttt{bv4\_cex5\_ccex.smt2} \\
+& \texttt{x\_at\_i} & \texttt{((\_ extract 127 0) i)} & Identity via bit extraction & \texttt{bvzext128\_cex5\_ccex.smt2} \\
+& \texttt{x\_at\_i} & \texttt{i} & Raw identity (Int type) & \texttt{bv8\_partial\_ccex.smt2} \\
+\midrule
+
+% Linear arithmetic
+\multirow{3}{*}{Linear} 
+& \texttt{y\_at\_i} & \texttt{((\_ int2bv 4) (* 2 i))} & Linear scaling ($2i$) & \texttt{bv4\_cex5\_ccex.smt2} \\
+& \texttt{x\_at\_i} & \texttt{((\_ int2bv 4) (+ 5 i))} & Affine transformation ($i+5$) & \texttt{bv4\_cex6\_ccex.smt2} \\
+& \texttt{x\_at\_i} & \texttt{(bvadd i \#x0001)} & Increment ($i+1$) & \texttt{bv16\_invalid\_ccex.smt2} \\
+\midrule
+
+% Bitwise operations
+\multirow{3}{*}{Bitwise} 
+& \texttt{x\_at\_i} & \texttt{(bvxor i (bvlshr i \#x00000001))} & Gray code encoding & \texttt{bv32\_gray\_ccex.smt2} \\
+& \texttt{y\_at\_i} & \texttt{((\_ extract 127 0) (bvshl i \#x01))} & Left shift by 1 & \texttt{bvzext128\_cex5\_ccex.smt2} \\
+& \texttt{x\_at\_i} & \texttt{((\_ extract 7 0) (bvadd i \#x0005))} & Addition + extraction & \texttt{bvzext8\_cex6\_ccex.smt2} \\
+\midrule
+
+% Polynomial
+\multirow{2}{*}{Polynomial} 
+& \texttt{x\_at\_i} & \texttt{(bvmul i i)} & Quadratic ($i^2$) & \texttt{bv8\_poly\_ccex.smt2} \\
+& \texttt{y\_at\_i} & \texttt{((\_ extract 3 0) (bvlshr (bvmul i (bvsub i \#x01)) \#x01))} & Triangular ($\frac{i(i-1)}{2}$) & \texttt{bv4\_quadratic\_ccex.smt2} \\
+\midrule
+
+% Conditional
+\multirow{4}{*}{Conditional} 
+& \texttt{x\_at\_i} & \texttt{(ite (= (bvand i \#x0001) \#x0000) i (bvneg i))} & Alternating sign & \texttt{bv16\_alt\_ccex.smt2} \\
+& \texttt{x\_at\_i} & \texttt{(ite (bvult i \#x80) i \#x80)} & Saturation at 128 & \texttt{bv8\_sat\_ccex.smt2} \\
+& \texttt{y\_at\_i} & \texttt{(ite (bvult i \#x0080) ...)} & Phase-based behavior & \texttt{bvzext8\_nd\_twophase\_ccex.smt2} \\
+& \texttt{x\_at\_i} & \texttt{(ite (= i \#x00) ... [16 nested ite])} & Lookup table (16 entries) & \texttt{bvzext4\_nd\_branch\_ccex.smt2} \\
+\midrule
+
+% Constants
+Constant 
+& \texttt{y\_at\_i} & \texttt{\#x0} & Always zero & \texttt{bvzext4\_nd\_cex1\_zext\_ccex.smt2} \\
+
+\bottomrule
+\end{tabular}
+\vspace{0.5em}
+\begin{flushleft}
+\footnotesize
+\textbf{Note:} Functions map iteration index \texttt{i} to program variable values at each step of the counterexample trace.
+The tool automatically synthesizes diverse patterns:
+(1) \textit{Identity} functions for simple equality constraints,
+(2) \textit{Linear} transformations for arithmetic progressions,
+(3) \textit{Bitwise} operations for bit manipulation patterns (shifts, XOR, Gray codes),
+(4) \textit{Polynomial} expressions for quadratic and triangular sequences,
+(5) \textit{Conditional} logic for branching behavior, saturation, and phase transitions,
+(6) \textit{Constants} for variables that remain fixed.
+Notation follows SMT-LIB 2: \texttt{(\_ int2bv n)} converts integers to $n$-bit vectors,
+\texttt{(\_ extract h l)} extracts bits $[h:l]$, \texttt{(ite c t e)} is if-then-else.
+\end{flushleft}
+\end{table*}

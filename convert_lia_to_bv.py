@@ -233,7 +233,27 @@ def transform_sexp(node):
 
     return node
 
+import sys
+
 def main():
+    if len(sys.argv) == 3:
+        # Single file mode
+        src_file = sys.argv[1]
+        dst_file = sys.argv[2]
+        
+        with open(src_file, 'r') as fin:
+            content = fin.read()
+            
+        tokens = content.replace('(', ' ( ').replace(')', ' ) ').split()
+        sexps = parse_sexp(tokens)
+        
+        new_sexps = [transform_sexp(s) for s in sexps]
+        
+        with open(dst_file, 'w') as fout:
+            for s in new_sexps:
+                fout.write(str(s) + "\n")
+        return
+
     src_dir = "bench_horn_split_cex"
     out_dir = "bench_horn_split_cex_bv"
     

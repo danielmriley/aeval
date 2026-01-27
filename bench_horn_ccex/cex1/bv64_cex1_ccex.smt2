@@ -1,13 +1,13 @@
-(define-fun x_at_i ((i Int)) (_ BitVec 64)
-  ((_ int2bv 64) i)
+(define-fun x_at_i ((i (_ BitVec 64))) (_ BitVec 64)
+  i
 )
 
-(declare-const trace (Array Int (_ BitVec 64)))
+(declare-const trace (Array (_ BitVec 64) (_ BitVec 64)))
 
 
 (assert 
-  (forall ((i Int)) 
-    (=> (and (<= 0 i) (<= i 18446744073709551615)) 
+  (forall ((i (_ BitVec 64))) 
+    (=> (and (bvule #x0000000000000000 i) (bvule i #xffffffffffffffff)) 
         (= (select trace i) (x_at_i i))
     )
   )

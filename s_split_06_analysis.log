@@ -1,0 +1,44 @@
+cvc5 interrupted by SIGTERM.
+[DEBUG] Entering sygus-full mode
+[DEBUG] Input file: bench_horn_split_cex_bv/s_split_06/bv16_s_split_06.smt2
+[DEBUG] Creating ExprFactory...
+[DEBUG] Creating EZ3...
+[DEBUG] Creating CHCs...
+[DEBUG] Parsing file...
+[Parse Timing] Load: 2ms, Process: 0ms, Setup: 0ms, Elim: 10ms, DeclElim: 0ms, Cycles: 0ms, Total: 14ms
+[DEBUG] Parse successful
+  [Timing] Trace Extraction: 302526ms
+  Extracted 93627 trace points
+  State variables: 3
+  Extracted 7 MBP guards for grammar
+  [Timing] SyGuS Gen: 514ms
+  Generated SyGuS file: full_trace.sygus
+  Running CVC5 on full_trace.sygus...
+  Running: timeout 180s cvc5 --lang=sygus2 full_trace.sygus
+CVC5 exited with status 31744
+  [Timing] CVC5 Synthesis: 180479ms
+CVC5 did not find a solution
+Command exited with non-zero status 1
+	Command being timed: "./build/tools/deep/freqhorn --sygus-full --sygus-full-bound 1000000 --sygus-sparse 1 --sygus-run --sygus-validate --sygus-mbp bench_horn_split_cex_bv/s_split_06/bv16_s_split_06.smt2"
+	User time (seconds): 480.25
+	System time (seconds): 5.42
+	Percent of CPU this job got: 99%
+	Elapsed (wall clock) time (h:mm:ss or m:ss): 8:05.82
+	Average shared text size (kbytes): 0
+	Average unshared data size (kbytes): 0
+	Average stack size (kbytes): 0
+	Average total size (kbytes): 0
+	Maximum resident set size (kbytes): 7820584
+	Average resident set size (kbytes): 0
+	Major (requiring I/O) page faults: 186
+	Minor (reclaiming a frame) page faults: 2792026
+	Voluntary context switches: 266
+	Involuntary context switches: 4085
+	Swaps: 0
+	File system inputs: 39864
+	File system outputs: 24160
+	Socket messages sent: 0
+	Socket messages received: 0
+	Signals delivered: 0
+	Page size (bytes): 4096
+	Exit status: 1

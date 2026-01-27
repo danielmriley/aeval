@@ -9,9 +9,11 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 FREQ_HORN_BIN = "./build/tools/deep/freqhorn"
 BENCH_ROOT = "bench_horn_split_cex_bv"
 OUTPUT_CSV = "trace_extraction_results.csv"
-MAX_WORKERS = 10
-TIMEOUT_SEC = 4200  # 1 hour and 10 minutes
-MAX_BOUND = 1000000
+MAX_WORKERS = 2       # Safe parallel limit for 14GB RAM
+TIMEOUT_SEC = 4200    # 1 hour and 10 minutes
+MAX_BOUND = 1000000   # Max logical steps
+SPARSE_FACTOR = 100   # Store every 100th point
+MEM_LIMIT_GB = 4.0    # Per-process memory limit (prevents system freeze)
 
 def run_benchmark(filepath):
     filename = os.path.basename(filepath)
@@ -23,10 +25,14 @@ def run_benchmark(filepath):
     bw = int(match.group(1))
     bench_id = match.group(2)
     
+    mem_bytes = int(MEM_LIMIT_GB * 1024 * 1024 * 1024)
     cmd = [
+        "prlimit",
+        f"--as={mem_bytes}",
         FREQ_HORN_BIN,
         "--sygus-full",
         "--sygus-full-bound", str(MAX_BOUND),
+        "--sygus-sparse", str(SPARSE_FACTOR),
         filepath
     ]
     
@@ -45,11 +51,11 @@ def run_benchmark(filepath):
         
         if result.returncode == 0:
             status = "Success"
-            # Extract trace length: "  Extracted 123 trace points"
+            # Extract stored trace length and scale by SPARSE_FACTOR for logical length estimate
             trace_match = re.search(r"Extracted (\d+) trace points", stdout)
-            trace_len = int(trace_match.group(1)) if trace_match else "Unknown"
+            trace_len = (int(trace_match.group(1)) * SPARSE_FACTOR) if trace_match else "Unknown"
         else:
-            status = "Failed"
+            status = f"Failed (Code {result.returncode})"
             trace_len = 0
             
     except subprocess.TimeoutExpired:
@@ -84,19 +90,44 @@ def main():
         return (int(m.group(1)), int(m.group(2)))
     
     benchmarks.sort(key=sort_key)
-    
-    print(f"Found {len(benchmarks)} benchmarks. Starting experiments with {MAX_WORKERS} workers...")
+
+    # Load existing results to skip completed benchmarks
+    completed = set()
+    if os.path.exists(OUTPUT_CSV):
+        try:
+            with open(OUTPUT_CSV, "r") as f:
+                reader = csv.DictReader(f)
+                for row in reader:
+                    completed.add((row['benchmark'], int(row['bitwidth'])))
+        except Exception as e:
+            print(f"Warning: Could not read existing results: {e}")
+
+    # Final list of benchmarks to run
+    to_run = []
+    for b in benchmarks:
+        filename = os.path.basename(b)
+        m = re.match(r"bv(\d+)_s_split_(\d+).smt2", filename)
+        if m:
+            bw = int(m.group(1))
+            bench_id = f"s_split_{m.group(2)}"
+            if (bench_id, bw) not in completed:
+                to_run.append(b)
+
+    print(f"Found {len(benchmarks)} total benchmarks. {len(to_run)} still remaining.")
+    print(f"Resuming experiments with {MAX_WORKERS} workers (Limit: {MEM_LIMIT_GB}GB/worker)...")
     
     results = []
-    # Initialize CSV file with headers
-    with open(OUTPUT_CSV, "w", newline="") as f:
-        writer = csv.DictWriter(f, fieldnames=["benchmark", "bitwidth", "status", "trace_length", "time_s"])
-        writer.writeheader()
+    # Initialize CSV file with headers only if it's new
+    if not os.path.exists(OUTPUT_CSV) or os.path.getsize(OUTPUT_CSV) == 0:
+        with open(OUTPUT_CSV, "w", newline="") as f:
+            writer = csv.DictWriter(f, fieldnames=["benchmark", "bitwidth", "status", "trace_length", "time_s"])
+            writer.writeheader()
 
     with ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
-        future_to_bench = {executor.submit(run_benchmark, b): b for b in benchmarks}
+        future_to_bench = {executor.submit(run_benchmark, b): b for b in to_run}
         
-        count = 0
+        count = len(completed)
+        total = len(benchmarks)
         for future in as_completed(future_to_bench):
             res = future.result()
             if res:
@@ -107,7 +138,7 @@ def main():
                     writer.writerow(res)
                 
                 count += 1
-                print(f"[{count}/{len(benchmarks)}] {res['benchmark']} (bw={res['bitwidth']}): {res['status']} in {res['time_s']}s")
+                print(f"[{count}/{total}] {res['benchmark']} (bw={res['bitwidth']}): {res['status']} in {res['time_s']}s")
 
     print(f"\nExperiment complete. Results saved to {OUTPUT_CSV}")
 

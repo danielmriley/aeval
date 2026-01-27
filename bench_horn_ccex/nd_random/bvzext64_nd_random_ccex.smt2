@@ -1,33 +1,20 @@
-; CCEX for nd_random: explicit enumeration of random path
-; This is NOT a closed-form function - it enumerates each step explicitly
-; Values: [0, 2053695854357871005, 13679192365072849617, 4517457392071889495, 2574020394472462046, 1890702223848595625, 13662908291426823533, 10060236952204337488, 10892664235628797826, 586287033698423193, 1728372192399379054, 4291835990902352011, 11105285438068160209, 10353144037217341363, 13208230535885162025, 18446744073709551615]
-; Trace bounds: 0 to 15
+; CCEX file generated from CVC5 SyGuS synthesis
+; Main relation: inv
+; Number of state variables: 1
 
-(define-fun x_at_i ((i (_ BitVec 128))) (_ BitVec 64)
-  (ite (= i #x0000000000000000000000000000000f) #xffffffffffffffff
-    (ite (= i #x0000000000000000000000000000000e) #xb74d0fb132e70629
-    (ite (= i #x0000000000000000000000000000000d) #x8fadc1a606cb0fb3
-    (ite (= i #x0000000000000000000000000000000c) #x9a1de644815ef6d1
-    (ite (= i #x0000000000000000000000000000000b) #x3b8faa1837f8a88b
-    (ite (= i #x0000000000000000000000000000000a) #x17fc695a07a0ca6e
-    (ite (= i #x00000000000000000000000000000009) #x0822e8f36c031199
-    (ite (= i #x00000000000000000000000000000008) #x972a846916419f82
-    (ite (= i #x00000000000000000000000000000007) #x8b9d2434e465e150
-    (ite (= i #x00000000000000000000000000000006) #xbd9c66b3ad3c2d6d
-    (ite (= i #x00000000000000000000000000000005) #x1a3d1fa7bc8960a9
-    (ite (= i #x00000000000000000000000000000004) #x23b8c1e9392456de
-    (ite (= i #x00000000000000000000000000000003) #x3eb13b9046685257
-    (ite (= i #x00000000000000000000000000000002) #xbdd640fb06671ad1
-    (ite (= i #x00000000000000000000000000000001) #x1c80317fa3b1799d
-    #x0000000000000000)))))))))))))))
-)
+; Synthesized closed-form functions for state evolution
+(define-fun var_0_at_i ((n (_ BitVec 8))) (_ BitVec 64) (let ((_let_1 ((_ zero_extend 56) n))) (ite (= #b0000000000000000000000000000000000000000000000000000000000000000 _let_1) _let_1 #b1111111111111111111111111111111111111111111111111111111111111111)))
 
-(declare-const trace (Array (_ BitVec 128) (_ BitVec 64)))
+; Trace arrays (one per state variable)
+(declare-const trace_0 (Array (_ BitVec 8) (_ BitVec 64)))
 
-(assert 
-  (forall ((i (_ BitVec 128))) 
-    (=> (and (bvule #x00000000000000000000000000000000 i) (bvule i #x0000000000000000000000000000000f)) 
-        (= (select trace i) (x_at_i i))
+; Assert that trace arrays follow the synthesized functions
+(assert
+  (forall ((i (_ BitVec 8)))
+    (=> (and (bvule #x00 i) (bvule i #x01))
+        (and
+          (= (select trace_0 i) (var_0_at_i i))
+        )
     )
   )
 )

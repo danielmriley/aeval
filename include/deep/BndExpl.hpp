@@ -2126,20 +2126,23 @@ namespace ufo
           if (debug)
             outs() << "\n  Found satisfiable trace of length " << len << "\n";
           
-          // Collect all variables for model extraction
-          ExprSet allVars;
-          for (const auto& stepVars : bindVars)
+          // Collect ONLY variables for sparse points to save massive memory
+          ExprSet sparseVars;
+          for (size_t step = 0; step < bindVars.size(); step++)
           {
-            for (const auto& var : stepVars)
+            if (sparse_factor > 1 && step % sparse_factor != 0 && step != bindVars.size() - 1)
+              continue;
+              
+            for (const auto& var : bindVars[step])
             {
-              if (var != nullptr) allVars.insert(var);
+              if (var != nullptr) sparseVars.insert(var);
             }
           }
           
-          u.getModel(allVars, extractedModel);
+          u.getModel(sparseVars, extractedModel);
           
           if (debug)
-            outs() << "  Extracted model has " << extractedModel.size() << " entries\n";
+            outs() << "  Extracted sparse model has " << extractedModel.size() << " entries\n";
           
           u.pop();  // Clean up
           break;
@@ -2881,11 +2884,19 @@ namespace ufo
         }
       }
       
-      // Collect constants from trace values
+      // Collect ESSENTIAL constants only - NOT all trace values!
+      // Including all trace constants causes combinatorial explosion in CVC5.
+      // We only need: 0, 1, and boundary values (first/last/important state values).
       std::set<mpz_class> traceConstants;
-      for (auto& stepState : trace)
+      
+      // Always include 0 and 1
+      traceConstants.insert(0);
+      traceConstants.insert(1);
+      
+      // Include initial state values (step 0)
+      if (!trace.empty())
       {
-        for (auto& kv : stepState)
+        for (auto& kv : trace[0])
         {
           if (bv::is_bvnum(kv.second))
           {
@@ -2898,7 +2909,27 @@ namespace ufo
         }
       }
       
-      // Add seed constants
+      // Include final state values (last step)
+      if (trace.size() > 1)
+      {
+        for (auto& kv : trace.back())
+        {
+          if (bv::is_bvnum(kv.second))
+          {
+            traceConstants.insert(bv::toMpz(kv.second));
+          }
+          else if (isOpX<MPZ>(kv.second))
+          {
+            traceConstants.insert(lexical_cast<mpz_class>(kv.second));
+          }
+        }
+      }
+      
+      // Include trace length as it's often a key constant
+      traceConstants.insert(mpz_class(trace.size()));
+      traceConstants.insert(mpz_class(trace.size() - 1));
+      
+      // Add seed constants (from user or MBP analysis)
       for (auto& c : seedConstants)
       {
         if (bv::is_bvnum(c))
@@ -2910,6 +2941,9 @@ namespace ufo
           traceConstants.insert(lexical_cast<mpz_class>(c));
         }
       }
+      
+      if (debug)
+        outs() << "  Grammar constants: " << traceConstants.size() << " (optimized from full trace)\n";
       
       // Header
       out << "; SyGuS file generated from BndExpl concrete trace\n";

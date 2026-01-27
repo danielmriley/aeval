@@ -1,15 +1,22 @@
-;; Compact CEX for bv4_cex4: x increments by 2 each step
-;; x_at_i(i) = 2*i (mod 16)
-(define-fun x_at_i ((i Int)) (_ BitVec 4)
-  ((_ int2bv 4) (* 2 i))
-)
+; CCEX file generated from CVC5 SyGuS synthesis
+; Main relation: inv
+; Number of state variables: 1
 
-(declare-const trace (Array Int (_ BitVec 4)))
+; Synthesized closed-form functions for state evolution
+(define-fun var_0_at_i ((n (_ BitVec 8))) (_ BitVec 4) (let ((_let_1 ((_ extract 3 0) n))) (bvadd _let_1 _let_1)))
 
-(assert 
-  (forall ((i Int)) 
-    (=> (and (<= 0 i) (<= i 8)) 
-        (= (select trace i) (x_at_i i))
+; Trace arrays (one per state variable)
+(declare-const trace_0 (Array (_ BitVec 8) (_ BitVec 4)))
+
+; Assert that trace arrays follow the synthesized functions
+(assert
+  (forall ((i (_ BitVec 8)))
+    (=> (and (bvule #x00 i) (bvule i #x07))
+        (and
+          (= (select trace_0 i) (var_0_at_i i))
+        )
     )
   )
 )
+
+(check-sat)

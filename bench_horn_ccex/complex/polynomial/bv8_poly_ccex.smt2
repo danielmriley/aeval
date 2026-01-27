@@ -1,24 +1,23 @@
-; CCEX for Polynomial: x(i) = i^2
-; c(i) = i
-; x(i) = i*i
-; Trace bounds: 0 to 15
+; CCEX file generated from CVC5 SyGuS synthesis
+; Main relation: inv
+; Number of state variables: 2
 
-(define-fun c_at_i ((i (_ BitVec 8))) (_ BitVec 8)
-  i
-)
+; Synthesized closed-form functions for state evolution
+(define-fun var_0_at_i ((n (_ BitVec 8))) (_ BitVec 8) n)
+(define-fun var_1_at_i ((n (_ BitVec 8))) (_ BitVec 8) (bvmul n n))
 
-(define-fun x_at_i ((i (_ BitVec 8))) (_ BitVec 8)
-  (bvmul i i)
-)
+; Trace arrays (one per state variable)
+(declare-const trace_0 (Array (_ BitVec 8) (_ BitVec 8)))
+(declare-const trace_1 (Array (_ BitVec 8) (_ BitVec 8)))
 
-(declare-const trace_c (Array (_ BitVec 8) (_ BitVec 8)))
-(declare-const trace_x (Array (_ BitVec 8) (_ BitVec 8)))
-
-(assert 
-  (forall ((i (_ BitVec 8))) 
-    (=> (and (bvule #x00 i) (bvule i #x0f)) 
-        (and (= (select trace_c i) (c_at_i i))
-             (= (select trace_x i) (x_at_i i)))
+; Assert that trace arrays follow the synthesized functions
+(assert
+  (forall ((i (_ BitVec 8)))
+    (=> (and (bvule #x00 i) (bvule i #x0f))
+        (and
+          (= (select trace_0 i) (var_0_at_i i))
+          (= (select trace_1 i) (var_1_at_i i))
+        )
     )
   )
 )

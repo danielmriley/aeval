@@ -462,6 +462,19 @@ namespace ufo
             Z3_mk_bvmul(ctx, res, marshal(e->arg(i), ctx, cache, seen)) : 
             Z3_mk_bvadd(ctx, res, marshal(e->arg(i), ctx, cache, seen));
       }
+      else if (isOpX<BCONCAT>(e))
+      {
+        // Handle n-ary BCONCAT by chaining binary Z3_mk_concat calls.
+        // Z3 may return n-ary concat when simplifying bvshl with zero_extend.
+        assert(e->arity() >= 2);
+        std::vector<z3::ast> concat_args;
+        concat_args.reserve(e->arity());
+        for (int i = 0; i < e->arity(); i++)
+          concat_args.push_back(marshal(e->arg(i), ctx, cache, seen));
+        res = Z3_mk_concat(ctx, concat_args[0], concat_args[1]);
+        for (int i = 2; i < e->arity(); i++)
+          res = Z3_mk_concat(ctx, res, concat_args[i]);
+      }
       else if (isOpX<BEXTRACT> (e))
       {
 //        assert (bv::high (e) > bv::low (e));

@@ -1,0 +1,81 @@
+\begin{table}[t]
+\centering
+\caption{Representative Counterexample Functions Synthesized by Our Tool}
+\label{tab:ccex_functions}
+\small
+\begin{tabular}{@{}llp{5.5cm}l@{}}
+\toprule
+\textbf{Category} & \textbf{Variable} & \textbf{Function Definition} & \textbf{Description} \\
+\midrule
+
+% Identity patterns
+Identity & \texttt{x\_at\_i} & 
+\texttt{((\_ int2bv 4) i)} & 
+Direct identity \\
+
+% Linear arithmetic
+Linear & \texttt{y\_at\_i} & 
+\texttt{((\_ int2bv 4) (* 2 i))} & 
+Linear scaling \\
+
+Linear & \texttt{x\_at\_i} & 
+\texttt{((\_ int2bv 4) (+ 5 i))} & 
+Affine transformation \\
+
+% Bitwise operations
+Bitwise & \texttt{x\_at\_i} & 
+\texttt{(bvxor i (bvlshr i \#x01))} & 
+Gray code \\
+
+Bitwise & \texttt{x\_at\_i} & 
+\texttt{((\_ extract 127 0) i)} & 
+Bit extraction \\
+
+Bitwise & \texttt{y\_at\_i} & 
+\texttt{((\_ extract 127 0) (bvshl i \#x01))} & 
+Shift and extract \\
+
+% Polynomial
+Polynomial & \texttt{x\_at\_i} & 
+\texttt{(bvmul i i)} & 
+Quadratic \\
+
+Polynomial & \texttt{y\_at\_i} & 
+\texttt{(bvlshr (bvmul i (bvsub i \#x01)) \#x01)} & 
+Triangular number \\
+
+% Conditional
+Conditional & \texttt{x\_at\_i} & 
+\texttt{(ite (= (bvand i \#x01) \#x00) i (bvneg i))} & 
+Alternating sign \\
+
+Conditional & \texttt{x\_at\_i} & 
+\texttt{(ite (bvult i \#x80) i \#x80)} & 
+Saturation \\
+
+Conditional & \texttt{x\_at\_i} & 
+\texttt{(ite (= i \#x00) \textit{...} \textit{[nested]})} & 
+Lookup table \\
+
+% Mixed
+Mixed & \texttt{x\_at\_i} & 
+\texttt{(bvadd i \#x0001)} & 
+Increment \\
+
+Mixed & \texttt{y\_at\_i} & 
+\texttt{(ite (bvult i \#x80) \textit{...})} & 
+Phase-dependent \\
+
+\bottomrule
+\end{tabular}
+\vspace{0.5em}
+\begin{flushleft}
+\footnotesize
+Functions map iteration index \texttt{i} to program variable values.
+The tool synthesizes diverse counterexample patterns including identity functions, 
+linear/polynomial arithmetic, bitwise operations (shifts, XOR, extraction), 
+conditional logic, and lookup tables.
+Notation follows SMT-LIB 2 format: \texttt{int2bv} converts integers to bitvectors,
+\texttt{extract} extracts bit ranges, and \texttt{ite} is if-then-else.
+\end{flushleft}
+\end{table}

@@ -1,6 +1,7 @@
 #include "deep/RndLearnerV4.hpp"
 #include "deep/BitHorn.hpp"
 #include "deep/BndExpl.hpp"
+#include <chrono>
 
 using namespace ufo;
 using namespace std;
@@ -316,6 +317,8 @@ int main (int argc, char ** argv)
     // Instantiate BndExpl
     BndExpl bndExpl(ruleManager, to, debug);
     
+    auto t_start = std::chrono::high_resolution_clock::now();
+
     // Extract concrete trace
     std::vector<std::map<Expr, Expr>> trace;
     ExprVector stateVars;
@@ -325,6 +328,8 @@ int main (int argc, char ** argv)
       outs() << "Failed to extract concrete trace\n";
       return 1;
     }
+    auto t_trace = std::chrono::high_resolution_clock::now();
+    outs() << "  [Timing] Trace Extraction: " << std::chrono::duration_cast<std::chrono::milliseconds>(t_trace - t_start).count() << "ms\n";
     
     outs() << "  Extracted " << trace.size() << " trace points\n";
     outs() << "  State variables: " << stateVars.size() << "\n";
@@ -387,6 +392,8 @@ int main (int argc, char ** argv)
       outs() << "Failed to write SyGuS file\n";
       return 1;
     }
+    auto t_gen = std::chrono::high_resolution_clock::now();
+    outs() << "  [Timing] SyGuS Gen: " << std::chrono::duration_cast<std::chrono::milliseconds>(t_gen - t_trace).count() << "ms\n";
     
     outs() << "  Generated SyGuS file: " << output_file << "\n";
     
@@ -394,7 +401,10 @@ int main (int argc, char ** argv)
     if (sygus_run)
     {
       outs() << "  Running CVC5 on " << output_file << "...\n";
-      auto result = ruleManager.runCVC5SyGuS(output_file, 60);
+      auto t_cvc_start = std::chrono::high_resolution_clock::now();
+      auto result = ruleManager.runCVC5SyGuS(output_file, 180);
+      auto t_cvc_end = std::chrono::high_resolution_clock::now();
+      outs() << "  [Timing] CVC5 Synthesis: " << std::chrono::duration_cast<std::chrono::milliseconds>(t_cvc_end - t_cvc_start).count() << "ms\n";
       if (result.empty())
       {
         outs() << "CVC5 did not find a solution\n";
@@ -422,6 +432,7 @@ int main (int argc, char ** argv)
         if (sygus_validate)
         {
           outs() << "\nValidating counterexample inductively...\n";
+          auto t_val_start = std::chrono::high_resolution_clock::now();
           
           // Load the CCEX file
           ZSolver<EZ3> solver(z3);
@@ -431,6 +442,9 @@ int main (int argc, char ** argv)
           BndExpl bnd(ruleManager, 0, debug);
           tribool inductiveResult = bnd.validateCEXInductive(ccexExprs);
           
+          auto t_val_end = std::chrono::high_resolution_clock::now();
+          outs() << "  [Timing] Validation: " << std::chrono::duration_cast<std::chrono::milliseconds>(t_val_end - t_val_start).count() << "ms\n";
+
           if (inductiveResult == true)
           {
             outs() << "✓ Counterexample is INDUCTIVE - property is FALSE\n";
@@ -499,7 +513,7 @@ int main (int argc, char ** argv)
     // Optionally run CVC5
     if (sygus_run)
     {
-      auto result = ruleManager.runCVC5SyGuS(output_file, 60);
+      auto result = ruleManager.runCVC5SyGuS(output_file, 180);
       if (result.empty())
       {
         outs() << "CVC5 did not find a solution\n";

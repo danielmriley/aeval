@@ -1,23 +1,23 @@
-; Compact CEX for 8-bit cex5_zext: x += 1, y += 2
-; x_at_i(i) = extract(i), y_at_i(i) = extract(i << 1)
-; Trace bounds: 0 to 127
+; CCEX file generated from CVC5 SyGuS synthesis
+; Main relation: inv
+; Number of state variables: 2
 
-(define-fun x_at_i ((i (_ BitVec 16))) (_ BitVec 8)
-  ((_ extract 7 0) i)
-)
+; Synthesized closed-form functions for state evolution
+(define-fun var_0_at_i ((n (_ BitVec 8))) (_ BitVec 8) n)
+(define-fun var_1_at_i ((n (_ BitVec 8))) (_ BitVec 8) (bvadd n n))
 
-(define-fun y_at_i ((i (_ BitVec 16))) (_ BitVec 8)
-  ((_ extract 7 0) (bvshl i #x0001))
-)
+; Trace arrays (one per state variable)
+(declare-const trace_0 (Array (_ BitVec 8) (_ BitVec 8)))
+(declare-const trace_1 (Array (_ BitVec 8) (_ BitVec 8)))
 
-(declare-const trace_x (Array (_ BitVec 16) (_ BitVec 8)))
-(declare-const trace_y (Array (_ BitVec 16) (_ BitVec 8)))
-
-(assert 
-  (forall ((i (_ BitVec 16))) 
-    (=> (and (bvule #x0000 i) (bvule i #x007f)) 
-        (and (= (select trace_x i) (x_at_i i))
-             (= (select trace_y i) (y_at_i i)))
+; Assert that trace arrays follow the synthesized functions
+(assert
+  (forall ((i (_ BitVec 8)))
+    (=> (and (bvule #x00 i) (bvule i #x7f))
+        (and
+          (= (select trace_0 i) (var_0_at_i i))
+          (= (select trace_1 i) (var_1_at_i i))
+        )
     )
   )
 )

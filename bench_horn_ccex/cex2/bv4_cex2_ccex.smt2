@@ -1,25 +1,23 @@
-(define-fun x_at_i ((i Int)) (_ BitVec 4)
-  ((_ int2bv 4) i)
-)
-(define-fun y_at_i ((i Int)) (_ BitVec 4)
-  ((_ int2bv 4) i)
-)
+; CCEX file generated from CVC5 SyGuS synthesis
+; Main relation: inv
+; Number of state variables: 2
 
-(declare-const trace_x (Array Int (_ BitVec 4)))
-(declare-const trace_y (Array Int (_ BitVec 4)))
+; Synthesized closed-form functions for state evolution
+(define-fun var_0_at_i ((n (_ BitVec 8))) (_ BitVec 4) ((_ extract 3 0) n))
+(define-fun var_1_at_i ((n (_ BitVec 8))) (_ BitVec 4) ((_ extract 3 0) n))
 
+; Trace arrays (one per state variable)
+(declare-const trace_0 (Array (_ BitVec 8) (_ BitVec 4)))
+(declare-const trace_1 (Array (_ BitVec 8) (_ BitVec 4)))
 
-(assert 
-  (forall ((i Int)) 
-    (=> (and (<= 0 i) (<= i 15)) 
-        (= (select trace_x i) (x_at_i i))
-    )
-  )
-)
-(assert 
-  (forall ((i Int)) 
-    (=> (and (<= 0 i) (<= i 15)) 
-        (= (select trace_y i) (y_at_i i))
+; Assert that trace arrays follow the synthesized functions
+(assert
+  (forall ((i (_ BitVec 8)))
+    (=> (and (bvule #x00 i) (bvule i #x0f))
+        (and
+          (= (select trace_0 i) (var_0_at_i i))
+          (= (select trace_1 i) (var_1_at_i i))
+        )
     )
   )
 )
