@@ -2710,6 +2710,16 @@ namespace ufo
             return "(bvsub " + exprToSygus(e->arg(0)) + " " + exprToSygus(e->arg(1)) + ")";
           if (isOpX<BMUL>(e))
             return "(bvmul " + exprToSygus(e->arg(0)) + " " + exprToSygus(e->arg(1)) + ")";
+          if (isOpX<BUDIV>(e))
+            return "(bvudiv " + exprToSygus(e->arg(0)) + " " + exprToSygus(e->arg(1)) + ")";
+          if (isOpX<BSDIV>(e))
+            return "(bvsdiv " + exprToSygus(e->arg(0)) + " " + exprToSygus(e->arg(1)) + ")";
+          if (isOpX<BUREM>(e))
+            return "(bvurem " + exprToSygus(e->arg(0)) + " " + exprToSygus(e->arg(1)) + ")";
+          if (isOpX<BSREM>(e))
+            return "(bvsrem " + exprToSygus(e->arg(0)) + " " + exprToSygus(e->arg(1)) + ")";
+          if (isOpX<BSMOD>(e))
+            return "(bvsmod " + exprToSygus(e->arg(0)) + " " + exprToSygus(e->arg(1)) + ")";
           if (isOpX<BAND>(e))
             return "(bvand " + exprToSygus(e->arg(0)) + " " + exprToSygus(e->arg(1)) + ")";
           if (isOpX<BOR>(e))
@@ -3013,6 +3023,16 @@ namespace ufo
                 return "(bvsub " + convert(e->arg(0)) + " " + convert(e->arg(1)) + ")";
               if (isOpX<BMUL>(e))
                 return "(bvmul " + convert(e->arg(0)) + " " + convert(e->arg(1)) + ")";
+              if (isOpX<BUDIV>(e))
+                return "(bvudiv " + convert(e->arg(0)) + " " + convert(e->arg(1)) + ")";
+              if (isOpX<BSDIV>(e))
+                return "(bvsdiv " + convert(e->arg(0)) + " " + convert(e->arg(1)) + ")";
+              if (isOpX<BUREM>(e))
+                return "(bvurem " + convert(e->arg(0)) + " " + convert(e->arg(1)) + ")";
+              if (isOpX<BSREM>(e))
+                return "(bvsrem " + convert(e->arg(0)) + " " + convert(e->arg(1)) + ")";
+              if (isOpX<BSMOD>(e))
+                return "(bvsmod " + convert(e->arg(0)) + " " + convert(e->arg(1)) + ")";
             }
             
             if (e->arity() >= 1)
