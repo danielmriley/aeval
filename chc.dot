@@ -1,5 +1,0 @@
-digraph print {
- true ->  inv
- inv ->  inv
- inv ->  false
-}
