@@ -511,6 +511,31 @@ namespace ufo
           return false;
       }
 
+      // Mark the translated system as BV
+      m_bvChcs.hasBV = true;
+
+      // Detect BV width from the translated declarations
+      for (auto decl : m_bvChcs.decls)
+      {
+        if (decl && decl->arity() > 1)
+        {
+          for (unsigned i = 1; i < decl->arity() - 1; ++i)
+          {
+            Expr sort = decl->arg(i);
+            if (isOpX<BVSORT>(sort))
+            {
+              m_original_bv_width = bv::width(sort);
+              if (debug >= 2)
+              {
+                outs() << "  Detected translated BV width: " << m_original_bv_width << "\n";
+              }
+              break;
+            }
+          }
+        }
+        if (m_original_bv_width > 0) break;
+      }
+
       if (debug >= 2)
       {
         outs() << "  LIA to BV translation complete.\n";
@@ -700,6 +725,12 @@ namespace ufo
             intCoefs.insert(lexical_cast<cpp_int>(b));
         }
       }
+
+      // Ensure at least default coefficients {1, -1} and constants {0, 1} exist
+      intCoefs.insert(cpp_int(1));
+      intCoefs.insert(cpp_int(-1));
+      progConsts.insert(cpp_int(0));
+      progConsts.insert(cpp_int(1));
 
       for (auto &c : progConsts) progConsts.insert(-c);
       for (auto &a : intCoefs) intCoefs.insert(-a);
@@ -980,6 +1011,21 @@ namespace ufo
         outs() << "\n--- Starting BitHorn Solve Process ---\n";
       }
 
+      // Check if automatic translation is requested and needed
+      if (translate) { // NOTE: This variable name from constructor is a bit misleading if it stores OPT_LIA2BV
+          // Double check if it's already BV or needs translation
+          if (m_bvChcs.hasBV) {
+             if (debug >= 1) outs() << "  System already marked as BV.\n";
+          } else {
+             if (debug >= 1) outs() << "  LIA system detected, triggering on-the-fly LIA->BV translation.\n";
+             if (!translateToBv()) {
+                 outs() << "  Fatal: Failed to translate LIA to BV. Aborting.\n";
+                 return false; // Or throw/exception
+             }
+             if (debug >= 1) outs() << "  On-the-fly translation successful. Continuing with BV solver.\n";
+          }
+      }
+
       bool isSafe = false;
       map<Expr, ExprSet> guidedMbpByRel;
 
@@ -1130,11 +1176,15 @@ namespace ufo
         // }
       }
 
-      if(!skipSampling)
+      if(!skipSampling && m_original_bv_width > 0)
       {
         // outs() << "Attempting to synthesize invariants through sampling...\n";
         ::std::srand(::std::time(0));
         synthesize(); // sampling candidates from grammar.
+      }
+      else if (m_original_bv_width == 0 && debug >= 1)
+      {
+        outs() << "  Skipping BV sampling (no BV-typed variables detected).\n";
       }
 
       if(debug >= 1) outs() << "Failed to find a safe solution after sampling.\n";
@@ -1146,6 +1196,31 @@ namespace ufo
       if (debug >= 2)
       {
         outs() << "\n--- Attempting to Solve LIA System ---\n";
+      }
+
+      // Check if LIA system has any integer-typed variables to work with
+      bool hasIntVars = false;
+      for (auto &decl : m_liaChcs->decls)
+      {
+        Expr rel = decl->left();
+        if (rel && m_liaChcs->invVars.count(rel))
+        {
+          for (auto &var : m_liaChcs->invVars[rel])
+          {
+            if (bind::isIntConst(var))
+            {
+              hasIntVars = true;
+              break;
+            }
+          }
+        }
+        if (hasIntVars) break;
+      }
+      if (!hasIntVars)
+      {
+        if (debug >= 1)
+          outs() << "  LIA system has no integer variables; skipping LIA solver.\n";
+        return false;
       }
 
       for (auto &rule : m_liaChcs->chcs)
@@ -2365,7 +2440,7 @@ namespace ufo
     auto parseEnd = high_resolution_clock::now();
     auto parseTime = duration_cast<milliseconds>(parseEnd - parseStart).count();
 
-    if (!ruleManager.hasBV && !ser)
+    if (!ruleManager.hasBV && !ser && !translateBv2Lia)
     {
       outs() << "Input is not in BV format\n";
       return 1;

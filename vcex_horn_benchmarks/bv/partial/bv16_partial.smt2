@@ -1,0 +1,16 @@
+; Partial system: x, y, z independent counters
+; Property only depends on x
+(set-logic HORN)
+(declare-fun inv ((_ BitVec 16) (_ BitVec 16) (_ BitVec 16)) Bool)
+(assert (forall ((x (_ BitVec 16)) (y (_ BitVec 16)) (z (_ BitVec 16)))
+    (=> (and (= x #x0000) (= y #x0000) (= z #x0000)) (inv x y z))))
+(assert (forall ((x (_ BitVec 16)) (y (_ BitVec 16)) (z (_ BitVec 16))
+                 (xn (_ BitVec 16)) (yn (_ BitVec 16)) (zn (_ BitVec 16)))
+    (=> (and (inv x y z) (bvult x #xffff)
+             (= xn (bvadd x #x0001))
+             (= yn (bvadd y #x0002))
+             (= zn (bvadd z #x0003)))
+        (inv xn yn zn))))
+(assert (forall ((x (_ BitVec 16)) (y (_ BitVec 16)) (z (_ BitVec 16)))
+    (=> (and (inv x y z) (= x #xffff)) false)))
+(check-sat)

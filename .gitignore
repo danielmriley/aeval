@@ -17,6 +17,12 @@
 /gtags.files
 
 *.sygus
+/*.csv
+/*.py
+/*.md
+/*.dot
+/*.sh
+/*.smt2
 
 .mypy_cache
 .vscode

@@ -481,6 +481,12 @@ namespace ufo
         }
       }
 
+      // Ensure at least default coefficients {1, -1} and constants {0, 1} exist
+      intCoefs.insert(cpp_int(1));
+      intCoefs.insert(cpp_int(-1));
+      progConsts.insert(cpp_int(0));
+      progConsts.insert(cpp_int(1));
+
       for (auto &c : progConsts) progConsts.insert(-c);
       for (auto &a : intCoefs) intCoefs.insert(-a);
       for (auto &a : intCoefs) if (a != 0) sf.lf.addIntCoef(a);

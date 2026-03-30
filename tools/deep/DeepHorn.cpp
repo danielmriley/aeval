@@ -174,7 +174,8 @@ int main (int argc, char ** argv)
         " " << OPT_SYGUS_VALIDATE << "              synthesize and validate CEX inductively\n" <<
         " " << OPT_SYGUS_CCEX << " <file>           output CCEX file from synthesis (for validation)\n" <<
         " " << OPT_SYGUS_MBP << ", " << OPT_NO_SYGUS_MBP << "    seed grammar with MBP guards (default: enabled)\n" <<
-        " " << OPT_SYGUS_INVARIANTS << ", " << OPT_NO_SYGUS_INVARIANTS << "  seed grammar with bootstrap invariants (default: disabled)\n";
+        " " << OPT_SYGUS_INVARIANTS << ", " << OPT_NO_SYGUS_INVARIANTS << "  seed grammar with bootstrap invariants (default: disabled)\n" <<
+        " " << OPT_LIA2BV << "                         translate LIA input to BV before SyGuS synthesis\n";
 
     return 0;
   }
@@ -311,6 +312,24 @@ int main (int argc, char ** argv)
     }
     outs() << "[DEBUG] Parse successful\n";
     
+    // LIA→BV translation if requested
+    if (d_lia2bv)
+    {
+      if (!ruleManager.hasBV)
+      {
+        outs() << "\n=== Translating LIA to BV for SyGuS ===\n";
+        Lia2BvTranslator translator(efac, z3, 4, debug);
+        CHCs bvManager = translator.translate(ruleManager);
+        ruleManager = bvManager;
+        outs() << "  LIA→BV translation complete (hasBV=" << ruleManager.hasBV << ")\n";
+      }
+      else
+      {
+        if (debug)
+          outs() << "  Input already in BV format, skipping LIA→BV translation\n";
+      }
+    }
+
     if (debug)
       outs() << "\n=== SyGuS Full Mode (BndExpl Trace Extraction) ===\n";
     
@@ -448,6 +467,13 @@ int main (int argc, char ** argv)
           if (inductiveResult == true)
           {
             outs() << "✓ Counterexample is INDUCTIVE - property is FALSE\n";
+            
+            // Update CCEX file if a tighter bound was found during validation
+            if (bnd.validatedTraceBound != -1 && bnd.validatedTraceBound != (int)(trace.size() - 1))
+            {
+              outs() << "  [Deep] Updating CCEX file with refined bound N=" << bnd.validatedTraceBound << "\n";
+              ruleManager.generateCCEXFromSynthesis(result, ccex_output, bnd.validatedTraceBound, sygus_bitwidth);
+            }
           }
           else if (inductiveResult == false)
           {
@@ -481,6 +507,24 @@ int main (int argc, char ** argv)
       return 1;
     }
     
+    // LIA→BV translation if requested
+    if (d_lia2bv)
+    {
+      if (!ruleManager.hasBV)
+      {
+        outs() << "\n=== Translating LIA to BV for SyGuS ===\n";
+        Lia2BvTranslator translator(efac, z3, 4, debug);
+        CHCs bvManager = translator.translate(ruleManager);
+        ruleManager = bvManager;
+        outs() << "  LIA→BV translation complete (hasBV=" << ruleManager.hasBV << ")\n";
+      }
+      else
+      {
+        if (debug)
+          outs() << "  Input already in BV format, skipping LIA→BV translation\n";
+      }
+    }
+
     // Set default output filename if not specified
     string output_file = (sygus_file != "") ? sygus_file : "counterexample.sygus";
     
@@ -553,6 +597,13 @@ int main (int argc, char ** argv)
           if (inductiveResult == true)
           {
             outs() << "✓ Counterexample is INDUCTIVE - property is FALSE\n";
+
+            // Update CCEX file if a tighter bound was found during validation
+            if (bnd.validatedTraceBound != -1)
+            {
+               outs() << "  [Deep] Updating CCEX file with refined bound N=" << bnd.validatedTraceBound << "\n";
+               ruleManager.generateCCEXFromSynthesis(result, ccex_output, bnd.validatedTraceBound, sygus_bitwidth);
+            }
           }
           else if (inductiveResult == false)
           {
@@ -573,8 +624,8 @@ int main (int argc, char ** argv)
   if(bv_solver)
     res = learnInvariants5(string(argv[argc - 1]), ccex, ccexInductive, ccexUnrolling, max_attempts, to, densecode, aggressivepruning,
                            do_dl, do_mu, do_elim, do_arithm, do_disj, do_prop, mbp_eqs,
-                           d_m, d_p, d_d, d_s, d_f, d_r, d_g, d_se, d_lia2bv, d_horn, d_sertrans,
-                           d2, doGJ, doReg, doCon, skipTranslation, skipSampling, debug);
+                           d_m, d_p, d_d, d_s, d_f, d_r, d_g, d_se, d_ser, d_horn, d_sertrans,
+                           d2, doGJ, doReg, doCon, d_lia2bv, skipSampling, debug);
   else if (vers4)      // MBP-based, path-sensitive algorithms
     learnInvariants4(string(argv[argc-1]), max_attempts, to, densecode, aggressivepruning,
                    do_dl, do_mu, do_elim, do_arithm, do_disj, do_prop, mbp_eqs,

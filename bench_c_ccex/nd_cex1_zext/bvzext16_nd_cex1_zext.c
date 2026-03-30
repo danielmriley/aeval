@@ -13,6 +13,7 @@ int main() {
     uint16_t v1 = 0x0000;
 
     while(1) {
+        assert(!(!((((((unsigned long long)v0) + 0x00000001) < 0x00010000) && ((((unsigned long long)v1) + 0x00000001) < 0x00010000)))));
 
         // Transition
 

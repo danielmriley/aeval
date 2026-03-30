@@ -27,6 +27,10 @@ namespace ufo
     CHCs &ruleManager;
     Expr extraLemmas;
 
+  public:
+    int64_t validatedTraceBound = -1;
+
+  private:
     ExprVector bindVars1;
 
     int tr_ind; // helper vars
@@ -1505,6 +1509,122 @@ namespace ufo
       };
 
       SMTUtils solver(m_efac);
+
+      // [Deep] Optimized: Synthesize valid bound N using Solver Query (Hybrid QF Approach)
+      // Strategy: 
+      // 1. Find candidate N such that Error(f(N)) is true (Reachability).
+      // 2. Verify candidate N by checking if EXISTS k < N . !Trans(f(k), f(k+1)) is UNSAT (Validity).
+      {
+          bool isBvIndex = false;
+          unsigned bvWidth = 0;
+          if (!traceArrays.empty()) {
+            auto it = cexData.traceValueFuncs.find(traceArrays[0]);
+            if (it != cexData.traceValueFuncs.end()) isBvIndex = isIndexBvType(it->second.first, bvWidth);
+          }
+          
+          Expr N;
+          if (isBvIndex) N = bv::bvConst(mkTerm<string>("_FH_N_bound", m_efac), bvWidth);
+          else N = bind::intConst(mkTerm<string>("_FH_N_bound", m_efac));
+          
+          // 1. Assert Query(f(N)) aka Error is reached at N
+          Expr queryAtN = substituteStepExpr(queryCHC->body, queryCHC->srcVars, N);
+          
+          solver.push(); // Push context for the search loop
+          solver.assertExpr(queryAtN);
+          
+          // Also enforce N > 0 to avoid trivial 0-length if init is error
+          if (isBvIndex) solver.assertExpr(bv::bvugt(N, bv::bvnum(mpz_class(0), bvWidth, m_efac)));
+          else solver.assertExpr(mk<GT>(N, mkMPZ(0, m_efac)));
+
+          int attempts = 0;
+          const int MAX_ATTEMPTS = 50; 
+          bool found = false;
+
+          while(attempts++ < MAX_ATTEMPTS)
+          {
+             boost::tribool res = solver.solve();
+             if (!res) break; // UNSAT
+
+             ExprSet modelVars; modelVars.insert(N);
+             ExprMap model;
+             solver.getModel(modelVars, model);
+             Expr nVal = model[N];
+             
+             // Extract concrete value
+             long long currentN = -1;
+             if (nVal) {
+                if (isOpX<MPZ>(nVal)) currentN = lexical_cast<long long>(nVal);
+                else {
+                    if (bv::is_bvnum(nVal)) {
+                        mpz_class v = bv::toMpz(nVal);
+                        if (v.fits_slong_p()) currentN = v.get_si();
+                    }
+                }
+             }
+             
+             if (currentN <= 0) {
+                 // Block invalid N
+                 if (isBvIndex) solver.assertExpr(mk<NEG>(mk<EQ>(N, nVal))); 
+                 else solver.assertExpr(mk<NEG>(mk<EQ>(N, nVal)));
+                 continue;
+             }
+             
+             if (debug) outs() << "  [Deep] Checking candidate N=" << currentN << "...\n";
+
+             // 2. Verify transition for this N: check UNSAT( exists k < N . !Trans(f(k), f(k+1)) )
+             solver.push(); // Scope for verification
+             
+             Expr k;
+             if (isBvIndex) k = bv::bvConst(mkTerm<string>("_FH_k_check", m_efac), bvWidth);
+             else k = bind::intConst(mkTerm<string>("_FH_k_check", m_efac));
+             
+             Expr kNext;
+             if (isBvIndex) kNext = bv::bvadd(k, bv::bvnum(mpz_class(1), bvWidth, m_efac));
+             else kNext = mk<PLUS>(k, mkTerm<mpz_class>(1, m_efac));
+             
+             Expr transBody = u.removeRedundantConjuncts(transCHC->body);
+             ExprMap srcSubst = buildStepSubstExpr(transCHC->srcVars, k);
+             ExprMap dstSubst = buildStepSubstExpr(transCHC->dstVars, kNext);
+             Expr transAtK = replaceAll(replaceAll(transBody, srcSubst), dstSubst);
+             
+             // Condition: 0 <= k < N (use nVal which is concrete/constant expr)
+             Expr rangeCond;
+             if (isBvIndex) rangeCond = mk<AND>(bv::bvuge(k, bv::bvnum(mpz_class(0), bvWidth, m_efac)), bv::bvult(k, nVal));
+             else rangeCond = mk<AND>(mk<GEQ>(k, mkMPZ(0, m_efac)), mk<LT>(k, nVal));
+             
+             // Assert: exists k in range such that Trans is VIOLATED
+             solver.assertExpr(rangeCond);
+             solver.assertExpr(mk<NEG>(transAtK)); // !Trans
+             
+             bool violationOnPath = false;
+             boost::tribool vRes = solver.solve();
+             if (vRes) violationOnPath = true;
+             
+             solver.pop(); // Clear verification assertions
+             
+             if (!violationOnPath) {
+                  // UNSAT => No bad transitions => Valid Path!
+                  // We only print this if debug is on or if it's a significant find
+                  outs() << "  [Deep] Synthesized confirmed bound N = " << currentN << "\n";
+                  cexData.traceEnd = currentN;
+                  this->validatedTraceBound = currentN;
+                  cexData.traceEndExpr = nVal;
+                  cexData.boundsFound = true;
+                  found = true;
+                  break; // Found it
+             } else {
+                  // Path invalid, block this N and try again
+                  if (debug) outs() << "  [Deep] Candidate N=" << currentN << " invalid (transition break). Retrying...\n";
+                  solver.assertExpr(mk<NEG>(mk<EQ>(N, nVal)));
+             }
+          }
+          
+          if (!found && debug) outs() << "  [Deep] No valid bound N found within attempt limit.\n";
+          
+          solver.pop(); // Cleanup search context
+          solver.reset();
+      }
+
       tribool result = true;
       long long initTime = 0, transTime = 0, propTime = 0;
 

@@ -14,6 +14,7 @@ int main() {
     uint8_t v2 = 0x00;
 
     while(1) {
+        assert(!(!((((((unsigned long long)v0) + 0x0001) < 0x0100) && ((((unsigned long long)v1) + 0x0001) < 0x0100) && ((((unsigned long long)v2) + 0x0001) < 0x0100)))));
 
         // Transition
         v0 = (v0 + 0x01);

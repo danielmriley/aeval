@@ -2,6 +2,11 @@ import os
 import re
 import sys
 
+# Module-level uninterpreted function registry, set per file conversion
+_uninterp_fns = {}
+# Module-level variable width registry: C var name -> BV width, set per file conversion
+_var_widths = {}
+
 def parse_smt2(filepath):
     with open(filepath, 'r') as f:
         content = f.read()
@@ -37,6 +42,17 @@ def find_relation_decl(sexprs):
                 return expr
     return None
 
+def find_uninterp_fns(sexprs):
+    # Collect (declare-fun name (args...) (_ BitVec N)) for non-inv functions
+    fns = {}
+    for expr in sexprs:
+        if isinstance(expr, list) and len(expr) >= 4:
+            if expr[0] == 'declare-fun' and expr[1] != 'inv':
+                ret = expr[3]
+                if isinstance(ret, list) and len(ret) == 3 and ret[0] == '_' and ret[1] == 'BitVec':
+                    fns[expr[1]] = int(ret[2])
+    return fns
+
 def get_vars_and_types(decl):
     # (declare-rel inv ((_ BitVec 16) (_ BitVec 16)))
     # (declare-fun inv ((_ BitVec 4) (_ BitVec 4)) Bool)
@@ -53,7 +69,9 @@ def get_vars_and_types(decl):
             vars_types.append((f'v{i}', width))
     return vars_types
 
-def translate_expr(expr, var_map):
+def translate_expr(expr, var_map, uninterp_fns=None):
+    if uninterp_fns is None:
+        uninterp_fns = _uninterp_fns
     if isinstance(expr, str):
         if expr in var_map:
             return var_map[expr]
@@ -77,7 +95,7 @@ def translate_expr(expr, var_map):
         if expr[1] == 'extract': # (_ extract high low)
              return f"EXTRACT_{expr[2]}_{expr[3]}"
 
-    args = [translate_expr(e, var_map) for e in expr[1:]]
+    args = [translate_expr(e, var_map, uninterp_fns) for e in expr[1:]]
     
     if op == 'and': return f"({' && '.join(args)})"
     if op == 'or': return f"({' || '.join(args)})"
@@ -88,8 +106,19 @@ def translate_expr(expr, var_map):
     if op == 'bvmul' or op == '*': return f"({args[0]} * {args[1]})"
     if op == 'bvudiv' or op == '/': return f"({args[0]} / {args[1]})"
     if op == 'bvurem' or op == '%': return f"({args[0]} % {args[1]})"
+    if op == 'bvand': return f"({args[0]} & {args[1]})"
+    if op == 'bvor': return f"({args[0]} | {args[1]})"
+    if op == 'bvxor': return f"({args[0]} ^ {args[1]})"
+    if op == 'bvnot': return f"(~{args[0]})"
+    if op == 'bvneg':
+        w = _var_widths.get(args[0])
+        if w:
+            ctype = get_c_type(w)
+            return f"({ctype})(0u - ({ctype})({args[0]}))"
+        return f"(-{args[0]})"
     if op == 'bvshl': return f"({args[0]} << {args[1]})"
     if op == 'bvlshr': return f"({args[0]} >> {args[1]})"
+    if op == 'bvashr': return f"({args[0]} >> {args[1]})"
     if op == 'bvult' or op == '<': return f"({args[0]} < {args[1]})"
     if op == 'bvule' or op == '<=': return f"({args[0]} <= {args[1]})"
     if op == 'bvugt' or op == '>': return f"({args[0]} > {args[1]})"
@@ -112,6 +141,14 @@ def translate_expr(expr, var_map):
         # ((x >> low) & mask)
         mask = (1 << (high - low + 1)) - 1
         return f"(({args[0]} >> {low}) & {mask})"
+
+    # Uninterpreted function: replace with nondet of appropriate width
+    if isinstance(op, str) and op in uninterp_fns:
+        width = uninterp_fns[op]
+        if width <= 8: return 'nondet_uchar()'
+        if width <= 16: return 'nondet_ushort()'
+        if width <= 32: return 'nondet_uint()'
+        return 'nondet_ulong()'
 
     return f"UNKNOWN_OP_{op}({', '.join(args)})"
 
@@ -160,18 +197,28 @@ def extract_assignments(exprs, next_args, var_map):
     return assignments, constraints
 
 def convert_file(filepath, outpath):
+    global _uninterp_fns, _var_widths
     tokens = parse_smt2(filepath)
     sexprs = []
     while tokens:
         sexprs.append(parse_sexpr(tokens))
-        
+
+    _uninterp_fns = find_uninterp_fns(sexprs)
+
     decl = find_relation_decl(sexprs)
+    # (populated below after vars_types is computed)
     if not decl:
         print(f"Skipping {filepath}: No inv declaration found")
         return
 
     vars_types = get_vars_and_types(decl)
     state_vars = [v for v, t in vars_types]
+
+    # Build width lookup for all current and next state variables
+    _var_widths = {}
+    for i, (v, w) in enumerate(vars_types):
+        _var_widths[f"v{i}"] = w
+        _var_widths[f"next_v{i}"] = w
     
     # Identify rules
     init_rule = None
@@ -429,9 +476,8 @@ def convert_file(filepath, outpath):
                         conds = [translate_expr(e, var_map) for e in error_exprs]
                         fail_cond = f"({' && '.join(conds)})"
         
-        # if fail_cond:
-        #     # If fail condition is met, assert(0)
-        #     f.write(f"        assert(!({fail_cond}));\n")
+        if fail_cond:
+            f.write(f"        assert(!({fail_cond}));\n")
             
         f.write("\n        // Transition\n")
         
