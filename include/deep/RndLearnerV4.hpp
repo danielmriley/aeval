@@ -991,6 +991,32 @@ namespace ufo
     if (!ruleManager.hasCycles())
       return (void)bnd.exploreTraces(1, ruleManager.chcs.size(), true);
 
+    // Auto-enable disjunctive (phase) search when an inductive transition is
+    // structurally disjunctive -- a conditional (ite) update or a disjunctive
+    // guard. Such loops need a disjunctive invariant the plain conjunctive
+    // search cannot express, and the default --v4 mode otherwise never enters
+    // phase discovery for non-array systems. Mirrors the implied defaults of
+    // the --disj flag (see DeepHorn.cpp).
+    if (!doDisj)
+    {
+      for (auto & hr : ruleManager.chcs)
+        if (hr.isInductive &&
+            (containsOp<ITE>(hr.body) || containsOp<OR>(hr.body)))
+        {
+          doDisj = true;
+          break;
+        }
+      if (doDisj)
+      {
+        if (debug > 0)
+          outs () << "Auto-enabling disjunctive search: "
+                     "disjunctive transition detected.\n";
+        if (doProp == 0) doProp = 1;
+        if (dat == 0)    dat = 1;
+        if (!dAddProp && !dAddDat) dAddDat = true;
+      }
+    }
+
     RndLearnerV4 ds(m_efac, z3, ruleManager, to, freqs, aggp, mut, dat,
                     doDisj, mbpEqs, dAllMbp, dAddProp, dAddDat, dStrenMbp,
                     dFwd, dRec, dGenerous, debug);

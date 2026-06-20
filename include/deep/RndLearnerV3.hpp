@@ -1245,7 +1245,16 @@ namespace ufo
           else
             return false; // TODO: use this fact somehow
         }
-        else if (indeterminate(b)) return false;
+        else if (indeterminate(b))
+        {
+          // A transient Z3 'unknown' (e.g. a large final query hitting the
+          // per-call timeout) would discard a possibly-valid full solution.
+          // Retry this single check once with an escalated timeout.
+          u.setTimeout(to * 8);
+          b = checkCHC(hr, candidates, true);
+          u.setTimeout(to);
+          if (b || indeterminate(b)) return false;
+        }
       }
       return true;
     }

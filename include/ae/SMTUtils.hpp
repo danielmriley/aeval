@@ -27,6 +27,15 @@ namespace ufo
     SMTUtils (ExprFactory& _efac, unsigned _to) :
       efac(_efac), z3(efac), smt (z3, _to), can_get_model(0), m(NULL) {}
 
+    // change the per-query Z3 timeout (ms); persists across isSat's reset()
+    // since reset() only pops/pushes the assertion stack, not solver params
+    void setTimeout(unsigned _to)
+    {
+      ZParams<EZ3> p(z3);
+      p.set("timeout", _to);
+      smt.set(p);
+    }
+
     boost::tribool eval(Expr v, ZSolver<EZ3>::Model* m1)
     {
       Expr ev = m1->eval(v);

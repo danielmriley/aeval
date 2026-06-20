@@ -707,6 +707,37 @@ namespace ufo
   static Expr simplifyArithm (Expr exp, bool keepRedundandDisj, bool keepRedundandConj);
 
   /**
+   * Collapse a disjunction of equalities over a single variable whose integer
+   * constants form a contiguous range, e.g. (or (= x 1) ... (= x N)), into the
+   * equivalent interval (and (>= x lo) (<= x hi)). Enumerated init facts of
+   * this shape make every downstream SMT query grow O(N); the interval form is
+   * tiny. Sound only for an exactly-contiguous set (no gaps), which is checked.
+   */
+  inline static Expr collapseEqRangeDisj (Expr d, ExprFactory& efac)
+  {
+    if (!isOpX<OR>(d)) return d;
+    Expr var = NULL;
+    set<cpp_int> vals;
+    for (auto it = d->args_begin(); it != d->args_end(); ++it)
+    {
+      Expr c = *it;
+      if (!isOpX<EQ>(c)) return d;
+      Expr v, k;
+      if (isOpX<MPZ>(c->right()))     { v = c->left();  k = c->right(); }
+      else if (isOpX<MPZ>(c->left())) { v = c->right(); k = c->left();  }
+      else return d;
+      if (var == NULL) var = v;
+      else if (var != v) return d;
+      vals.insert(lexical_cast<cpp_int>(k));
+    }
+    if (var == NULL || vals.size() < 2) return d;
+    cpp_int lo = *vals.begin(), hi = *vals.rbegin();
+    if (hi - lo + 1 != (cpp_int)vals.size()) return d;   // gaps -> not equivalent
+    return mk<AND>(mk<GEQ>(var, mkMPZ(lo, efac)),
+                   mk<LEQ>(var, mkMPZ(hi, efac)));
+  }
+
+  /**
    * Move var v to LHS of each expression and simplify
    */
   inline static Expr ineqSimplifier(Expr v, Expr exp, bool merge = false){

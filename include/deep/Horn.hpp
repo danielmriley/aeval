@@ -299,6 +299,22 @@ namespace ufo
       {
         Expr head = hr.body->right();
         hr.body = hr.body->left();
+        // collapse enumerated contiguous-range equality disjunctions (e.g.
+        // (or (= x 1) ... (= x N))) to intervals before the O(N) clause can
+        // bloat every downstream SMT query
+        {
+          ExprSet cnjs;
+          getConj(hr.body, cnjs);
+          ExprSet ncnjs;
+          bool changed = false;
+          for (auto & c : cnjs)
+          {
+            Expr nc = collapseEqRangeDisj(c, m_efac);
+            if (nc != c) changed = true;
+            ncnjs.insert(nc);
+          }
+          if (changed) hr.body = conjoin(ncnjs, m_efac);
+        }
         if (isOpX<FAPP>(head))
         {
           if (head->left()->arity() == 2 &&
