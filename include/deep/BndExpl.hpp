@@ -112,7 +112,15 @@ namespace ufo
 
     Expr compactPrefix (Expr rel, int num, int unr = 0)
     {
-      vector<int> pr = ruleManager.prefixes[rel][num];
+      auto pit = ruleManager.prefixes.find(rel);
+      if (pit == ruleManager.prefixes.end() || pit->second.empty())
+        return mk<TRUE>(m_efac);
+      // prefixes[rel] and cycles[rel] are not guaranteed to be the same length
+      // (e.g. an ITE-split loop body yields more cycles than entry paths), so
+      // clamp to the available entry prefix. This is a no-op when the sizes
+      // match, and reuses the (single) entry path otherwise.
+      int pnum = num < (int)pit->second.size() ? num : (int)pit->second.size() - 1;
+      vector<int> pr = pit->second[pnum];
       if (pr.size() == 0) return mk<TRUE>(m_efac);
 
       for (int j = pr.size() - 1; j >= 0; j--)
@@ -327,7 +335,8 @@ namespace ufo
     {
       assert(k >= 0);
 
-      int fc_ind;
+      int fc_ind = -1;
+      tr_ind = pr_ind = -1;
       for (int i = 0; i < ruleManager.chcs.size(); i++)
       {
         auto & r = ruleManager.chcs[i];
@@ -335,6 +344,7 @@ namespace ufo
         if (r.isQuery) pr_ind = i;
         if (r.isFact) fc_ind = i;
       }
+      assert(fc_ind >= 0 && tr_ind >= 0 && pr_ind >= 0);
 
       HornRuleExt& fc = ruleManager.chcs[fc_ind];
       HornRuleExt& tr = ruleManager.chcs[tr_ind];
@@ -508,7 +518,6 @@ namespace ufo
           continue; // does not make much sense to run with only one var when it is the last cycle
           invVars = vars;
 
-          auto & prefix = ruleManager.prefixes[invRel][cyc];
           vector<int> trace;
           int l = 0;                              // starting index (before the loop)
           if (ruleManager.hasArrays[srcRel]) l++; // first iter is usually useless
@@ -688,7 +697,15 @@ namespace ufo
           // continue; // does not make much sense to run with only one var when it is the last cycle
           invVars[srcRel] = vars;
 
-          auto & prefix = ruleManager.prefixes[invRel][cyc];
+          vector<int> prefix;
+          {
+            auto pit = ruleManager.prefixes.find(invRel);
+            if (pit != ruleManager.prefixes.end() && !pit->second.empty())
+            {
+              int pnum = cyc < (int)pit->second.size() ? cyc : (int)pit->second.size() - 1;
+              prefix = pit->second[pnum];
+            }
+          }
           vector<int> trace;
           Expr lastModel = mk<TRUE>(m_efac);
 
@@ -703,7 +720,7 @@ namespace ufo
             trace.push_back(prefix[p]);
           }
 
-          int l = trace.size() - 1; // starting index (before the loop)
+          int l = trace.size() > 0 ? (int)trace.size() - 1 : 0; // starting index (before the loop)
           if (ruleManager.hasArrays[srcRel]) l++; // first iter is usually useless
 
           for (int j = 0; j < k; j++)

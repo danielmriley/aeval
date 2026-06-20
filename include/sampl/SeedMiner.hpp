@@ -178,7 +178,9 @@ namespace ufo
         int index = getVarIndex(v, vars);
         if (index >= 0)
         {
-          tmpl = replaceAll(tmpl, v, invVars[index]);
+          auto it = invVars.find(index);
+          if (it != invVars.end() && it->second != NULL)
+            tmpl = replaceAll(tmpl, v, it->second);
         }
       }
 
@@ -336,11 +338,17 @@ namespace ufo
 
       if (hr.srcRelation == invRel)
         for (int i = 0; i < hr.srcVars.size(); i++)
-          if (invVars[i] == NULL) quantified.insert(hr.srcVars[i]);
+        {
+          auto it = invVars.find(i);
+          if (it == invVars.end() || it->second == NULL) quantified.insert(hr.srcVars[i]);
+        }
 
       if (hr.dstRelation == invRel)
         for (int i = 0; i < hr.dstVars.size(); i++)
-          if (invVars[i] == NULL) quantified.insert(hr.dstVars[i]);
+        {
+          auto it = invVars.find(i);
+          if (it == invVars.end() || it->second == NULL) quantified.insert(hr.dstVars[i]);
+        }
 
       body = rewriteSelectStore(body);
       body = eliminateQuantifiers(body, quantified);

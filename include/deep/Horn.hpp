@@ -52,7 +52,7 @@ namespace ufo
         else it = locVars.erase(it);
     }
 
-    bool splitBody ()
+    bool splitBody (ExprSet& decls)
     {
       getConj (simplifyBool(body), lin);
       for (auto c = lin.begin(); c != lin.end(); )
@@ -62,6 +62,10 @@ namespace ufo
         if (isOpX<FAPP>(cnj) && cnj->arity() > 1 && isOpX<FDECL>(cnj->left()))
         {
           Expr rel = cnj->left();
+          // an uninterpreted predicate with no defining rules is not a
+          // synthesizable relation: treat the body as FALSE and drop the CHC
+          if (find(decls.begin(), decls.end(), rel) == decls.end())
+            return false;
           if (srcRelation != NULL)
           {
             errs () << "Nonlinear CHC is currently unsupported: ["
@@ -327,7 +331,7 @@ namespace ufo
         // ExprVector origSrcSymbs, origDstSymbs;
         // ExprSet lin;
         HornRuleExt & hr = *it;
-        if (!hr.splitBody())
+        if (!hr.splitBody(decls))
         {
           it = chcs.erase(it);
           continue;
@@ -1128,9 +1132,10 @@ namespace ufo
     vector<int> empt;
     vector<int>& getCycleForRel(Expr rel)
     {
-      for (auto & c : cycles[loopheads[0]]) // GF: loopheads[0]]?
-        if (chcs[c[0]].srcRelation == rel)
-          return c;
+      if (cycles.count(rel))
+        for (auto & c : cycles[rel])
+          if (chcs[c[0]].srcRelation == rel)
+            return c;
       return empt;
     }
 

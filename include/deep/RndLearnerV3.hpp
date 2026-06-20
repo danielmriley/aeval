@@ -610,10 +610,7 @@ namespace ufo
         candidates.clear();
         SamplFactory& sf = sfs[invNum].back();
         Expr cand = sf.getFreshCandidate();
-        if (cand == NULL) {
-          outs() << "cand is NULL\n";
-          exit(1);
-        }
+        if (cand == NULL) continue;
         if (cand != NULL && isOpX<FORALL>(cand) && isOpX<IMPL>(cand->last()))
         {
           if (!u.isSat(cand->last()->left())) cand = NULL;

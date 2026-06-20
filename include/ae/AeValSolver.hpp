@@ -607,6 +607,9 @@ namespace ufo
 
         // get value in the middle of max and min
 
+        if (conjLT.size() == 0 && conjGT.size() == 0 && conjNEG.size() == 0)
+          return getDefaultAssignment(var);
+
         if (conjNEG.size() == 0){
           if (conjLT.size() > 0 && conjGT.size() > 0){
             return mk<DIV>(mk<PLUS>(curMin, curMax), mkTerm (mpq_class (2), efac));

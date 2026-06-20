@@ -50,6 +50,23 @@ void getStrValues(const char * opt, vector<string> & values, int argc, char ** a
   }
 }
 
+// The input file is the argument that names a readable file. Scanning for it
+// (instead of assuming argv[argc-1]) keeps the CLI robust when flags or their
+// values are placed after the filename, which otherwise fed a flag string to
+// the parser and crashed.
+char * getFileName(int argc, char ** argv)
+{
+  char * fname = NULL;
+  for (int i = 1; i < argc; i++)
+  {
+    if (argv[i][0] == '-') continue;          // skip flags
+    FILE * fp = fopen(argv[i], "r");
+    if (fp) { fclose(fp); fname = argv[i]; }  // last readable non-flag arg wins
+  }
+  if (fname == NULL) fname = argv[argc-1];    // fallback to legacy behavior
+  return fname;
+}
+
 int main (int argc, char ** argv)
 {
   const char *OPT_HELP = "--help";
@@ -191,18 +208,20 @@ int main (int argc, char ** argv)
     if (do_dl == 0) do_dl = 1;
   }
 
+  string fname = string(getFileName(argc, argv));
+
   if (vers4)      // MBP-based, path-sensitive algorithms
-    learnInvariants4(string(argv[argc-1]), max_attempts, to, densecode, aggressivepruning,
+    learnInvariants4(fname, max_attempts, to, densecode, aggressivepruning,
                    do_dl, do_mu, do_elim, do_arithm, do_disj, do_prop, mbp_eqs,
                    d_m, d_p, d_d, d_s, d_f, d_r, d_g, d_se, d_ser, debug);
   else if (vers3) // FMCAD'18 + CAV'19 + experiments with data
-    learnInvariants3(string(argv[argc-1]), max_attempts, to, densecode, aggressivepruning,
+    learnInvariants3(fname, max_attempts, to, densecode, aggressivepruning,
                      do_dl, do_mu, do_elim, do_arithm, do_prop, d_se, d_ser, debug);
   else if (vers2) // run the TACAS'18 algorithm
-    learnInvariants2(string(argv[argc-1]), to, max_attempts,
+    learnInvariants2(fname, to, max_attempts,
                   itp, batch, retry, densecode, aggressivepruning, debug);
   else            // run the FMCAD'17 algorithm
-    learnInvariants(string(argv[argc-1]), to, max_attempts,
+    learnInvariants(fname, to, max_attempts,
                   kinduction, itp, densecode, addepsilon, aggressivepruning, debug);
   return 0;
 }
